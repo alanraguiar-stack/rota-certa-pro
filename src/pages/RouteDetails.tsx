@@ -1,0 +1,370 @@
+import { useEffect, useState } from 'react';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Printer } from 'lucide-react';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { Checkbox } from '@/components/ui/checkbox';
+import { useRouteDetails } from '@/hooks/useRoutes';
+import { useTrucks } from '@/hooks/useTrucks';
+import { Truck as TruckType, ParsedOrder } from '@/types';
+import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
+
+export default function RouteDetails() {
+  const { id } = useParams<{ id: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const { route, isLoading, addOrders, assignTrucks, distributeOrders, refetch } = useRouteDetails(id);
+  const { activeTrucks } = useTrucks();
+
+  const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
+  const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
+
+  // Add pending orders from navigation state
+  useEffect(() => {
+    const pendingOrders = location.state?.pendingOrders as ParsedOrder[] | undefined;
+    if (pendingOrders && pendingOrders.length > 0 && !hasAddedPendingOrders && route) {
+      setHasAddedPendingOrders(true);
+      addOrders.mutate(
+        pendingOrders.map((o) => ({
+          client_name: o.client_name,
+          address: o.address,
+          weight_kg: o.weight_kg,
+        }))
+      );
+      // Clear the state
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, hasAddedPendingOrders, route, addOrders, navigate, location.pathname]);
+
+  const formatWeight = (weight: number) => {
+    if (weight >= 1000) {
+      return `${(weight / 1000).toFixed(1)}t`;
+    }
+    return `${weight.toFixed(0)}kg`;
+  };
+
+  const handleTruckSelection = (truckId: string) => {
+    setSelectedTrucks((prev) =>
+      prev.includes(truckId)
+        ? prev.filter((id) => id !== truckId)
+        : [...prev, truckId]
+    );
+  };
+
+  const calculateRecommendedTrucks = () => {
+    if (!route || activeTrucks.length === 0) return [];
+
+    const totalWeight = Number(route.total_weight_kg);
+    const sortedTrucks = [...activeTrucks].sort(
+      (a, b) => Number(b.capacity_kg) - Number(a.capacity_kg)
+    );
+
+    const recommended: TruckType[] = [];
+    let remainingWeight = totalWeight * 1.1; // 10% safety margin
+
+    for (const truck of sortedTrucks) {
+      if (remainingWeight <= 0) break;
+      recommended.push(truck);
+      remainingWeight -= Number(truck.capacity_kg);
+    }
+
+    return recommended;
+  };
+
+  const handleAutoSelect = () => {
+    const recommended = calculateRecommendedTrucks();
+    setSelectedTrucks(recommended.map((t) => t.id));
+    toast({
+      title: 'Seleção automática',
+      description: `${recommended.length} caminhões recomendados para ${formatWeight(Number(route?.total_weight_kg ?? 0))}`,
+    });
+  };
+
+  const handleAssignTrucks = async () => {
+    if (selectedTrucks.length === 0) {
+      toast({
+        title: 'Selecione caminhões',
+        description: 'Escolha pelo menos um caminhão para a rota',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    await assignTrucks.mutateAsync(selectedTrucks);
+    await refetch();
+  };
+
+  const handleDistribute = async () => {
+    await distributeOrders.mutateAsync();
+  };
+
+  const handleExportPDF = () => {
+    toast({ title: 'Em breve!', description: 'Exportação para PDF será implementada' });
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  if (isLoading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-pulse text-muted-foreground">Carregando rota...</div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!route) {
+    return (
+      <AppLayout>
+        <div className="flex flex-col items-center justify-center py-12">
+          <p className="mb-4 text-muted-foreground">Rota não encontrada</p>
+          <Button variant="outline" onClick={() => navigate('/')}>
+            Voltar ao Dashboard
+          </Button>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const totalCapacitySelected = activeTrucks
+    .filter((t) => selectedTrucks.includes(t.id))
+    .reduce((sum, t) => sum + Number(t.capacity_kg), 0);
+
+  const isOverCapacity = Number(route.total_weight_kg) > totalCapacitySelected && selectedTrucks.length > 0;
+
+  return (
+    <AppLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold">{route.name}</h1>
+            <p className="text-muted-foreground">
+              {route.total_orders} pedidos • {formatWeight(Number(route.total_weight_kg))}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={handleExportPDF}>
+              <FileDown className="mr-2 h-4 w-4" />
+              PDF
+            </Button>
+            <Button variant="outline" onClick={handlePrint}>
+              <Printer className="mr-2 h-4 w-4" />
+              Imprimir
+            </Button>
+          </div>
+        </div>
+
+        {/* Step 1: Select Trucks (if not assigned yet) */}
+        {route.route_trucks.length === 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Truck className="h-5 w-5" />
+                Selecionar Caminhões
+              </CardTitle>
+              <CardDescription>
+                Escolha os caminhões para esta rota ou use a recomendação automática
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">
+                    Capacidade selecionada: {formatWeight(totalCapacitySelected)} / Peso total:{' '}
+                    {formatWeight(Number(route.total_weight_kg))}
+                  </p>
+                  {isOverCapacity && (
+                    <p className="text-sm font-medium text-destructive">
+                      ⚠️ Capacidade insuficiente!
+                    </p>
+                  )}
+                </div>
+                <Button variant="outline" onClick={handleAutoSelect}>
+                  <Calculator className="mr-2 h-4 w-4" />
+                  Recomendar Automaticamente
+                </Button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {activeTrucks.map((truck) => (
+                  <div
+                    key={truck.id}
+                    className={cn(
+                      'flex cursor-pointer items-center gap-3 rounded-lg border p-4 transition-colors',
+                      selectedTrucks.includes(truck.id)
+                        ? 'border-primary bg-primary/5'
+                        : 'hover:bg-muted/50'
+                    )}
+                    onClick={() => handleTruckSelection(truck.id)}
+                  >
+                    <Checkbox checked={selectedTrucks.includes(truck.id)} />
+                    <div>
+                      <p className="font-medium">{truck.plate}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {truck.model} • {formatWeight(Number(truck.capacity_kg))}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {activeTrucks.length === 0 && (
+                <div className="py-8 text-center text-muted-foreground">
+                  <Truck className="mx-auto mb-2 h-8 w-8 opacity-50" />
+                  <p>Nenhum caminhão ativo</p>
+                  <Button variant="link" onClick={() => navigate('/frota')}>
+                    Cadastrar caminhões
+                  </Button>
+                </div>
+              )}
+
+              {selectedTrucks.length > 0 && (
+                <Button
+                  className="mt-4 w-full"
+                  onClick={handleAssignTrucks}
+                  disabled={assignTrucks.isPending}
+                >
+                  {assignTrucks.isPending ? 'Atribuindo...' : 'Confirmar Seleção'}
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Step 2: Distribute Orders (if trucks assigned but not distributed) */}
+        {route.route_trucks.length > 0 && route.status === 'draft' && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Package className="h-5 w-5" />
+                Distribuir Pedidos
+              </CardTitle>
+              <CardDescription>
+                {route.route_trucks.length} caminhões selecionados. Clique para distribuir as cargas automaticamente.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={handleDistribute}
+                disabled={distributeOrders.isPending}
+              >
+                {distributeOrders.isPending ? 'Distribuindo...' : 'Distribuir Cargas Automaticamente'}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Step 3: Show Distribution Results */}
+        {route.status !== 'draft' && route.route_trucks.length > 0 && (
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Distribuição de Cargas</h2>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {route.route_trucks.map((rt) => (
+                <Card key={rt.id}>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <Truck className="h-5 w-5 text-primary" />
+                        {rt.truck?.plate}
+                      </CardTitle>
+                      <span
+                        className={cn(
+                          'rounded-full px-2 py-1 text-xs font-medium',
+                          rt.occupancy_percent > 90
+                            ? 'bg-destructive/10 text-destructive'
+                            : rt.occupancy_percent > 70
+                            ? 'bg-warning/10 text-warning'
+                            : 'bg-success/10 text-success'
+                        )}
+                      >
+                        {rt.occupancy_percent}%
+                      </span>
+                    </div>
+                    <CardDescription>{rt.truck?.model}</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="mb-3 space-y-1">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Carga:</span>
+                        <span className="font-medium">
+                          {formatWeight(Number(rt.total_weight_kg))} /{' '}
+                          {formatWeight(Number(rt.truck?.capacity_kg ?? 0))}
+                        </span>
+                      </div>
+                      <Progress value={rt.occupancy_percent} className="h-2" />
+                    </div>
+
+                    <p className="mb-2 text-sm font-medium">
+                      {rt.total_orders} entregas:
+                    </p>
+                    <div className="max-h-40 space-y-1 overflow-y-auto">
+                      {rt.assignments?.map((assignment, index) => (
+                        <div
+                          key={assignment.id}
+                          className="flex items-center gap-2 rounded border px-2 py-1 text-sm"
+                        >
+                          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                            {index + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">
+                              {assignment.order?.client_name}
+                            </p>
+                            <p className="truncate text-xs text-muted-foreground">
+                              {formatWeight(Number(assignment.order?.weight_kg ?? 0))}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* All Orders List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Todos os Pedidos ({route.orders.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-[300px] space-y-2 overflow-y-auto">
+              {route.orders.map((order, index) => (
+                <div
+                  key={order.id}
+                  className="flex items-center justify-between rounded-lg border p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-medium">
+                      {index + 1}
+                    </span>
+                    <div>
+                      <p className="font-medium">{order.client_name}</p>
+                      <p className="text-sm text-muted-foreground">{order.address}</p>
+                    </div>
+                  </div>
+                  <span className="font-medium">{formatWeight(Number(order.weight_kg))}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </AppLayout>
+  );
+}
