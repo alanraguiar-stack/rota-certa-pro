@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, Fragment, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -95,6 +95,7 @@ interface RouteMapProps {
   editable?: boolean;
 }
 
+// Component to update map bounds
 function MapBoundsUpdater({ bounds }: { bounds: L.LatLngBounds | null }) {
   const map = useMap();
   
@@ -112,16 +113,141 @@ interface OrderWithCoords {
   lat: number;
   lng: number;
   sequence: number;
-  geocoded: ReturnType<typeof parseAddress>;
+  truckId: string;
+  truckColor: string;
+  truckPlate: string;
 }
 
-interface RouteDataItem {
-  truck: Truck;
-  orders: OrderWithCoords[];
-  polylinePoints: [number, number][];
+interface PolylineData {
+  id: string;
+  positions: [number, number][];
   color: string;
-  totalWeight: number;
-  occupancyPercent: number;
+  dashed: boolean;
+}
+
+// Separate component for rendering map content
+function MapContent({ 
+  cdPosition,
+  polylines,
+  ordersWithCoords,
+  bounds,
+  editable,
+  draggingOrder,
+  onDragStart,
+  onDragEnd,
+}: {
+  cdPosition: [number, number];
+  polylines: PolylineData[];
+  ordersWithCoords: OrderWithCoords[];
+  bounds: L.LatLngBounds | null;
+  editable: boolean;
+  draggingOrder: string | null;
+  onDragStart: (orderId: string) => void;
+  onDragEnd: (orderId: string, truckId: string, lat: number, lng: number, originalLat: number, originalLng: number) => void;
+}) {
+  const formatWeight = (weight: number) => {
+    if (weight >= 1000) {
+      return `${(weight / 1000).toFixed(1)}t`;
+    }
+    return `${weight.toFixed(0)}kg`;
+  };
+
+  return (
+    <>
+      <TileLayer
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      />
+      
+      <MapBoundsUpdater bounds={bounds} />
+      
+      {/* Distribution Center Marker */}
+      <Marker position={cdPosition} icon={cdIcon}>
+        <Popup>
+          <div className="text-center">
+            <strong className="text-orange-600">Centro de Distribuição</strong>
+            <p className="text-sm text-gray-600">
+              Av. Iracema, 939<br />
+              Jardim Iracema, Barueri - SP
+            </p>
+          </div>
+        </Popup>
+      </Marker>
+      
+      {/* Route polylines */}
+      {polylines.map((polyline) => (
+        <Polyline
+          key={polyline.id}
+          positions={polyline.positions}
+          pathOptions={{
+            color: polyline.color,
+            weight: 4,
+            opacity: 0.8,
+            dashArray: polyline.dashed ? '10, 10' : undefined,
+          }}
+        />
+      ))}
+      
+      {/* Order markers */}
+      {ordersWithCoords.map((orderData) => (
+        <Marker
+          key={orderData.order.id}
+          position={[orderData.lat, orderData.lng]}
+          icon={createIcon(
+            orderData.truckColor, 
+            String(orderData.sequence),
+            draggingOrder === orderData.order.id
+          )}
+          draggable={editable}
+          eventHandlers={editable ? {
+            dragstart: () => {
+              onDragStart(orderData.order.id);
+            },
+            dragend: (e) => {
+              const marker = e.target;
+              const position = marker.getLatLng();
+              onDragEnd(
+                orderData.order.id,
+                orderData.truckId,
+                position.lat,
+                position.lng,
+                orderData.lat,
+                orderData.lng
+              );
+              // Reset marker to its calculated position
+              marker.setLatLng([orderData.lat, orderData.lng]);
+            },
+          } : undefined}
+        >
+          <Popup>
+            <div className="min-w-[200px]">
+              <div 
+                className="mb-2 rounded-t px-2 py-1 text-white"
+                style={{ backgroundColor: orderData.truckColor }}
+              >
+                <strong>Entrega #{orderData.sequence}</strong>
+                <span className="ml-2 text-xs opacity-80">
+                  {orderData.truckPlate}
+                </span>
+              </div>
+              <div className="space-y-1 px-1">
+                <p className="font-medium">{orderData.order.client_name}</p>
+                <p className="text-sm text-gray-600">{orderData.order.address}</p>
+                <p className="text-sm">
+                  <strong>Peso:</strong> {formatWeight(Number(orderData.order.weight_kg))}
+                </p>
+                {editable && (
+                  <p className="mt-2 text-xs text-muted-foreground italic">
+                    Arraste para reordenar
+                  </p>
+                )}
+              </div>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+    </>
+  );
 }
 
 export function RouteMap({ 
@@ -133,6 +259,7 @@ export function RouteMap({
 }: RouteMapProps) {
   const mapRef = useRef<L.Map>(null);
   const cd = getDistributionCenterCoords();
+  const cdPosition: [number, number] = [cd.lat, cd.lng];
   const [localTrucks, setLocalTrucks] = useState<TruckRoute[]>(trucks);
   const [draggingOrder, setDraggingOrder] = useState<string | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
@@ -144,91 +271,86 @@ export function RouteMap({
     setHasChanges(false);
   }, [trucks]);
   
-  // Geocode all orders and build route data
-  const routeData = useMemo((): RouteDataItem[] => {
-    return localTrucks.map((truckRoute, truckIndex) => {
-      const color = TRUCK_COLORS[truckIndex % TRUCK_COLORS.length];
+  // Build flattened data structures for the map
+  const { polylines, ordersWithCoords, routeStats } = useMemo(() => {
+    const polylinesData: PolylineData[] = [];
+    const ordersData: OrderWithCoords[] = [];
+    const stats: { distance: number; time: number; truck: Truck; ordersCount: number; color: string }[] = [];
+    
+    const visibleTrucks = showAllRoutes 
+      ? localTrucks 
+      : selectedTruckIndex !== undefined && localTrucks[selectedTruckIndex] 
+        ? [localTrucks[selectedTruckIndex]] 
+        : localTrucks;
+    
+    visibleTrucks.forEach((truckRoute, truckIndex) => {
+      const actualIndex = showAllRoutes ? truckIndex : (selectedTruckIndex ?? truckIndex);
+      const color = TRUCK_COLORS[actualIndex % TRUCK_COLORS.length];
       
-      const ordersWithCoords: OrderWithCoords[] = truckRoute.orders.map((order, orderIndex) => {
+      const polylinePoints: [number, number][] = [cdPosition];
+      
+      truckRoute.orders.forEach((order, orderIndex) => {
         const geocoded = parseAddress(order.address);
-        return {
+        const lat = geocoded.estimatedLat;
+        const lng = geocoded.estimatedLng;
+        
+        polylinePoints.push([lat, lng]);
+        
+        ordersData.push({
           order,
-          lat: geocoded.estimatedLat,
-          lng: geocoded.estimatedLng,
+          lat,
+          lng,
           sequence: orderIndex + 1,
-          geocoded,
-        };
+          truckId: truckRoute.truck.id,
+          truckColor: color,
+          truckPlate: truckRoute.truck.plate,
+        });
       });
       
-      // Build polyline points: CD -> orders -> CD (if return route)
-      const polylinePoints: [number, number][] = [[cd.lat, cd.lng]];
-      ordersWithCoords.forEach(o => {
-        polylinePoints.push([o.lat, o.lng]);
-      });
       // Return to CD
-      polylinePoints.push([cd.lat, cd.lng]);
+      polylinePoints.push(cdPosition);
       
-      return {
-        truck: truckRoute.truck,
-        orders: ordersWithCoords,
-        polylinePoints,
+      polylinesData.push({
+        id: truckRoute.truck.id,
+        positions: polylinePoints,
         color,
-        totalWeight: truckRoute.totalWeight,
-        occupancyPercent: truckRoute.occupancyPercent,
-      };
+        dashed: truckIndex > 0 && showAllRoutes,
+      });
+      
+      // Calculate stats
+      let distance = 0;
+      for (let i = 0; i < polylinePoints.length - 1; i++) {
+        distance += calculateDistance(
+          polylinePoints[i][0], polylinePoints[i][1],
+          polylinePoints[i + 1][0], polylinePoints[i + 1][1]
+        );
+      }
+      const time = Math.round((distance / 30) * 60) + (truckRoute.orders.length * 5);
+      
+      stats.push({
+        distance,
+        time,
+        truck: truckRoute.truck,
+        ordersCount: truckRoute.orders.length,
+        color,
+      });
     });
-  }, [localTrucks, cd.lat, cd.lng]);
+    
+    return { polylines: polylinesData, ordersWithCoords: ordersData, routeStats: stats };
+  }, [localTrucks, showAllRoutes, selectedTruckIndex, cdPosition]);
   
   // Calculate map bounds
   const bounds = useMemo(() => {
-    const allPoints: [number, number][] = [[cd.lat, cd.lng]];
+    const allPoints: [number, number][] = [cdPosition];
     
-    routeData.forEach(route => {
-      route.orders.forEach(o => {
-        allPoints.push([o.lat, o.lng]);
-      });
+    ordersWithCoords.forEach(o => {
+      allPoints.push([o.lat, o.lng]);
     });
     
     if (allPoints.length === 1) return null;
     
     return L.latLngBounds(allPoints.map(p => L.latLng(p[0], p[1])));
-  }, [routeData, cd.lat, cd.lng]);
-  
-  // Filter routes to display
-  const visibleRoutes = useMemo(() => {
-    if (showAllRoutes) return routeData;
-    if (selectedTruckIndex !== undefined && routeData[selectedTruckIndex]) {
-      return [routeData[selectedTruckIndex]];
-    }
-    return routeData;
-  }, [routeData, showAllRoutes, selectedTruckIndex]);
-  
-  // Calculate total distance for each route
-  const calculateRouteDistance = (points: [number, number][]) => {
-    let total = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-      total += calculateDistance(
-        points[i][0], points[i][1],
-        points[i + 1][0], points[i + 1][1]
-      );
-    }
-    return total;
-  };
-  
-  // Calculate estimated time based on distance
-  const calculateRouteTime = (distanceKm: number) => {
-    const avgSpeedKmH = 30; // Average speed in urban areas
-    const deliveryTimeMinutes = 5; // Time per delivery
-    const totalTimeMinutes = (distanceKm / avgSpeedKmH) * 60;
-    return Math.round(totalTimeMinutes);
-  };
-  
-  const formatWeight = (weight: number) => {
-    if (weight >= 1000) {
-      return `${(weight / 1000).toFixed(1)}t`;
-    }
-    return `${weight.toFixed(0)}kg`;
-  };
+  }, [ordersWithCoords, cdPosition]);
   
   const formatTime = (minutes: number) => {
     if (minutes >= 60) {
@@ -239,12 +361,19 @@ export function RouteMap({
     return `${minutes}min`;
   };
   
+  // Handle marker drag start
+  const handleDragStart = useCallback((orderId: string) => {
+    setDraggingOrder(orderId);
+  }, []);
+  
   // Handle marker drag to reorder
-  const handleMarkerDragEnd = useCallback((
+  const handleDragEnd = useCallback((
     orderId: string,
     truckId: string,
     newLat: number,
-    newLng: number
+    newLng: number,
+    _originalLat: number,
+    _originalLng: number
   ) => {
     setDraggingOrder(null);
     
@@ -275,10 +404,8 @@ export function RouteMap({
     let newPosition: number;
     
     if (!nearestOrder || distanceToCD < nearestOrder.distance) {
-      // Closest to CD - put at position 0 (first delivery)
       newPosition = 0;
     } else {
-      // Determine if it should go before or after the nearest order
       const nearestGeo = parseAddress(nearestOrder.order.address);
       const distFromCDToNew = calculateDistance(cd.lat, cd.lng, newLat, newLng);
       const distFromCDToNearest = calculateDistance(cd.lat, cd.lng, nearestGeo.estimatedLat, nearestGeo.estimatedLng);
@@ -290,17 +417,14 @@ export function RouteMap({
       }
     }
     
-    // Adjust if moving from a position before the new position
     if (orderIndex < newPosition) {
       newPosition = newPosition - 1;
     }
     
-    // Reorder the orders array
     const newOrders = [...truckRoute.orders];
     const [movedOrder] = newOrders.splice(orderIndex, 1);
     newOrders.splice(newPosition, 0, movedOrder);
     
-    // Update local state
     setLocalTrucks(prev => {
       const updated = [...prev];
       updated[truckIndex] = {
@@ -347,15 +471,6 @@ export function RouteMap({
     setHasChanges(false);
   };
   
-  // Route stats for legend
-  const routeStats = useMemo(() => {
-    return routeData.map(route => {
-      const distance = calculateRouteDistance(route.polylinePoints);
-      const time = calculateRouteTime(distance) + (route.orders.length * 5);
-      return { distance, time };
-    });
-  }, [routeData]);
-  
   return (
     <div className="relative h-[500px] w-full overflow-hidden rounded-lg border">
       {/* Edit controls */}
@@ -392,129 +507,42 @@ export function RouteMap({
       
       <MapContainer
         ref={mapRef}
-        center={[cd.lat, cd.lng]}
+        center={cdPosition}
         zoom={12}
         className="h-full w-full"
         scrollWheelZoom={true}
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        <MapContent
+          cdPosition={cdPosition}
+          polylines={polylines}
+          ordersWithCoords={ordersWithCoords}
+          bounds={bounds}
+          editable={editable}
+          draggingOrder={draggingOrder}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
         />
-        
-        <MapBoundsUpdater bounds={bounds} />
-        
-        {/* Distribution Center Marker */}
-        <Marker position={[cd.lat, cd.lng]} icon={cdIcon}>
-          <Popup>
-            <div className="text-center">
-              <strong className="text-orange-600">Centro de Distribuição</strong>
-              <p className="text-sm text-gray-600">
-                Av. Iracema, 939<br />
-                Jardim Iracema, Barueri - SP
-              </p>
-            </div>
-          </Popup>
-        </Marker>
-        
-        {/* Route polylines and markers */}
-        {visibleRoutes.map((route, routeIndex) => (
-          <Fragment key={route.truck.id}>
-            {/* Route polyline */}
-            <Polyline
-              positions={route.polylinePoints}
-              pathOptions={{
-                color: route.color,
-                weight: 4,
-                opacity: 0.8,
-                dashArray: routeIndex > 0 && showAllRoutes ? '10, 10' : undefined,
-              }}
-            />
-            
-            {/* Order markers */}
-            {route.orders.map((orderData) => (
-              <Marker
-                key={orderData.order.id}
-                position={[orderData.lat, orderData.lng]}
-                icon={createIcon(
-                  route.color, 
-                  String(orderData.sequence),
-                  draggingOrder === orderData.order.id
-                )}
-                draggable={editable}
-                eventHandlers={editable ? {
-                  dragstart: () => {
-                    setDraggingOrder(orderData.order.id);
-                  },
-                  dragend: (e) => {
-                    const marker = e.target;
-                    const position = marker.getLatLng();
-                    handleMarkerDragEnd(
-                      orderData.order.id,
-                      route.truck.id,
-                      position.lat,
-                      position.lng
-                    );
-                    // Reset marker to its calculated position
-                    marker.setLatLng([orderData.lat, orderData.lng]);
-                  },
-                } : undefined}
-              >
-                <Popup>
-                  <div className="min-w-[200px]">
-                    <div 
-                      className="mb-2 rounded-t px-2 py-1 text-white"
-                      style={{ backgroundColor: route.color }}
-                    >
-                      <strong>Entrega #{orderData.sequence}</strong>
-                      <span className="ml-2 text-xs opacity-80">
-                        {route.truck.plate}
-                      </span>
-                    </div>
-                    <div className="space-y-1 px-1">
-                      <p className="font-medium">{orderData.order.client_name}</p>
-                      <p className="text-sm text-gray-600">{orderData.order.address}</p>
-                      <p className="text-sm">
-                        <strong>Peso:</strong> {formatWeight(Number(orderData.order.weight_kg))}
-                      </p>
-                      {editable && (
-                        <p className="mt-2 text-xs text-muted-foreground italic">
-                          Arraste para reordenar
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-          </Fragment>
-        ))}
       </MapContainer>
       
       {/* Legend */}
       <div className="absolute bottom-4 left-4 z-[1000] max-h-[200px] overflow-y-auto rounded-lg bg-background/95 p-3 shadow-lg backdrop-blur-sm">
         <h4 className="mb-2 text-sm font-semibold">Rotas</h4>
         <div className="space-y-2">
-          {routeData.map((route, index) => {
-            const stats = routeStats[index];
-            const isVisible = showAllRoutes || selectedTruckIndex === index;
-            
-            return (
+          {routeStats.map((stat) => (
+            <div 
+              key={stat.truck.id}
+              className="flex items-center gap-2 text-sm"
+            >
               <div 
-                key={route.truck.id}
-                className={`flex items-center gap-2 text-sm ${!isVisible ? 'opacity-40' : ''}`}
-              >
-                <div 
-                  className="h-3 w-3 rounded-full"
-                  style={{ backgroundColor: route.color }}
-                />
-                <span className="font-medium">{route.truck.plate}</span>
-                <span className="text-muted-foreground">
-                  {route.orders.length} entregas • {stats.distance.toFixed(1)}km • {formatTime(stats.time)}
-                </span>
-              </div>
-            );
-          })}
+                className="h-3 w-3 rounded-full"
+                style={{ backgroundColor: stat.color }}
+              />
+              <span className="font-medium">{stat.truck.plate}</span>
+              <span className="text-muted-foreground">
+                {stat.ordersCount} entregas • {stat.distance.toFixed(1)}km • {formatTime(stat.time)}
+              </span>
+            </div>
+          ))}
         </div>
         
         {hasChanges && (
