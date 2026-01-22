@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, Fragment } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -207,7 +207,7 @@ export function RouteMap({ trucks, showAllRoutes = true, selectedTruckIndex }: R
         
         {/* Route polylines and markers */}
         {visibleRoutes.map((route, routeIndex) => (
-          <div key={route.truck.id}>
+          <Fragment key={route.truck.id}>
             {/* Route polyline */}
             <Polyline
               positions={route.polylinePoints}
@@ -248,7 +248,7 @@ export function RouteMap({ trucks, showAllRoutes = true, selectedTruckIndex }: R
                 </Popup>
               </Marker>
             ))}
-          </div>
+          </Fragment>
         ))}
       </MapContainer>
       
