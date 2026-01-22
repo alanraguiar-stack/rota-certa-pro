@@ -1,19 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Printer, MapPin, Clock } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
 import { useRouteDetails } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
-import { Truck as TruckType, ParsedOrder, RoutingStrategy, ROUTING_STRATEGIES } from '@/types';
+import { Truck as TruckType, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { ManifestViewer } from '@/components/route/ManifestViewer';
-
+import { RouteMap } from '@/components/route/RouteMap';
 export default function RouteDetails() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
@@ -26,6 +25,7 @@ export default function RouteDetails() {
   const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
   const [showManifest, setShowManifest] = useState(false);
+  const [showMap, setShowMap] = useState(false);
 
   // Add pending orders and routing strategy from navigation state
   useEffect(() => {
@@ -161,10 +161,20 @@ export default function RouteDetails() {
             </p>
           </div>
           {route.status !== 'draft' && (
-            <Button variant="outline" onClick={handleShowManifest} className="gap-2">
-              <FileDown className="h-4 w-4" />
-              Romaneios
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant={showMap ? "default" : "outline"} 
+                onClick={() => setShowMap(!showMap)} 
+                className="gap-2"
+              >
+                <Map className="h-4 w-4" />
+                Mapa
+              </Button>
+              <Button variant="outline" onClick={handleShowManifest} className="gap-2">
+                <FileDown className="h-4 w-4" />
+                Romaneios
+              </Button>
+            </div>
           )}
         </div>
 
@@ -266,6 +276,31 @@ export default function RouteDetails() {
               >
                 {distributeOrders.isPending ? 'Distribuindo...' : 'Distribuir Cargas Automaticamente'}
               </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Map Visualization */}
+        {showMap && route.status !== 'draft' && route.route_trucks.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Map className="h-5 w-5" />
+                Visualização das Rotas
+              </CardTitle>
+              <CardDescription>
+                Mapa interativo com as rotas de cada caminhão
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RouteMap
+                trucks={route.route_trucks.map(rt => ({
+                  truck: rt.truck!,
+                  orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
+                  totalWeight: Number(rt.total_weight_kg),
+                  occupancyPercent: rt.occupancy_percent,
+                }))}
+              />
             </CardContent>
           </Card>
         )}
