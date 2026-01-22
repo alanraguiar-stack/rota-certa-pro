@@ -56,9 +56,9 @@ function formatTime(minutes: number): string {
 
 function addMinutesToTime(timeStr: string, minutes: number): string {
   const [hours, mins] = timeStr.split(':').map(Number);
-  const totalMinutes = hours * 60 + mins + minutes;
+  const totalMinutes = Math.round(hours * 60 + mins + minutes);
   const newHours = Math.floor(totalMinutes / 60) % 24;
-  const newMins = totalMinutes % 60;
+  const newMins = Math.round(totalMinutes % 60);
   return `${newHours.toString().padStart(2, '0')}:${newMins.toString().padStart(2, '0')}`;
 }
 
