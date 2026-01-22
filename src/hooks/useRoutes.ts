@@ -376,6 +376,72 @@ export function useRouteDetails(routeId: string | undefined) {
     },
   });
 
+  const reorderDeliveries = useMutation({
+    mutationFn: async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
+      const route = routeQuery.data;
+      if (!route) throw new Error('Rota não encontrada');
+
+      // Group reorders by truck
+      const reordersByTruck = new Map<string, typeof reorders>();
+      
+      for (const reorder of reorders) {
+        // Find the route_truck_id for this truck
+        const routeTruck = route.route_trucks.find(rt => rt.truck?.id === reorder.truckId);
+        if (!routeTruck) continue;
+        
+        const existing = reordersByTruck.get(routeTruck.id) ?? [];
+        existing.push(reorder);
+        reordersByTruck.set(routeTruck.id, existing);
+      }
+
+      // Update each assignment's delivery_sequence
+      for (const [routeTruckId, truckReorders] of reordersByTruck) {
+        for (const reorder of truckReorders) {
+          // Find the assignment for this order
+          const routeTruck = route.route_trucks.find(rt => rt.id === routeTruckId);
+          const assignment = routeTruck?.assignments?.find(a => a.order?.id === reorder.orderId);
+          
+          if (assignment) {
+            await supabase
+              .from('order_assignments')
+              .update({ delivery_sequence: reorder.newSequence })
+              .eq('id', assignment.id);
+          }
+        }
+
+        // Recalculate route metrics for this truck
+        const routeTruck = route.route_trucks.find(rt => rt.id === routeTruckId);
+        if (routeTruck) {
+          const truckOrders = truckReorders
+            .sort((a, b) => a.newSequence - b.newSequence)
+            .map(r => route.orders.find(o => o.id === r.orderId))
+            .filter((o): o is Order => o !== undefined);
+          
+          const routeMetrics = optimizeDeliveryOrder(truckOrders, 'economy');
+          
+          await supabase
+            .from('route_trucks')
+            .update({
+              estimated_distance_km: routeMetrics.totalDistance,
+              estimated_time_minutes: routeMetrics.estimatedMinutes,
+            })
+            .eq('id', routeTruckId);
+        }
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      toast({ title: 'Ordem de entrega atualizada!' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao reordenar entregas',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   return {
     route: routeQuery.data,
     isLoading: routeQuery.isLoading,
@@ -384,6 +450,7 @@ export function useRouteDetails(routeId: string | undefined) {
     deleteOrder,
     assignTrucks,
     distributeOrders: distributeOrdersMutation,
+    reorderDeliveries,
     refetch: routeQuery.refetch,
   };
 }
