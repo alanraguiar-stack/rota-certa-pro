@@ -10,6 +10,7 @@ import Fleet from "./pages/Fleet";
 import NewRoute from "./pages/NewRoute";
 import RouteDetails from "./pages/RouteDetails";
 import History from "./pages/History";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,6 +29,7 @@ const App = () => (
             <Route path="/nova-rota" element={<NewRoute />} />
             <Route path="/rota/:id" element={<RouteDetails />} />
             <Route path="/historico" element={<History />} />
+            <Route path="/configuracoes" element={<Settings />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
