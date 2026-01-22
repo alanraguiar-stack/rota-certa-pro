@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Printer } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Printer, MapPin, Clock } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { useRouteDetails } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
-import { Truck as TruckType, ParsedOrder } from '@/types';
+import { Truck as TruckType, ParsedOrder, RoutingStrategy, ROUTING_STRATEGIES } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { ManifestViewer } from '@/components/route/ManifestViewer';
 
 export default function RouteDetails() {
   const { id } = useParams<{ id: string }>();
@@ -22,10 +24,18 @@ export default function RouteDetails() {
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
   const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
+  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
+  const [showManifest, setShowManifest] = useState(false);
 
-  // Add pending orders from navigation state
+  // Add pending orders and routing strategy from navigation state
   useEffect(() => {
     const pendingOrders = location.state?.pendingOrders as ParsedOrder[] | undefined;
+    const stateStrategy = location.state?.routingStrategy as RoutingStrategy | undefined;
+    
+    if (stateStrategy) {
+      setRoutingStrategy(stateStrategy);
+    }
+    
     if (pendingOrders && pendingOrders.length > 0 && !hasAddedPendingOrders && route) {
       setHasAddedPendingOrders(true);
       addOrders.mutate(
@@ -99,15 +109,12 @@ export default function RouteDetails() {
   };
 
   const handleDistribute = async () => {
-    await distributeOrders.mutateAsync();
+    await distributeOrders.mutateAsync(routingStrategy);
+    setShowManifest(true);
   };
 
-  const handleExportPDF = () => {
-    toast({ title: 'Em breve!', description: 'Exportação para PDF será implementada' });
-  };
-
-  const handlePrint = () => {
-    window.print();
+  const handleShowManifest = () => {
+    setShowManifest(true);
   };
 
   if (isLoading) {
@@ -153,16 +160,12 @@ export default function RouteDetails() {
               {route.total_orders} pedidos • {formatWeight(Number(route.total_weight_kg))}
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={handleExportPDF}>
-              <FileDown className="mr-2 h-4 w-4" />
-              PDF
+          {route.status !== 'draft' && (
+            <Button variant="outline" onClick={handleShowManifest} className="gap-2">
+              <FileDown className="h-4 w-4" />
+              Romaneios
             </Button>
-            <Button variant="outline" onClick={handlePrint}>
-              <Printer className="mr-2 h-4 w-4" />
-              Imprimir
-            </Button>
-          </div>
+          )}
         </div>
 
         {/* Step 1: Select Trucks (if not assigned yet) */}
@@ -337,7 +340,34 @@ export default function RouteDetails() {
           </div>
         )}
 
-        {/* All Orders List */}
+        {/* Manifest Viewer */}
+        {showManifest && route.status !== 'draft' && route.route_trucks.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileDown className="h-5 w-5" />
+                Romaneios de Entrega
+              </CardTitle>
+              <CardDescription>
+                Visualize, baixe ou imprima os romaneios de cada caminhão
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ManifestViewer
+                routeName={route.name}
+                date={new Date(route.created_at).toLocaleDateString('pt-BR')}
+                trucks={route.route_trucks.map(rt => ({
+                  truck: rt.truck!,
+                  orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
+                  totalWeight: Number(rt.total_weight_kg),
+                  occupancyPercent: rt.occupancy_percent,
+                }))}
+                strategy={routingStrategy}
+              />
+            </CardContent>
+          </Card>
+        )}
+
         <Card>
           <CardHeader>
             <CardTitle>Todos os Pedidos ({route.orders.length})</CardTitle>
