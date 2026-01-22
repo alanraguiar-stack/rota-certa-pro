@@ -18,7 +18,7 @@ export default function RouteDetails() {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { route, isLoading, addOrders, assignTrucks, distributeOrders, refetch } = useRouteDetails(id);
+  const { route, isLoading, addOrders, assignTrucks, distributeOrders, reorderDeliveries, refetch } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
@@ -26,6 +26,11 @@ export default function RouteDetails() {
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
   const [showManifest, setShowManifest] = useState(false);
   const [showMap, setShowMap] = useState(false);
+
+  // Handle order reordering from the map
+  const handleOrderReorder = async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
+    await reorderDeliveries.mutateAsync(reorders);
+  };
 
   // Add pending orders and routing strategy from navigation state
   useEffect(() => {
@@ -300,6 +305,8 @@ export default function RouteDetails() {
                   totalWeight: Number(rt.total_weight_kg),
                   occupancyPercent: rt.occupancy_percent,
                 }))}
+                editable={true}
+                onOrderReorder={handleOrderReorder}
               />
             </CardContent>
           </Card>
