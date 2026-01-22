@@ -1,9 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Route, Order, RouteTruck, OrderAssignment } from '@/types';
+import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-
+import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distribution';
+import { optimizeDeliveryOrder } from '@/lib/routing';
 export function useRoutes() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -273,54 +274,50 @@ export function useRouteDetails(routeId: string | undefined) {
     },
   });
 
-  const distributeOrders = useMutation({
-    mutationFn: async () => {
+  const distributeOrdersMutation = useMutation({
+    mutationFn: async (strategy: RoutingStrategy = 'economy') => {
       const route = routeQuery.data;
       if (!route || route.route_trucks.length === 0 || route.orders.length === 0) {
         throw new Error('É necessário ter pedidos e caminhões atribuídos');
       }
 
-      // Simple distribution algorithm: balance by weight
-      const trucks = route.route_trucks.map((rt) => ({
+      // Use the advanced distribution algorithm
+      const routeTrucks = route.route_trucks.map(rt => ({
         id: rt.id,
-        capacity: Number(rt.truck?.capacity_kg ?? 0),
-        currentWeight: 0,
-        orders: [] as { orderId: string; weight: number; sequence: number }[],
+        truck: rt.truck!,
       }));
 
-      // Sort orders by weight descending for better distribution
-      const sortedOrders = [...route.orders].sort(
-        (a, b) => Number(b.weight_kg) - Number(a.weight_kg)
+      const distributionResult = distributeOrders(
+        route.orders,
+        routeTrucks,
+        strategy
       );
 
-      // Distribute orders to trucks with least load that can fit the order
-      for (const order of sortedOrders) {
-        const orderWeight = Number(order.weight_kg);
-        
-        // Find truck with least weight that can still fit this order
-        const availableTrucks = trucks
-          .filter((t) => t.currentWeight + orderWeight <= t.capacity)
-          .sort((a, b) => a.currentWeight - b.currentWeight);
+      // Reorder deliveries based on routing strategy
+      const reorderedDistributions = reorderDeliveriesByStrategy(
+        distributionResult.distributions,
+        route.orders,
+        strategy
+      );
 
-        if (availableTrucks.length === 0) {
-          // If no truck can fit, assign to truck with most remaining capacity
-          const truckWithMostSpace = [...trucks].sort(
-            (a, b) => (b.capacity - b.currentWeight) - (a.capacity - a.currentWeight)
-          )[0];
-          truckWithMostSpace.currentWeight += orderWeight;
-          truckWithMostSpace.orders.push({
-            orderId: order.id,
-            weight: orderWeight,
-            sequence: truckWithMostSpace.orders.length + 1,
-          });
-        } else {
-          availableTrucks[0].currentWeight += orderWeight;
-          availableTrucks[0].orders.push({
-            orderId: order.id,
-            weight: orderWeight,
-            sequence: availableTrucks[0].orders.length + 1,
-          });
-        }
+      // Now optimize each truck's route using real address-based routing
+      const ordersMap = new Map(route.orders.map(o => [o.id, o]));
+
+      for (const dist of reorderedDistributions) {
+        // Get orders for this truck
+        const truckOrders = dist.orders
+          .map(o => ordersMap.get(o.orderId))
+          .filter((o): o is Order => o !== undefined);
+
+        // Optimize route based on actual addresses
+        const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+
+        // Update order sequences based on optimized route
+        dist.orders = optimizedRoute.orderedDeliveries.map((delivery, index) => ({
+          orderId: delivery.order.id,
+          weight: Number(delivery.order.weight_kg),
+          sequence: index + 1,
+        }));
       }
 
       // Clear existing assignments
@@ -329,25 +326,34 @@ export function useRouteDetails(routeId: string | undefined) {
       }
 
       // Create new assignments and update route_truck totals
-      for (const truck of trucks) {
-        if (truck.orders.length > 0) {
-          const assignmentsToInsert = truck.orders.map((o) => ({
+      for (const dist of reorderedDistributions) {
+        if (dist.orders.length > 0) {
+          const assignmentsToInsert = dist.orders.map((o) => ({
             order_id: o.orderId,
-            route_truck_id: truck.id,
+            route_truck_id: dist.routeTruckId,
             delivery_sequence: o.sequence,
           }));
 
           await supabase.from('order_assignments').insert(assignmentsToInsert);
         }
 
-        // Update route_truck totals
+        // Calculate route metrics
+        const truckOrders = dist.orders
+          .map(o => ordersMap.get(o.orderId))
+          .filter((o): o is Order => o !== undefined);
+        
+        const routeMetrics = optimizeDeliveryOrder(truckOrders, strategy);
+
+        // Update route_truck totals with distance and time estimates
         await supabase
           .from('route_trucks')
           .update({
-            total_weight_kg: truck.currentWeight,
-            total_orders: truck.orders.length,
+            total_weight_kg: dist.currentWeight,
+            total_orders: dist.orders.length,
+            estimated_distance_km: routeMetrics.totalDistance,
+            estimated_time_minutes: routeMetrics.estimatedMinutes,
           })
-          .eq('id', truck.id);
+          .eq('id', dist.routeTruckId);
       }
 
       // Update route status
@@ -359,7 +365,7 @@ export function useRouteDetails(routeId: string | undefined) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
       queryClient.invalidateQueries({ queryKey: ['routes'] });
-      toast({ title: 'Distribuição concluída!' });
+      toast({ title: 'Distribuição otimizada concluída!' });
     },
     onError: (error) => {
       toast({
@@ -377,7 +383,7 @@ export function useRouteDetails(routeId: string | undefined) {
     addOrders,
     deleteOrder,
     assignTrucks,
-    distributeOrders,
+    distributeOrders: distributeOrdersMutation,
     refetch: routeQuery.refetch,
   };
 }
