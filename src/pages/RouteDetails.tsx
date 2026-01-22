@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,12 +13,14 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { ManifestViewer } from '@/components/route/ManifestViewer';
 import { RouteMap } from '@/components/route/RouteMap';
+import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
+import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
 export default function RouteDetails() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { route, isLoading, addOrders, assignTrucks, distributeOrders, reorderDeliveries, refetch } = useRouteDetails(id);
+  const { route, isLoading, addOrders, assignTrucks, distributeOrders, reorderDeliveries, updateDepartureTimes, refetch } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
@@ -26,6 +28,7 @@ export default function RouteDetails() {
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
   const [showManifest, setShowManifest] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
 
   // Handle order reordering from the map
   const handleOrderReorder = async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
@@ -60,6 +63,15 @@ export default function RouteDetails() {
       return `${(weight / 1000).toFixed(1)}t`;
     }
     return `${weight.toFixed(0)}kg`;
+  };
+
+  const formatTime = (minutes: number) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hours > 0) {
+      return `${hours}h ${mins}min`;
+    }
+    return `${mins}min`;
   };
 
   const handleTruckSelection = (truckId: string) => {
@@ -167,6 +179,14 @@ export default function RouteDetails() {
           </div>
           {route.status !== 'draft' && (
             <div className="flex gap-2">
+              <Button 
+                variant={showSchedule ? "default" : "outline"} 
+                onClick={() => setShowSchedule(!showSchedule)} 
+                className="gap-2"
+              >
+                <Clock className="h-4 w-4" />
+                Horários
+              </Button>
               <Button 
                 variant={showMap ? "default" : "outline"} 
                 onClick={() => setShowMap(!showMap)} 
@@ -312,6 +332,30 @@ export default function RouteDetails() {
           </Card>
         )}
 
+        {/* Schedule Configuration */}
+        {showSchedule && route.status !== 'draft' && route.route_trucks.length > 0 && (
+          <DepartureTimeConfig
+            trucks={route.route_trucks.map(rt => ({
+              routeTruckId: rt.id,
+              truckPlate: rt.truck?.plate || '',
+              truckModel: rt.truck?.model || '',
+              estimatedMinutes: rt.estimated_time_minutes || 60,
+              totalOrders: rt.total_orders,
+              currentDepartureTime: (rt as any).departure_time || undefined,
+              currentDepartureDate: (rt as any).departure_date || undefined,
+              currentDeliveryTimeMinutes: (rt as any).delivery_time_minutes || 5,
+            }))}
+            onSave={async (schedules) => {
+              await updateDepartureTimes.mutateAsync(schedules.map(s => ({
+                routeTruckId: s.routeTruckId,
+                departureTime: s.departureTime,
+                departureDate: s.departureDate,
+                deliveryTimeMinutes: s.deliveryTimeMinutes,
+              })));
+            }}
+          />
+        )}
+
         {/* Step 3: Show Distribution Results */}
         {route.status !== 'draft' && route.route_trucks.length > 0 && (
           <div className="space-y-4">
@@ -351,6 +395,20 @@ export default function RouteDetails() {
                       </div>
                       <Progress value={rt.occupancy_percent} className="h-2" />
                     </div>
+
+                    {/* Timeline if schedule is set */}
+                    {(rt as any).departure_time && (
+                      <div className="mb-3">
+                        <TruckTimelineSummary
+                          truckPlate={rt.truck?.plate || ''}
+                          departureTime={(rt as any).departure_time}
+                          lastDeliveryTime={(rt as any).estimated_last_delivery_time || '--:--'}
+                          returnTime={(rt as any).estimated_return_time || '--:--'}
+                          totalOrders={rt.total_orders}
+                          totalDuration={formatTime(rt.estimated_time_minutes || 0)}
+                        />
+                      </div>
+                    )}
 
                     <p className="mb-2 text-sm font-medium">
                       {rt.total_orders} entregas:
@@ -403,6 +461,9 @@ export default function RouteDetails() {
                   orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
                   totalWeight: Number(rt.total_weight_kg),
                   occupancyPercent: rt.occupancy_percent,
+                  departureTime: (rt as any).departure_time || undefined,
+                  departureDate: (rt as any).departure_date || undefined,
+                  estimatedReturnTime: (rt as any).estimated_return_time || undefined,
                 }))}
                 strategy={routingStrategy}
               />
