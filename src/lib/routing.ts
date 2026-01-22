@@ -92,7 +92,8 @@ export function optimizeDeliveryOrder(
 }
 
 /**
- * Nearest neighbor algorithm starting from CD
+ * Nearest neighbor algorithm with backtrack penalty
+ * Prioritizes geographic continuity over simple distance
  */
 function nearestNeighborRoute(
   orders: Array<{ order: Order; geocoded: GeocodedAddress; distanceFromCD: number }>
@@ -105,29 +106,94 @@ function nearestNeighborRoute(
 
   let currentLat = cd.lat;
   let currentLng = cd.lng;
+  let lastDirection = { lat: 0, lng: 0 };
 
   while (remaining.length > 0) {
-    // Find nearest unvisited order
-    let nearestIndex = 0;
-    let nearestDistance = Infinity;
+    let bestIndex = 0;
+    let bestScore = Infinity;
 
     for (let i = 0; i < remaining.length; i++) {
+      const candidate = remaining[i];
       const dist = calculateDistance(
         currentLat, currentLng,
-        remaining[i].geocoded.estimatedLat,
-        remaining[i].geocoded.estimatedLng
+        candidate.geocoded.estimatedLat,
+        candidate.geocoded.estimatedLng
       );
 
-      if (dist < nearestDistance) {
-        nearestDistance = dist;
-        nearestIndex = i;
+      // Calculate direction to candidate
+      const newDirection = {
+        lat: candidate.geocoded.estimatedLat - currentLat,
+        lng: candidate.geocoded.estimatedLng - currentLng,
+      };
+
+      // Calculate backtrack penalty (going back in direction)
+      let backtrackPenalty = 0;
+      if (result.length > 0) {
+        // Dot product: negative = going backwards
+        const dotProduct = lastDirection.lat * newDirection.lat + lastDirection.lng * newDirection.lng;
+        if (dotProduct < 0) {
+          // Strong penalty for backtracking
+          backtrackPenalty = Math.abs(dotProduct) * 2;
+        }
+      }
+
+      // Calculate neighborhood consistency bonus
+      let neighborhoodBonus = 0;
+      if (result.length > 0) {
+        const lastOrder = result[result.length - 1];
+        // Same neighborhood = big bonus
+        if (lastOrder.geocoded.neighborhood && candidate.geocoded.neighborhood &&
+            lastOrder.geocoded.neighborhood === candidate.geocoded.neighborhood) {
+          neighborhoodBonus = -0.5; // Reduce score (better)
+        }
+        // Same street = even bigger bonus
+        if (lastOrder.geocoded.street && candidate.geocoded.street &&
+            lastOrder.geocoded.street === candidate.geocoded.street) {
+          neighborhoodBonus = -1;
+        }
+      }
+
+      // Calculate region consistency (penalize crossing to distant regions)
+      let regionPenalty = 0;
+      if (result.length >= 2) {
+        // Check if we're zigzagging between regions
+        const prev1 = result[result.length - 1];
+        const prev2 = result[result.length - 2];
+        
+        const distFromPrev1 = calculateDistance(
+          prev1.geocoded.estimatedLat, prev1.geocoded.estimatedLng,
+          candidate.geocoded.estimatedLat, candidate.geocoded.estimatedLng
+        );
+        const distFromPrev2 = calculateDistance(
+          prev2.geocoded.estimatedLat, prev2.geocoded.estimatedLng,
+          candidate.geocoded.estimatedLat, candidate.geocoded.estimatedLng
+        );
+
+        // If candidate is closer to 2-steps-ago than 1-step-ago, penalize (zigzag)
+        if (distFromPrev2 < distFromPrev1 * 0.7) {
+          regionPenalty = 0.5;
+        }
+      }
+
+      const finalScore = dist * (1 + backtrackPenalty + regionPenalty + neighborhoodBonus);
+
+      if (finalScore < bestScore) {
+        bestScore = finalScore;
+        bestIndex = i;
       }
     }
 
-    const nearest = remaining.splice(nearestIndex, 1)[0];
-    result.push(nearest);
-    currentLat = nearest.geocoded.estimatedLat;
-    currentLng = nearest.geocoded.estimatedLng;
+    const chosen = remaining.splice(bestIndex, 1)[0];
+    
+    // Update direction for next iteration
+    lastDirection = {
+      lat: chosen.geocoded.estimatedLat - currentLat,
+      lng: chosen.geocoded.estimatedLng - currentLng,
+    };
+
+    result.push(chosen);
+    currentLat = chosen.geocoded.estimatedLat;
+    currentLng = chosen.geocoded.estimatedLng;
   }
 
   return result;

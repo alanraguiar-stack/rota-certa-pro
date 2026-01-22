@@ -1,4 +1,4 @@
-import { LayoutDashboard, Truck, Route, History, LogOut } from 'lucide-react';
+import { LayoutDashboard, Truck, Route, History, LogOut, Settings } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -20,6 +20,7 @@ const menuItems = [
   { title: 'Frota', url: '/frota', icon: Truck },
   { title: 'Nova Rota', url: '/nova-rota', icon: Route },
   { title: 'Histórico', url: '/historico', icon: History },
+  { title: 'Configurações', url: '/configuracoes', icon: Settings },
 ];
 
 export function AppSidebar() {

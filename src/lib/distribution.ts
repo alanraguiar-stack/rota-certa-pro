@@ -1,4 +1,5 @@
 import { Order, RoutingStrategy, TruckDistribution, RouteTruck, Truck } from '@/types';
+import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress } from './geocoding';
 
 export interface DistributionResult {
   distributions: TruckDistribution[];
@@ -6,9 +7,16 @@ export interface DistributionResult {
   totalOrders: number;
 }
 
+interface GeocodedOrder {
+  order: Order;
+  geocoded: GeocodedAddress;
+  distanceFromCD: number;
+}
+
 /**
- * Advanced distribution algorithm that balances both weight AND order count
- * between trucks, respecting capacity limits and max delivery constraints.
+ * Advanced distribution algorithm that prioritizes GEOGRAPHIC PROXIMITY
+ * Weight is only used as a capacity constraint, not as distribution criterion.
+ * Groups orders by real address proximity to create continuous routes.
  */
 export function distributeOrders(
   orders: Order[],
@@ -18,6 +26,18 @@ export function distributeOrders(
   if (orders.length === 0 || routeTrucks.length === 0) {
     return { distributions: [], totalWeight: 0, totalOrders: 0 };
   }
+
+  const cd = getDistributionCenterCoords();
+
+  // Geocode all orders and calculate distance from CD
+  const geocodedOrders: GeocodedOrder[] = orders.map(order => {
+    const geocoded = parseAddress(order.address);
+    return {
+      order,
+      geocoded,
+      distanceFromCD: calculateDistance(cd.lat, cd.lng, geocoded.estimatedLat, geocoded.estimatedLng),
+    };
+  });
 
   // Initialize truck distributions
   const distributions: TruckDistribution[] = routeTrucks.map((rt) => ({
@@ -30,48 +50,13 @@ export function distributeOrders(
     occupancyPercent: 0,
   }));
 
-  // Sort orders based on strategy
-  const sortedOrders = sortOrdersByStrategy(orders, strategy);
-
-  // Target balanced distribution
-  const avgOrdersPerTruck = Math.ceil(orders.length / distributions.length);
   const totalWeight = orders.reduce((sum, o) => sum + Number(o.weight_kg), 0);
-  const targetWeightPerTruck = totalWeight / distributions.length;
 
-  // Distribute orders using balanced algorithm
-  for (const order of sortedOrders) {
-    const orderWeight = Number(order.weight_kg);
-    
-    // Find best truck considering:
-    // 1. Can fit the weight
-    // 2. Balance weight distribution
-    // 3. Balance order count
-    // 4. Respect max_deliveries if set
-    const eligibleTrucks = distributions.filter((d) => {
-      const canFitWeight = d.currentWeight + orderWeight <= d.capacity;
-      const truck = routeTrucks.find((rt) => rt.id === d.routeTruckId)?.truck;
-      const canFitOrders = !truck?.max_deliveries || d.orderCount < truck.max_deliveries;
-      return canFitWeight && canFitOrders;
-    });
+  // Cluster orders geographically for each truck
+  const clusters = clusterByGeographicProximity(geocodedOrders, distributions.length, strategy);
 
-    if (eligibleTrucks.length === 0) {
-      // Force assign to truck with most remaining capacity
-      const forcedTruck = [...distributions].sort(
-        (a, b) => (b.capacity - b.currentWeight) - (a.capacity - a.currentWeight)
-      )[0];
-      assignOrder(forcedTruck, order, orderWeight);
-    } else {
-      // Score each eligible truck
-      const scoredTrucks = eligibleTrucks.map((d) => ({
-        distribution: d,
-        score: calculateAssignmentScore(d, orderWeight, targetWeightPerTruck, avgOrdersPerTruck),
-      }));
-
-      // Pick truck with highest score
-      scoredTrucks.sort((a, b) => b.score - a.score);
-      assignOrder(scoredTrucks[0].distribution, order, orderWeight);
-    }
-  }
+  // Assign clusters to trucks, respecting capacity constraints
+  assignClustersToTrucks(clusters, distributions, routeTrucks);
 
   // Calculate final occupancy percentages
   for (const dist of distributions) {
@@ -85,64 +70,239 @@ export function distributeOrders(
   };
 }
 
-function assignOrder(distribution: TruckDistribution, order: Order, weight: number) {
-  distribution.currentWeight += weight;
-  distribution.orderCount++;
-  distribution.orders.push({
-    orderId: order.id,
-    weight,
-    sequence: distribution.orders.length + 1,
+/**
+ * Cluster orders by geographic proximity using sector-based approach
+ * This ensures routes don't cross neighborhoods unnecessarily
+ */
+function clusterByGeographicProximity(
+  geocodedOrders: GeocodedOrder[],
+  numClusters: number,
+  strategy: RoutingStrategy
+): GeocodedOrder[][] {
+  if (geocodedOrders.length === 0 || numClusters <= 0) return [];
+
+  const cd = getDistributionCenterCoords();
+
+  // Calculate angle from CD for each order (sector-based clustering)
+  const ordersWithAngle = geocodedOrders.map(go => ({
+    ...go,
+    angle: Math.atan2(
+      go.geocoded.estimatedLat - cd.lat,
+      go.geocoded.estimatedLng - cd.lng
+    ) * (180 / Math.PI),
+  }));
+
+  // Sort by angle to create geographic sectors
+  ordersWithAngle.sort((a, b) => a.angle - b.angle);
+
+  // Divide into sectors (clusters)
+  const clusters: GeocodedOrder[][] = Array.from({ length: numClusters }, () => []);
+  const ordersPerCluster = Math.ceil(ordersWithAngle.length / numClusters);
+
+  ordersWithAngle.forEach((item, index) => {
+    const clusterIndex = Math.min(Math.floor(index / ordersPerCluster), numClusters - 1);
+    clusters[clusterIndex].push(item);
   });
+
+  // Within each cluster, sort by distance from CD based on strategy
+  clusters.forEach(cluster => {
+    switch (strategy) {
+      case 'start_far':
+      case 'end_near_cd':
+        // Start far, end near CD
+        cluster.sort((a, b) => b.distanceFromCD - a.distanceFromCD);
+        break;
+      case 'start_near':
+        // Start near CD, end far
+        cluster.sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+        break;
+      default:
+        // For economy/speed, use nearest-neighbor within cluster
+        optimizeClusterSequence(cluster, cd);
+    }
+  });
+
+  return clusters;
 }
 
-function calculateAssignmentScore(
-  distribution: TruckDistribution,
-  orderWeight: number,
-  targetWeight: number,
-  targetOrders: number
+/**
+ * Optimize sequence within a cluster using nearest-neighbor
+ * Prioritizes continuous route without backtracking
+ */
+function optimizeClusterSequence(
+  cluster: GeocodedOrder[],
+  cd: { lat: number; lng: number }
+) {
+  if (cluster.length <= 1) return;
+
+  const result: GeocodedOrder[] = [];
+  const remaining = [...cluster];
+
+  let currentLat = cd.lat;
+  let currentLng = cd.lng;
+
+  while (remaining.length > 0) {
+    let nearestIndex = 0;
+    let nearestDistance = Infinity;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const dist = calculateDistance(
+        currentLat, currentLng,
+        remaining[i].geocoded.estimatedLat,
+        remaining[i].geocoded.estimatedLng
+      );
+
+      // Penalize heavily if this would cause backtracking
+      const backtrackPenalty = calculateBacktrackPenalty(
+        { lat: currentLat, lng: currentLng },
+        remaining[i].geocoded,
+        result.length > 0 ? result[result.length - 1].geocoded : null
+      );
+
+      const adjustedDist = dist * (1 + backtrackPenalty);
+
+      if (adjustedDist < nearestDistance) {
+        nearestDistance = adjustedDist;
+        nearestIndex = i;
+      }
+    }
+
+    const nearest = remaining.splice(nearestIndex, 1)[0];
+    result.push(nearest);
+    currentLat = nearest.geocoded.estimatedLat;
+    currentLng = nearest.geocoded.estimatedLng;
+  }
+
+  // Replace cluster contents with optimized sequence
+  cluster.length = 0;
+  cluster.push(...result);
+}
+
+/**
+ * Calculate penalty for backtracking (returning to areas already visited)
+ * Higher penalty = less likely to choose that order next
+ */
+function calculateBacktrackPenalty(
+  current: { lat: number; lng: number },
+  next: GeocodedAddress,
+  previous: GeocodedAddress | null
 ): number {
-  // Weight balance score (closer to target = higher score)
-  const newWeight = distribution.currentWeight + orderWeight;
-  const weightDeviation = Math.abs(newWeight - targetWeight);
-  const maxWeightDeviation = targetWeight;
-  const weightScore = 1 - (weightDeviation / maxWeightDeviation);
+  if (!previous) return 0;
 
-  // Order count balance score
-  const newOrderCount = distribution.orderCount + 1;
-  const orderDeviation = Math.abs(newOrderCount - targetOrders);
-  const orderScore = 1 - (orderDeviation / targetOrders);
+  // Calculate if we're going back in the general direction
+  const prevDirection = {
+    lat: current.lat - previous.estimatedLat,
+    lng: current.lng - previous.estimatedLng,
+  };
 
-  // Capacity utilization score (prefer filling trucks evenly)
-  const utilizationAfter = newWeight / distribution.capacity;
-  const utilizationScore = utilizationAfter <= 0.9 ? utilizationAfter : 0.9 - (utilizationAfter - 0.9);
+  const nextDirection = {
+    lat: next.estimatedLat - current.lat,
+    lng: next.estimatedLng - current.lng,
+  };
 
-  // Weighted combination
-  return (weightScore * 0.4) + (orderScore * 0.4) + (utilizationScore * 0.2);
+  // Dot product to check if we're reversing direction
+  const dotProduct = prevDirection.lat * nextDirection.lat + prevDirection.lng * nextDirection.lng;
+
+  // If going backwards (negative dot product), apply penalty
+  if (dotProduct < 0) {
+    // Penalty proportional to how much we're backtracking
+    return Math.abs(dotProduct) * 0.5;
+  }
+
+  return 0;
 }
 
-function sortOrdersByStrategy(orders: Order[], strategy: RoutingStrategy): Order[] {
-  const ordersCopy = [...orders];
+/**
+ * Assign geographic clusters to trucks, respecting capacity constraints
+ * May split clusters if needed to respect weight limits
+ */
+function assignClustersToTrucks(
+  clusters: GeocodedOrder[][],
+  distributions: TruckDistribution[],
+  routeTrucks: Array<{ id: string; truck: Truck }>
+) {
+  // Sort clusters by total weight for better bin-packing
+  const clustersWithWeight = clusters.map((cluster, index) => ({
+    cluster,
+    originalIndex: index,
+    totalWeight: cluster.reduce((sum, go) => sum + Number(go.order.weight_kg), 0),
+  }));
 
-  switch (strategy) {
-    case 'economy':
-      // Sort by weight descending for better bin packing
-      return ordersCopy.sort((a, b) => Number(b.weight_kg) - Number(a.weight_kg));
+  // Sort trucks by capacity descending
+  const sortedTruckIndices = distributions
+    .map((d, i) => ({ index: i, capacity: d.capacity }))
+    .sort((a, b) => b.capacity - a.capacity);
 
-    case 'speed':
-      // Keep original order (assumed to be optimized for speed)
-      return ordersCopy;
+  // Assign clusters to trucks
+  for (const { cluster } of clustersWithWeight) {
+    let remainingOrders = [...cluster];
 
-    case 'end_near_cd':
-    case 'start_far':
-      // Group by weight for balanced trucks, sequence will be adjusted later
-      return ordersCopy.sort((a, b) => Number(b.weight_kg) - Number(a.weight_kg));
+    while (remainingOrders.length > 0) {
+      // Find truck with most remaining capacity that can fit at least one order
+      let bestTruckIndex = -1;
+      let bestRemainingCapacity = -1;
 
-    case 'start_near':
-      // Reverse order for near-to-far routing
-      return ordersCopy.sort((a, b) => Number(a.weight_kg) - Number(b.weight_kg));
+      for (const { index } of sortedTruckIndices) {
+        const dist = distributions[index];
+        const truck = routeTrucks.find(rt => rt.id === dist.routeTruckId)?.truck;
+        const remainingCapacity = dist.capacity - dist.currentWeight;
+        const canFitMoreOrders = !truck?.max_deliveries || dist.orderCount < truck.max_deliveries;
 
-    default:
-      return ordersCopy;
+        if (canFitMoreOrders && remainingCapacity > bestRemainingCapacity) {
+          bestTruckIndex = index;
+          bestRemainingCapacity = remainingCapacity;
+        }
+      }
+
+      if (bestTruckIndex === -1) {
+        // No truck can accept more orders, force to first available
+        bestTruckIndex = 0;
+      }
+
+      const targetDist = distributions[bestTruckIndex];
+
+      // Add orders from this cluster to the truck until capacity reached
+      const ordersToAdd: GeocodedOrder[] = [];
+      const stillRemaining: GeocodedOrder[] = [];
+
+      for (const go of remainingOrders) {
+        const orderWeight = Number(go.order.weight_kg);
+        const truck = routeTrucks.find(rt => rt.id === targetDist.routeTruckId)?.truck;
+        const canFitWeight = targetDist.currentWeight + orderWeight <= targetDist.capacity;
+        const canFitOrders = !truck?.max_deliveries || targetDist.orderCount < truck.max_deliveries;
+
+        if (canFitWeight && canFitOrders) {
+          ordersToAdd.push(go);
+          targetDist.currentWeight += orderWeight;
+          targetDist.orderCount++;
+        } else {
+          stillRemaining.push(go);
+        }
+      }
+
+      // Add orders to distribution
+      for (const go of ordersToAdd) {
+        targetDist.orders.push({
+          orderId: go.order.id,
+          weight: Number(go.order.weight_kg),
+          sequence: targetDist.orders.length + 1,
+        });
+      }
+
+      remainingOrders = stillRemaining;
+
+      // If we couldn't add any orders, force add to prevent infinite loop
+      if (ordersToAdd.length === 0 && remainingOrders.length > 0) {
+        const forced = remainingOrders.shift()!;
+        targetDist.currentWeight += Number(forced.order.weight_kg);
+        targetDist.orderCount++;
+        targetDist.orders.push({
+          orderId: forced.order.id,
+          weight: Number(forced.order.weight_kg),
+          sequence: targetDist.orders.length + 1,
+        });
+      }
+    }
   }
 }
 

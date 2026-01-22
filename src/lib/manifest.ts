@@ -45,107 +45,126 @@ export function generateManifestPDF(data: ManifestData): jsPDF {
   });
 
   const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 15;
-  let currentY = 20;
+  const margin = 12;
+  let currentY = 15;
 
   // Header
-  doc.setFontSize(18);
+  doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');
   doc.text('ROMANEIO DE ENTREGAS', pageWidth / 2, currentY, { align: 'center' });
   
-  currentY += 10;
-  doc.setFontSize(12);
+  currentY += 8;
+  doc.setFontSize(11);
   doc.setFont('helvetica', 'normal');
   doc.text(data.routeName, pageWidth / 2, currentY, { align: 'center' });
 
   // Truck and route info box
-  currentY += 12;
+  currentY += 10;
   doc.setDrawColor(200, 200, 200);
   doc.setFillColor(248, 248, 248);
-  doc.roundedRect(margin, currentY, pageWidth - 2 * margin, 35, 2, 2, 'FD');
-
-  currentY += 8;
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('VEÍCULO:', margin + 5, currentY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${data.truck.plate} - ${data.truck.model}`, margin + 30, currentY);
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('DATA:', pageWidth / 2, currentY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(data.date, pageWidth / 2 + 20, currentY);
+  doc.roundedRect(margin, currentY, pageWidth - 2 * margin, 42, 2, 2, 'FD');
 
   currentY += 7;
+  doc.setFontSize(9);
+  
+  // Row 1: Vehicle and Date
   doc.setFont('helvetica', 'bold');
-  doc.text('ORIGEM:', margin + 5, currentY);
+  doc.text('VEÍCULO:', margin + 4, currentY);
   doc.setFont('helvetica', 'normal');
-  doc.text(DISTRIBUTION_CENTER.address, margin + 25, currentY);
-
-  currentY += 7;
-  doc.setFont('helvetica', 'bold');
-  doc.text('ENTREGAS:', margin + 5, currentY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${data.route.orderedDeliveries.length}`, margin + 32, currentY);
+  doc.text(`${data.truck.plate} - ${data.truck.model}`, margin + 25, currentY);
 
   doc.setFont('helvetica', 'bold');
-  doc.text('PESO TOTAL:', margin + 50, currentY);
+  doc.text('DATA:', pageWidth / 2 + 10, currentY);
   doc.setFont('helvetica', 'normal');
-  doc.text(formatWeight(data.totalWeight), margin + 80, currentY);
+  doc.text(data.date, pageWidth / 2 + 27, currentY);
+
+  // Row 2: Origin
+  currentY += 6;
+  doc.setFont('helvetica', 'bold');
+  doc.text('ORIGEM (CD):', margin + 4, currentY);
+  doc.setFont('helvetica', 'normal');
+  const originText = DISTRIBUTION_CENTER.address;
+  doc.text(originText.substring(0, 70), margin + 30, currentY);
+  if (originText.length > 70) {
+    doc.text(originText.substring(70), margin + 30, currentY + 4);
+    currentY += 4;
+  }
+
+  // Row 3: Stats
+  currentY += 6;
+  doc.setFont('helvetica', 'bold');
+  doc.text('ENTREGAS:', margin + 4, currentY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${data.route.orderedDeliveries.length}`, margin + 28, currentY);
 
   doc.setFont('helvetica', 'bold');
-  doc.text('OCUPAÇÃO:', pageWidth / 2 + 20, currentY);
+  doc.text('PESO TOTAL:', margin + 45, currentY);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${data.occupancyPercent}%`, pageWidth / 2 + 50, currentY);
-
-  currentY += 7;
-  doc.setFont('helvetica', 'bold');
-  doc.text('DISTÂNCIA:', margin + 5, currentY);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${data.route.totalDistance} km`, margin + 32, currentY);
+  doc.text(formatWeight(data.totalWeight), margin + 70, currentY);
 
   doc.setFont('helvetica', 'bold');
-  doc.text('TEMPO EST.:', margin + 60, currentY);
+  doc.text('OCUPAÇÃO:', pageWidth / 2 + 10, currentY);
   doc.setFont('helvetica', 'normal');
-  doc.text(formatTime(data.route.estimatedMinutes), margin + 90, currentY);
+  doc.text(`${data.occupancyPercent}%`, pageWidth / 2 + 35, currentY);
+
+  // Row 4: Distance and Time
+  currentY += 6;
+  doc.setFont('helvetica', 'bold');
+  doc.text('DISTÂNCIA:', margin + 4, currentY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${data.route.totalDistance} km`, margin + 28, currentY);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('TEMPO EST.:', margin + 55, currentY);
+  doc.setFont('helvetica', 'normal');
+  doc.text(formatTime(data.route.estimatedMinutes), margin + 80, currentY);
 
   // Deliveries table
-  currentY += 18;
+  currentY += 16;
   
-  const tableData = data.route.orderedDeliveries.map((delivery, index) => [
-    (index + 1).toString(),
-    delivery.order.client_name,
-    delivery.order.address,
-    formatWeight(Number(delivery.order.weight_kg)),
-    '', // Signature column
-    '', // Observations column
-  ]);
+  const tableData = data.route.orderedDeliveries.map((delivery, index) => {
+    // Parse address for structured display
+    const addr = delivery.order.address;
+    const zipMatch = addr.match(/(\d{5}-?\d{3})/);
+    const zipCode = zipMatch ? zipMatch[1] : '-';
+    
+    return [
+      (index + 1).toString(),
+      delivery.order.client_name,
+      delivery.order.address,
+      formatWeight(Number(delivery.order.weight_kg)),
+      '', // Signature column
+      '', // Observations column
+    ];
+  });
 
   autoTable(doc, {
     startY: currentY,
     head: [[
       'Seq.',
       'Cliente',
-      'Endereço',
+      'Endereço Completo',
       'Peso',
       'Assinatura',
       'Obs.',
     ]],
     body: tableData,
     styles: {
-      fontSize: 8,
-      cellPadding: 3,
+      fontSize: 7,
+      cellPadding: 2,
+      overflow: 'linebreak',
     },
     headStyles: {
       fillColor: [245, 130, 32], // Orange color from theme
       textColor: [255, 255, 255],
       fontStyle: 'bold',
+      fontSize: 8,
     },
     columnStyles: {
-      0: { cellWidth: 12, halign: 'center' },
-      1: { cellWidth: 35 },
-      2: { cellWidth: 60 },
-      3: { cellWidth: 18, halign: 'center' },
+      0: { cellWidth: 10, halign: 'center' },
+      1: { cellWidth: 30 },
+      2: { cellWidth: 65 },
+      3: { cellWidth: 15, halign: 'center' },
       4: { cellWidth: 30 },
       5: { cellWidth: 25 },
     },
@@ -156,28 +175,40 @@ export function generateManifestPDF(data: ManifestData): jsPDF {
   });
 
   // Footer
-  const finalY = (doc as any).lastAutoTable.finalY + 15;
+  const finalY = (doc as any).lastAutoTable.finalY + 12;
   
-  doc.setFontSize(8);
+  // Driver signature section
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
+  doc.setTextColor(0, 0, 0);
+  
+  // Left signature
+  doc.text('_'.repeat(35), margin, finalY);
+  doc.setFontSize(8);
+  doc.text('Assinatura do Motorista', margin, finalY + 4);
+
+  // Right signature  
+  doc.setFontSize(9);
+  doc.text('_'.repeat(35), pageWidth / 2 + 15, finalY);
+  doc.setFontSize(8);
+  doc.text('Data / Hora de Retorno', pageWidth / 2 + 15, finalY + 4);
+
+  // Vehicle km section
+  const kmY = finalY + 15;
+  doc.setFontSize(8);
+  doc.text('Km Saída: ____________', margin, kmY);
+  doc.text('Km Retorno: ____________', margin + 50, kmY);
+  doc.text('Total Km: ____________', margin + 105, kmY);
+
+  // Footer timestamp
+  doc.setFontSize(7);
   doc.setTextColor(128, 128, 128);
   doc.text(
     `Documento gerado em ${new Date().toLocaleString('pt-BR')} - Rota Certa`,
     pageWidth / 2,
-    finalY,
+    kmY + 10,
     { align: 'center' }
   );
-
-  // Driver signature section
-  const signatureY = finalY + 15;
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(10);
-  
-  doc.text('_'.repeat(40), margin, signatureY);
-  doc.text('Assinatura do Motorista', margin, signatureY + 5);
-
-  doc.text('_'.repeat(40), pageWidth / 2 + 10, signatureY);
-  doc.text('Data / Hora de Retorno', pageWidth / 2 + 10, signatureY + 5);
 
   return doc;
 }
