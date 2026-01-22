@@ -442,6 +442,70 @@ export function useRouteDetails(routeId: string | undefined) {
     },
   });
 
+  const updateDepartureTimes = useMutation({
+    mutationFn: async (schedules: Array<{
+      routeTruckId: string;
+      departureTime: string;
+      departureDate: string;
+      deliveryTimeMinutes: number;
+    }>) => {
+      const route = routeQuery.data;
+      if (!route) throw new Error('Rota não encontrada');
+
+      for (const schedule of schedules) {
+        const routeTruck = route.route_trucks.find(rt => rt.id === schedule.routeTruckId);
+        if (!routeTruck) continue;
+
+        // Calculate estimated times based on departure + route duration
+        const estimatedMinutes = routeTruck.estimated_time_minutes || 0;
+        const totalOrders = routeTruck.total_orders || 0;
+        
+        // Parse departure time
+        const [hours, mins] = schedule.departureTime.split(':').map(Number);
+        const departureMinutes = hours * 60 + mins;
+        
+        // Calculate delivery time (travel * 0.7 + stops * delivery_time)
+        const travelTime = estimatedMinutes * 0.7;
+        const deliveryStopTime = totalOrders * schedule.deliveryTimeMinutes;
+        const lastDeliveryMinutes = departureMinutes + travelTime + deliveryStopTime;
+        
+        // Calculate return time (add remaining travel)
+        const returnMinutes = lastDeliveryMinutes + (estimatedMinutes * 0.3);
+        
+        // Convert back to time strings
+        const lastDeliveryHours = Math.floor(lastDeliveryMinutes / 60) % 24;
+        const lastDeliveryMins = Math.round(lastDeliveryMinutes % 60);
+        const returnHours = Math.floor(returnMinutes / 60) % 24;
+        const returnMins = Math.round(returnMinutes % 60);
+        
+        const estimatedLastDeliveryTime = `${lastDeliveryHours.toString().padStart(2, '0')}:${lastDeliveryMins.toString().padStart(2, '0')}`;
+        const estimatedReturnTime = `${returnHours.toString().padStart(2, '0')}:${returnMins.toString().padStart(2, '0')}`;
+
+        await supabase
+          .from('route_trucks')
+          .update({
+            departure_time: schedule.departureTime,
+            departure_date: schedule.departureDate,
+            delivery_time_minutes: schedule.deliveryTimeMinutes,
+            estimated_last_delivery_time: estimatedLastDeliveryTime,
+            estimated_return_time: estimatedReturnTime,
+          } as any)
+          .eq('id', schedule.routeTruckId);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      toast({ title: 'Horários atualizados!' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao atualizar horários',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   return {
     route: routeQuery.data,
     isLoading: routeQuery.isLoading,
@@ -451,6 +515,7 @@ export function useRouteDetails(routeId: string | undefined) {
     assignTrucks,
     distributeOrders: distributeOrdersMutation,
     reorderDeliveries,
+    updateDepartureTimes,
     refetch: routeQuery.refetch,
   };
 }

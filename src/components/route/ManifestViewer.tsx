@@ -17,6 +17,9 @@ interface ManifestViewerProps {
     orders: Order[];
     totalWeight: number;
     occupancyPercent: number;
+    departureTime?: string;
+    departureDate?: string;
+    estimatedReturnTime?: string;
   }>;
   strategy: RoutingStrategy;
 }
@@ -190,7 +193,7 @@ export function ManifestViewer({ routeName, date, trucks, strategy }: ManifestVi
             </div>
 
             {/* Route metrics */}
-            <div className="flex items-center gap-6 border-b bg-muted/20 px-4 py-3">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b bg-muted/20 px-4 py-3">
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-primary" />
                 <span className="text-sm">
@@ -209,6 +212,25 @@ export function ManifestViewer({ routeName, date, trucks, strategy }: ManifestVi
                   <strong>{selectedRoute.orderedDeliveries.length}</strong> entregas
                 </span>
               </div>
+              {selectedTruck.departureTime && (
+                <>
+                  <Separator orientation="vertical" className="h-4" />
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-muted-foreground">Saída:</span>
+                    <Badge variant="outline" className="font-bold text-green-600">
+                      {selectedTruck.departureTime}
+                    </Badge>
+                  </div>
+                  {selectedTruck.estimatedReturnTime && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="text-muted-foreground">Retorno:</span>
+                      <Badge variant="outline" className="font-bold text-orange-600">
+                        {selectedTruck.estimatedReturnTime}
+                      </Badge>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
 
             {/* Origin */}

@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          created_at: string
+          id: string
+          setting_key: string
+          setting_value: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          setting_key: string
+          setting_value: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          setting_key?: string
+          setting_value?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       order_assignments: {
         Row: {
           created_at: string
@@ -94,27 +121,33 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          default_delivery_time_minutes: number | null
           full_name: string | null
           id: string
           is_active: boolean | null
+          return_to_cd_required: boolean | null
           theme: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          default_delivery_time_minutes?: number | null
           full_name?: string | null
           id?: string
           is_active?: boolean | null
+          return_to_cd_required?: boolean | null
           theme?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          default_delivery_time_minutes?: number | null
           full_name?: string | null
           id?: string
           is_active?: boolean | null
+          return_to_cd_required?: boolean | null
           theme?: string | null
           updated_at?: string
           user_id?: string
@@ -124,7 +157,12 @@ export type Database = {
       route_trucks: {
         Row: {
           created_at: string
+          delivery_time_minutes: number | null
+          departure_date: string | null
+          departure_time: string | null
           estimated_distance_km: number | null
+          estimated_last_delivery_time: string | null
+          estimated_return_time: string | null
           estimated_time_minutes: number | null
           id: string
           route_id: string
@@ -134,7 +172,12 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          delivery_time_minutes?: number | null
+          departure_date?: string | null
+          departure_time?: string | null
           estimated_distance_km?: number | null
+          estimated_last_delivery_time?: string | null
+          estimated_return_time?: string | null
           estimated_time_minutes?: number | null
           id?: string
           route_id: string
@@ -144,7 +187,12 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          delivery_time_minutes?: number | null
+          departure_date?: string | null
+          departure_time?: string | null
           estimated_distance_km?: number | null
+          estimated_last_delivery_time?: string | null
+          estimated_return_time?: string | null
           estimated_time_minutes?: number | null
           id?: string
           route_id?: string

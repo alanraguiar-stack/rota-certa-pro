@@ -135,6 +135,11 @@ export interface RouteTruck {
   total_orders: number;
   estimated_distance_km: number | null;
   estimated_time_minutes: number | null;
+  departure_time: string | null;
+  departure_date: string | null;
+  estimated_last_delivery_time: string | null;
+  estimated_return_time: string | null;
+  delivery_time_minutes: number;
   created_at: string;
   truck?: Truck;
 }
