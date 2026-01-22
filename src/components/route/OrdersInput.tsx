@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { OrderFormData, ParsedOrder } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { decodeFileContent, normalizeText } from '@/lib/encoding';
 
 interface OrdersInputProps {
   orders: ParsedOrder[];
@@ -96,21 +97,21 @@ function FileUpload({ onParsed }: { onParsed: (orders: ParsedOrder[]) => void })
 
     for (let i = startIndex; i < lines.length; i++) {
       const line = lines[i];
-      const parts = line.split(/[,;]/).map((p) => p.trim().replace(/^["']|["']$/g, ''));
+      const parts = line.split(/[,;]/).map((p) => normalizeText(p.trim().replace(/^["']|["']$/g, '')));
 
       if (parts.length >= 3) {
         const weight = parseFloat(parts[2]);
         if (parts[0] && parts[1] && !isNaN(weight) && weight > 0) {
           orders.push({
-            client_name: parts[0],
-            address: parts[1],
+            client_name: normalizeText(parts[0]),
+            address: normalizeText(parts[1]),
             weight_kg: weight,
             isValid: true,
           });
         } else {
           orders.push({
-            client_name: parts[0] || '',
-            address: parts[1] || '',
+            client_name: normalizeText(parts[0] || ''),
+            address: normalizeText(parts[1] || ''),
             weight_kg: weight || 0,
             isValid: false,
             error: 'Dados inválidos na linha ' + (i + 1),
@@ -134,7 +135,8 @@ function FileUpload({ onParsed }: { onParsed: (orders: ParsedOrder[]) => void })
 
     try {
       if (file.name.endsWith('.csv')) {
-        const text = await file.text();
+        // Use the encoding-aware file decoder
+        const text = await decodeFileContent(file);
         const orders = parseCSV(text);
         onParsed(orders);
       } else {
