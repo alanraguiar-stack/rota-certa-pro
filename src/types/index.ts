@@ -111,8 +111,10 @@ export interface Route {
   name: string;
   total_weight_kg: number;
   total_orders: number;
-  status: 'draft' | 'planned' | 'completed';
+  status: 'draft' | 'trucks_assigned' | 'loading' | 'loading_confirmed' | 'distributed' | 'completed';
   routing_strategy?: RoutingStrategy;
+  loading_confirmed_at?: string | null;
+  loading_confirmed_by?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -123,6 +125,7 @@ export interface Order {
   client_name: string;
   address: string;
   weight_kg: number;
+  product_description?: string | null;
   sequence_order: number | null;
   created_at: string;
   latitude?: number | null;
@@ -185,6 +188,7 @@ export interface ParsedOrder {
   client_name: string;
   address: string;
   weight_kg: number;
+  product_description?: string;
   isValid: boolean;
   error?: string;
 }

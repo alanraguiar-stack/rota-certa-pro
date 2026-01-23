@@ -29,6 +29,7 @@ export interface ColumnMapping {
   clientName: number;
   address: number;
   weight: number;
+  product?: number;
 }
 
 /**
@@ -44,7 +45,11 @@ const COLUMN_PATTERNS = {
     /rua/i, /avenida/i, /location/i
   ],
   weight: [
-    /peso/i, /weight/i, /kg/i, /kilos?/i, /massa/i, /carga/i, /quantidade/i
+    /peso/i, /weight/i, /kg/i, /kilos?/i, /massa/i, /carga/i
+  ],
+  product: [
+    /produto/i, /product/i, /item/i, /descri[çc][ãa]o/i, /description/i,
+    /mercadoria/i, /material/i, /artigo/i
   ],
 };
 
@@ -57,6 +62,7 @@ export function detectColumnMapping(headers: string[]): ColumnMapping | null {
   let clientNameIdx = -1;
   let addressIdx = -1;
   let weightIdx = -1;
+  let productIdx = -1;
   
   // Try to match each column pattern
   normalizedHeaders.forEach((header, idx) => {
@@ -86,19 +92,29 @@ export function detectColumnMapping(headers: string[]): ColumnMapping | null {
         }
       }
     }
+    
+    if (productIdx === -1) {
+      for (const pattern of COLUMN_PATTERNS.product) {
+        if (pattern.test(header)) {
+          productIdx = idx;
+          break;
+        }
+      }
+    }
   });
   
   // Fallback: assume first 3 columns in order if no matches
   if (clientNameIdx === -1 && addressIdx === -1 && weightIdx === -1) {
     if (headers.length >= 3) {
-      return { clientName: 0, address: 1, weight: 2 };
+      return { clientName: 0, address: 1, weight: 2, product: headers.length >= 4 ? 3 : undefined };
     }
     return null;
   }
   
-  // Fill in missing columns with remaining indices
-  const usedIndices = new Set([clientNameIdx, addressIdx, weightIdx].filter(i => i !== -1));
-  const availableIndices = [0, 1, 2].filter(i => !usedIndices.has(i) && i < headers.length);
+  // Fill in missing required columns with remaining indices
+  const usedIndices = new Set([clientNameIdx, addressIdx, weightIdx, productIdx].filter(i => i !== -1));
+  const availableIndices = Array.from({ length: headers.length }, (_, i) => i)
+    .filter(i => !usedIndices.has(i));
   
   if (clientNameIdx === -1 && availableIndices.length > 0) {
     clientNameIdx = availableIndices.shift()!;
@@ -114,7 +130,12 @@ export function detectColumnMapping(headers: string[]): ColumnMapping | null {
     return null;
   }
   
-  return { clientName: clientNameIdx, address: addressIdx, weight: weightIdx };
+  return { 
+    clientName: clientNameIdx, 
+    address: addressIdx, 
+    weight: weightIdx,
+    product: productIdx !== -1 ? productIdx : undefined,
+  };
 }
 
 /**
@@ -169,6 +190,7 @@ function validateOrder(
   clientName: string,
   address: string,
   weight: number | null,
+  product: string | undefined,
   row: number
 ): { order: ParsedOrder; errors: ValidationError[] } {
   const errors: ValidationError[] = [];
@@ -176,6 +198,7 @@ function validateOrder(
   // Normalize inputs
   const normalizedName = normalizeText(clientName || '').trim();
   const normalizedAddress = normalizeText(address || '').trim();
+  const normalizedProduct = product ? normalizeText(product).trim() : undefined;
   
   // Validate client name
   if (!normalizedName) {
@@ -246,6 +269,7 @@ function validateOrder(
       client_name: normalizedName,
       address: normalizedAddress,
       weight_kg: weight ?? 0,
+      product_description: normalizedProduct,
       isValid,
       error: isValid ? undefined : errors.map(e => e.message).join('; '),
     },
@@ -286,8 +310,9 @@ export function parseRows(
     const address = String(row[mapping.address] ?? '');
     const weightRaw = row[mapping.weight];
     const weight = parseWeight(weightRaw);
+    const product = mapping.product !== undefined ? String(row[mapping.product] ?? '') : undefined;
     
-    const result = validateOrder(clientName, address, weight, rowNum);
+    const result = validateOrder(clientName, address, weight, product, rowNum);
     orders.push(result.order);
     errors.push(...result.errors);
   }
