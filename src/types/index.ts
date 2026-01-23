@@ -131,6 +131,16 @@ export interface Order {
   latitude?: number | null;
   longitude?: number | null;
   geocoding_status?: string | null;
+  items?: OrderItem[]; // Multiple items per order
+}
+
+export interface OrderItem {
+  id: string;
+  order_id: string;
+  product_name: string;
+  weight_kg: number;
+  quantity: number;
+  created_at: string;
 }
 
 export interface RouteTruck {
@@ -184,13 +194,28 @@ export interface OrderFormData {
   weight_kg: number;
 }
 
+export interface ParsedOrderItem {
+  product_name: string;
+  weight_kg: number;
+  quantity: number;
+}
+
 export interface ParsedOrder {
+  pedido_id?: string;
   client_name: string;
   address: string;
-  weight_kg: number;
-  product_description?: string;
+  weight_kg: number; // Total weight (sum of items)
+  product_description?: string; // Legacy single product field
+  items: ParsedOrderItem[]; // Multiple items
   isValid: boolean;
   error?: string;
+}
+
+// Consolidated item for loading manifest
+export interface ConsolidatedItem {
+  product_name: string;
+  total_weight_kg: number;
+  order_count: number;
 }
 
 // Distribution algorithm types

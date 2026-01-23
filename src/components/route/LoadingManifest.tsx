@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Truck as TruckType, Order, DISTRIBUTION_CENTER } from '@/types';
+import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -26,16 +26,32 @@ interface ConsolidatedProduct {
   orderCount: number;
 }
 
+/**
+ * Consolidate products from orders - now uses order_items when available
+ */
 function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
   const productMap = new Map<string, { weight: number; count: number }>();
   
   orders.forEach(order => {
-    const productName = order.product_description || 'Produto não especificado';
-    const existing = productMap.get(productName) || { weight: 0, count: 0 };
-    productMap.set(productName, {
-      weight: existing.weight + Number(order.weight_kg),
-      count: existing.count + 1,
-    });
+    // If order has items, use them for detailed consolidation
+    if (order.items && order.items.length > 0) {
+      order.items.forEach((item: OrderItem) => {
+        const productName = item.product_name || 'Produto não especificado';
+        const existing = productMap.get(productName) || { weight: 0, count: 0 };
+        productMap.set(productName, {
+          weight: existing.weight + Number(item.weight_kg),
+          count: existing.count + 1,
+        });
+      });
+    } else {
+      // Fallback to legacy single product per order
+      const productName = order.product_description || 'Produto não especificado';
+      const existing = productMap.get(productName) || { weight: 0, count: 0 };
+      productMap.set(productName, {
+        weight: existing.weight + Number(order.weight_kg),
+        count: existing.count + 1,
+      });
+    }
   });
   
   return Array.from(productMap.entries())

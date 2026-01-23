@@ -707,6 +707,7 @@ export function OrdersInput({ orders, onOrdersChange }: OrdersInputProps) {
       ...orders,
       {
         ...order,
+        items: [],
         isValid: true,
       },
     ]);
