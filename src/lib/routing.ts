@@ -43,12 +43,23 @@ export function optimizeDeliveryOrder(
     };
   }
 
-  // Geocode all orders
-  const geocodedOrders = orders.map(order => ({
-    order,
-    geocoded: parseAddress(order.address),
-    distanceFromCD: 0,
-  }));
+  // Geocode all orders - use real coordinates if available
+  const geocodedOrders = orders.map(order => {
+    const geocoded = parseAddress(order.address);
+    
+    // Override with real coordinates if available
+    if (order.latitude != null && order.longitude != null && 
+        order.geocoding_status === 'success') {
+      geocoded.estimatedLat = Number(order.latitude);
+      geocoded.estimatedLng = Number(order.longitude);
+    }
+    
+    return {
+      order,
+      geocoded,
+      distanceFromCD: 0,
+    };
+  });
 
   // Calculate distance from CD for each order
   geocodedOrders.forEach(item => {

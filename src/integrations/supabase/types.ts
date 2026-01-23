@@ -41,6 +41,39 @@ export type Database = {
         }
         Relationships: []
       }
+      geocoding_cache: {
+        Row: {
+          address_hash: string
+          confidence: string | null
+          created_at: string | null
+          display_name: string | null
+          id: string
+          latitude: number
+          longitude: number
+          original_address: string
+        }
+        Insert: {
+          address_hash: string
+          confidence?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          id?: string
+          latitude: number
+          longitude: number
+          original_address: string
+        }
+        Update: {
+          address_hash?: string
+          confidence?: string | null
+          created_at?: string | null
+          display_name?: string | null
+          id?: string
+          latitude?: number
+          longitude?: number
+          original_address?: string
+        }
+        Relationships: []
+      }
       order_assignments: {
         Row: {
           created_at: string
@@ -85,7 +118,10 @@ export type Database = {
           address: string
           client_name: string
           created_at: string
+          geocoding_status: string | null
           id: string
+          latitude: number | null
+          longitude: number | null
           route_id: string
           sequence_order: number | null
           weight_kg: number
@@ -94,7 +130,10 @@ export type Database = {
           address: string
           client_name: string
           created_at?: string
+          geocoding_status?: string | null
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           route_id: string
           sequence_order?: number | null
           weight_kg: number
@@ -103,7 +142,10 @@ export type Database = {
           address?: string
           client_name?: string
           created_at?: string
+          geocoding_status?: string | null
           id?: string
+          latitude?: number | null
+          longitude?: number | null
           route_id?: string
           sequence_order?: number | null
           weight_kg?: number

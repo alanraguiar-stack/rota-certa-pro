@@ -125,6 +125,9 @@ export interface Order {
   weight_kg: number;
   sequence_order: number | null;
   created_at: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  geocoding_status?: string | null;
 }
 
 export interface RouteTruck {
