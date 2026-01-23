@@ -539,14 +539,35 @@ export function parsePastedData(text: string): ParseResult {
 }
 
 /**
+ * Generate test data for E2E testing
+ * Returns orders with real addresses near Barueri CD
+ */
+export function generateTestData(): ParsedOrder[] {
+  return [
+    { client_name: 'Padaria Central Barueri', address: 'Rua Campos Sales 150 - Centro Barueri SP', weight_kg: 50, product_description: 'Mussarela', isValid: true },
+    { client_name: 'Mercado Jardim Paulista', address: 'Rua Espírito Santo 200 - Jardim Paulista Barueri SP', weight_kg: 80, product_description: 'Mussarela', isValid: true },
+    { client_name: 'Restaurante Sabor do Centro', address: 'Rua da Prata 500 - Centro Barueri SP', weight_kg: 120, product_description: 'Presunto', isValid: true },
+    { client_name: 'Empório Vila São Silvestre', address: 'Rua Irene 75 - Vila São Silvestre Barueri SP', weight_kg: 45, product_description: 'Mortadela', isValid: true },
+    { client_name: 'Açougue Bom Corte', address: 'Rua Benedita Guerra Zendron 300 - Belval Barueri SP', weight_kg: 200, product_description: 'Mussarela', isValid: true },
+    { client_name: 'Padaria Doce Pão', address: 'Rua da Prata 850 - Centro Barueri SP', weight_kg: 30, product_description: 'Pão de Forma', isValid: true },
+    { client_name: 'Mini Mercado Belval', address: 'Rua Benedita Guerra Zendron 150 - Belval Barueri SP', weight_kg: 60, product_description: 'Presunto', isValid: true },
+    { client_name: 'Restaurante Bella Massa', address: 'Alameda Araguaia 1200 - Alphaville Barueri SP', weight_kg: 90, product_description: 'Mussarela', isValid: true },
+    { client_name: 'Hamburgueria Prime Grill', address: 'Alameda Rio Negro 500 - Alphaville Barueri SP', weight_kg: 75, product_description: 'Hambúrguer', isValid: true },
+    { client_name: 'Mercado Alpha Plus', address: 'Alameda Madeira 800 - Alphaville Barueri SP', weight_kg: 150, product_description: 'Mortadela', isValid: true },
+  ];
+}
+
+/**
  * Generate template CSV content
  */
 export function generateTemplateCSV(): string {
-  const header = 'Cliente,Endereço,Peso (kg)';
+  const header = 'Cliente,Endereço,Peso (kg),Produto';
   const examples = [
-    'Restaurante Sabor da Terra,"Rua das Palmeiras, 123 - Centro, São Paulo - SP, 01000-000",85',
-    'Padaria Pão Quente,"Av. Brasil, 456 - Jardim Europa, São Paulo - SP, 01452-000",120',
-    'Açougue Central,"Rua Augusta, 789 - Consolação, São Paulo - SP, 01305-000",200',
+    'Padaria Central Barueri,"Rua Campos Sales 150 - Centro Barueri SP",50,Mussarela',
+    'Mercado Jardim Paulista,"Rua Espírito Santo 200 - Jardim Paulista Barueri SP",80,Mussarela',
+    'Restaurante Sabor do Centro,"Rua da Prata 500 - Centro Barueri SP",120,Presunto',
+    'Açougue Bom Corte,"Rua Benedita Guerra Zendron 300 - Belval Barueri SP",200,Mussarela',
+    'Hamburgueria Prime Grill,"Alameda Rio Negro 500 - Alphaville Barueri SP",75,Hambúrguer',
   ];
   
   return [header, ...examples].join('\n');
@@ -557,10 +578,12 @@ export function generateTemplateCSV(): string {
  */
 export function generateTemplateExcel(): Blob {
   const data = [
-    ['Cliente', 'Endereço', 'Peso (kg)'],
-    ['Restaurante Sabor da Terra', 'Rua das Palmeiras, 123 - Centro, São Paulo - SP, 01000-000', 85],
-    ['Padaria Pão Quente', 'Av. Brasil, 456 - Jardim Europa, São Paulo - SP, 01452-000', 120],
-    ['Açougue Central', 'Rua Augusta, 789 - Consolação, São Paulo - SP, 01305-000', 200],
+    ['Cliente', 'Endereço', 'Peso (kg)', 'Produto'],
+    ['Padaria Central Barueri', 'Rua Campos Sales 150 - Centro Barueri SP', 50, 'Mussarela'],
+    ['Mercado Jardim Paulista', 'Rua Espírito Santo 200 - Jardim Paulista Barueri SP', 80, 'Mussarela'],
+    ['Restaurante Sabor do Centro', 'Rua da Prata 500 - Centro Barueri SP', 120, 'Presunto'],
+    ['Açougue Bom Corte', 'Rua Benedita Guerra Zendron 300 - Belval Barueri SP', 200, 'Mussarela'],
+    ['Hamburgueria Prime Grill', 'Alameda Rio Negro 500 - Alphaville Barueri SP', 75, 'Hambúrguer'],
   ];
   
   const ws = XLSX.utils.aoa_to_sheet(data);
@@ -568,8 +591,9 @@ export function generateTemplateExcel(): Blob {
   // Set column widths
   ws['!cols'] = [
     { wch: 30 }, // Cliente
-    { wch: 60 }, // Endereço
+    { wch: 55 }, // Endereço
     { wch: 12 }, // Peso
+    { wch: 15 }, // Produto
   ];
   
   const wb = XLSX.utils.book_new();

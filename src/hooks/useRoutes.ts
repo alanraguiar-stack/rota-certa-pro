@@ -350,13 +350,23 @@ export function useRouteDetails(routeId: string | undefined) {
       }
 
       // Update route status to 'loading' (ready for loading manifest)
-      const { error: statusError } = await supabase
+      console.log('[distributeLoad] Updating route status to loading for routeId:', routeId);
+      
+      const { error: statusError, data: statusData } = await supabase
         .from('routes')
         .update({ status: 'loading' })
-        .eq('id', routeId!);
+        .eq('id', routeId!)
+        .select();
+
+      console.log('[distributeLoad] Status update result:', { statusData, statusError });
 
       if (statusError) {
+        console.error('[distributeLoad] Failed to update route status:', statusError);
         throw new Error(`Erro ao atualizar status: ${statusError.message}`);
+      }
+
+      if (!statusData || statusData.length === 0) {
+        console.warn('[distributeLoad] No rows updated - RLS policy may be blocking the update');
       }
     },
     onSuccess: () => {

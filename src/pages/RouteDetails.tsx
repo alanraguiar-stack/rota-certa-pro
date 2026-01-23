@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -359,6 +359,35 @@ export default function RouteDetails() {
             <RouteWorkflowStepper route={route} hasTrucks={hasTrucks} hasAssignments={hasAssignments} />
           </CardContent>
         </Card>
+
+        {/* Recovery Alert - If status is inconsistent with data */}
+        {hasAssignments && (route.status === 'draft' || route.status === 'trucks_assigned') && (
+          <Card className="border-warning bg-warning/5">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-warning" />
+                  <div>
+                    <p className="font-medium">Status desatualizado</p>
+                    <p className="text-sm text-muted-foreground">
+                      A distribuição foi realizada, mas o status não foi atualizado corretamente.
+                    </p>
+                  </div>
+                </div>
+                <Button 
+                  onClick={async () => {
+                    const { supabase } = await import('@/integrations/supabase/client');
+                    await supabase.from('routes').update({ status: 'loading' }).eq('id', route.id);
+                    refetch();
+                    toast({ title: 'Status corrigido!' });
+                  }}
+                >
+                  Corrigir e Continuar
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Geocoding Progress */}
         {(geocodingProgress.status === 'processing' || geocodingProgress.status === 'complete') && (
