@@ -34,6 +34,12 @@ export default function RouteDetails() {
   const [showMap, setShowMap] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  
+  // State for manual map location selection
+  const [selectingLocationFor, setSelectingLocationFor] = useState<{
+    orderId: string;
+    clientName: string;
+  } | null>(null);
 
   // Handle order reordering from the map
   const handleOrderReorder = async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
@@ -207,6 +213,29 @@ export default function RouteDetails() {
     await refetch();
   };
 
+  // Handlers for manual map selection
+  const handleStartMapSelection = (orderId: string, clientName: string) => {
+    setSelectingLocationFor({ orderId, clientName });
+    // Automatically show the map when user wants to select location
+    setShowMap(true);
+  };
+
+  const handleCancelMapSelection = () => {
+    setSelectingLocationFor(null);
+  };
+
+  const handleManualLocationSelect = async (lat: number, lng: number) => {
+    if (!selectingLocationFor) return;
+    
+    await handleSetManualCoords(selectingLocationFor.orderId, lat, lng);
+    setSelectingLocationFor(null);
+    
+    toast({
+      title: 'Localização definida',
+      description: `Coordenadas manuais salvas para ${selectingLocationFor.clientName}`,
+    });
+  };
+
   const handleShowManifest = () => {
     setShowManifest(true);
   };
@@ -262,6 +291,8 @@ export default function RouteDetails() {
             onRetryGeocode={handleRetryGeocode}
             onUpdateAddress={handleUpdateAddress}
             onSetManualCoords={handleSetManualCoords}
+            onStartMapSelection={handleStartMapSelection}
+            selectingOnMapFor={selectingLocationFor?.orderId}
             isProcessing={geocodingProgress.status === 'processing'}
           />
         )}
@@ -404,28 +435,41 @@ export default function RouteDetails() {
           </Card>
         )}
 
-        {/* Map Visualization */}
-        {showMap && route.status !== 'draft' && route.route_trucks.length > 0 && (
-          <Card>
+        {/* Map Visualization - Show if explicitly opened OR if selecting location */}
+        {(showMap || selectingLocationFor) && (
+          <Card className={selectingLocationFor ? "ring-2 ring-primary" : ""}>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Map className="h-5 w-5" />
-                Visualização das Rotas
+                {selectingLocationFor 
+                  ? `Selecione a localização: ${selectingLocationFor.clientName}`
+                  : 'Visualização das Rotas'
+                }
               </CardTitle>
               <CardDescription>
-                Mapa interativo com as rotas de cada caminhão
+                {selectingLocationFor 
+                  ? 'Clique no mapa para definir a localização manualmente'
+                  : 'Mapa interativo com as rotas de cada caminhão'
+                }
               </CardDescription>
             </CardHeader>
             <CardContent>
               <RouteMap
-                trucks={route.route_trucks.map(rt => ({
-                  truck: rt.truck!,
-                  orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
-                  totalWeight: Number(rt.total_weight_kg),
-                  occupancyPercent: rt.occupancy_percent,
-                }))}
-                editable={true}
+                trucks={route.route_trucks.length > 0 
+                  ? route.route_trucks.map(rt => ({
+                      truck: rt.truck!,
+                      orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
+                      totalWeight: Number(rt.total_weight_kg),
+                      occupancyPercent: rt.occupancy_percent,
+                    }))
+                  : []
+                }
+                editable={!selectingLocationFor && route.status !== 'draft'}
                 onOrderReorder={handleOrderReorder}
+                isSelectingLocation={!!selectingLocationFor}
+                selectingForClient={selectingLocationFor?.clientName}
+                onManualLocationSelect={handleManualLocationSelect}
+                onCancelSelection={handleCancelMapSelection}
               />
             </CardContent>
           </Card>

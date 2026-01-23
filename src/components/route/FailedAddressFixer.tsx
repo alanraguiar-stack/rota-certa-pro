@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, MapPin, RefreshCw, Loader2, Check, Edit2, X } from 'lucide-react';
+import { AlertTriangle, MapPin, RefreshCw, Loader2, Check, Edit2, X, MousePointer2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +11,8 @@ interface FailedAddressFixerProps {
   onRetryGeocode: (orderId: string) => Promise<boolean>;
   onUpdateAddress: (orderId: string, newAddress: string) => Promise<boolean>;
   onSetManualCoords: (orderId: string, lat: number, lng: number) => Promise<void>;
+  onStartMapSelection?: (orderId: string, clientName: string) => void;
+  selectingOnMapFor?: string | null;
   isProcessing?: boolean;
 }
 
@@ -24,6 +26,8 @@ export function FailedAddressFixer({
   onRetryGeocode,
   onUpdateAddress,
   onSetManualCoords,
+  onStartMapSelection,
+  selectingOnMapFor,
   isProcessing = false,
 }: FailedAddressFixerProps) {
   const [editing, setEditing] = useState<EditingState | null>(null);
@@ -73,27 +77,43 @@ export function FailedAddressFixer({
     setRetryingAll(false);
   };
 
+  const handleMapSelection = (order: Order) => {
+    if (onStartMapSelection) {
+      onStartMapSelection(order.id, order.client_name);
+    }
+  };
+
   // Generate address suggestions based on common patterns
   const getSuggestions = (address: string): string[] => {
     const suggestions: string[] = [];
     
+    // Extract neighborhood and city from address pattern: Rua X, 123 – Bairro – Cidade – Estado
+    const bairroMatch = address.match(/–\s*([^–]+)\s*–\s*([^–]+)\s*–/);
+    if (bairroMatch) {
+      suggestions.push(`${bairroMatch[1].trim()}, ${bairroMatch[2].trim()}, Brasil`);
+    }
+    
     // Try without number
     const withoutNumber = address.replace(/,?\s*\d+\s*[-–]?/, '');
-    if (withoutNumber !== address) {
-      suggestions.push(withoutNumber);
+    if (withoutNumber !== address && withoutNumber.trim()) {
+      suggestions.push(withoutNumber.trim());
     }
     
-    // Try with CEP if Brazilian
-    if (address.includes('Barueri') && !address.includes('06')) {
-      suggestions.push(`${address}, CEP 06400-000`);
+    // Simplify to: "Rua X, Bairro, Cidade, Brasil"
+    const parts = address.split(/[-–]/).map(p => p.trim()).filter(Boolean);
+    if (parts.length >= 3) {
+      // Remove house number from first part
+      const streetPart = parts[0].replace(/,?\s*\d+\s*$/, '').trim();
+      suggestions.push(`${streetPart}, ${parts[1]}, ${parts[2]}, Brasil`);
     }
     
-    // Try removing "Rua" prefix
-    if (address.toLowerCase().startsWith('rua ')) {
-      suggestions.push(address.replace(/^rua /i, 'R. '));
+    // Add CEP of Barueri if not present
+    if (address.includes('Barueri') && !address.match(/\d{5}-?\d{3}/)) {
+      suggestions.push(`${address}, 06401-000`);
     }
     
-    return suggestions.slice(0, 2);
+    // Remove duplicates and limit to 3
+    return [...new Set(suggestions)].slice(0, 3);
   };
 
   return (
@@ -105,7 +125,7 @@ export function FailedAddressFixer({
         </CardTitle>
         <CardDescription className="text-amber-600 dark:text-amber-500">
           {failedOrders.length} endereço{failedOrders.length > 1 ? 's' : ''} não encontrado{failedOrders.length > 1 ? 's' : ''}. 
-          Edite ou tente novamente.
+          Edite, tente novamente ou marque no mapa.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -134,9 +154,11 @@ export function FailedAddressFixer({
               key={order.id}
               className={cn(
                 "rounded-lg border bg-card p-3 space-y-2",
-                order.geocoding_status === 'error' 
-                  ? "border-destructive/50" 
-                  : "border-amber-300 dark:border-amber-800"
+                selectingOnMapFor === order.id
+                  ? "border-primary ring-2 ring-primary/30"
+                  : order.geocoding_status === 'error' 
+                    ? "border-destructive/50" 
+                    : "border-amber-300 dark:border-amber-800"
               )}
             >
               {/* Order Info */}
@@ -161,16 +183,22 @@ export function FailedAddressFixer({
                 {/* Status Badge */}
                 <span className={cn(
                   "shrink-0 text-xs px-2 py-0.5 rounded-full",
-                  order.geocoding_status === 'error'
-                    ? "bg-destructive/10 text-destructive"
-                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  selectingOnMapFor === order.id
+                    ? "bg-primary/10 text-primary"
+                    : order.geocoding_status === 'error'
+                      ? "bg-destructive/10 text-destructive"
+                      : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                 )}>
-                  {order.geocoding_status === 'error' ? 'Erro' : 'Não encontrado'}
+                  {selectingOnMapFor === order.id 
+                    ? 'Selecionando...' 
+                    : order.geocoding_status === 'error' 
+                      ? 'Erro' 
+                      : 'Não encontrado'}
                 </span>
               </div>
 
               {/* Edit/Retry Actions */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {editing?.orderId === order.id ? (
                   <>
                     <Button
@@ -202,7 +230,7 @@ export function FailedAddressFixer({
                       size="sm"
                       variant="ghost"
                       onClick={() => handleStartEdit(order)}
-                      disabled={isProcessing || retrying === order.id}
+                      disabled={isProcessing || retrying === order.id || selectingOnMapFor === order.id}
                       className="h-7 px-2"
                     >
                       <Edit2 className="h-3 w-3 mr-1" />
@@ -212,7 +240,7 @@ export function FailedAddressFixer({
                       size="sm"
                       variant="outline"
                       onClick={() => handleRetry(order.id)}
-                      disabled={isProcessing || retrying === order.id}
+                      disabled={isProcessing || retrying === order.id || selectingOnMapFor === order.id}
                       className="h-7 px-2"
                     >
                       {retrying === order.id ? (
@@ -222,12 +250,24 @@ export function FailedAddressFixer({
                       )}
                       Tentar
                     </Button>
+                    {onStartMapSelection && (
+                      <Button
+                        size="sm"
+                        variant={selectingOnMapFor === order.id ? "default" : "secondary"}
+                        onClick={() => handleMapSelection(order)}
+                        disabled={isProcessing || retrying === order.id}
+                        className="h-7 px-2"
+                      >
+                        <MousePointer2 className="h-3 w-3 mr-1" />
+                        {selectingOnMapFor === order.id ? 'Clique no mapa' : 'Marcar no Mapa'}
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
 
               {/* Suggestions */}
-              {!editing && getSuggestions(order.address).length > 0 && (
+              {!editing && !selectingOnMapFor && getSuggestions(order.address).length > 0 && (
                 <div className="text-xs">
                   <p className="text-muted-foreground mb-1">Sugestões:</p>
                   <div className="flex flex-wrap gap-1">
@@ -235,7 +275,7 @@ export function FailedAddressFixer({
                       <button
                         key={i}
                         onClick={() => setEditing({ orderId: order.id, address: suggestion })}
-                        className="text-primary hover:underline truncate max-w-full"
+                        className="text-primary hover:underline truncate max-w-full text-left"
                       >
                         {suggestion}
                       </button>

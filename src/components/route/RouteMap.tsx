@@ -4,8 +4,9 @@ import 'leaflet/dist/leaflet.css';
 import { parseAddress, getDistributionCenterCoords, calculateDistance } from '@/lib/geocoding';
 import { Order, Truck } from '@/types';
 import { Badge } from '@/components/ui/badge';
-import { GripVertical, RotateCcw } from 'lucide-react';
+import { GripVertical, RotateCcw, MousePointer, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 // Fix for default marker icons in Leaflet with Vite
 delete (L.Icon.Default.prototype as unknown as { _getIconUrl?: unknown })._getIconUrl;
@@ -92,6 +93,11 @@ interface RouteMapProps {
   selectedTruckIndex?: number;
   onOrderReorder?: (reorders: OrderReorder[]) => Promise<void>;
   editable?: boolean;
+  // Manual location selection mode
+  isSelectingLocation?: boolean;
+  selectingForClient?: string;
+  onManualLocationSelect?: (lat: number, lng: number) => void;
+  onCancelSelection?: () => void;
 }
 
 interface OrderWithCoords {
@@ -116,7 +122,11 @@ export function RouteMap({
   showAllRoutes = true, 
   selectedTruckIndex, 
   onOrderReorder,
-  editable = false 
+  editable = false,
+  isSelectingLocation = false,
+  selectingForClient,
+  onManualLocationSelect,
+  onCancelSelection,
 }: RouteMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -332,6 +342,33 @@ export function RouteMap({
     };
   }, [cdPosition]);
   
+  // Handle map click for manual location selection
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    
+    const handleMapClick = (e: L.LeafletMouseEvent) => {
+      if (isSelectingLocation && onManualLocationSelect) {
+        onManualLocationSelect(e.latlng.lat, e.latlng.lng);
+      }
+    };
+    
+    if (isSelectingLocation) {
+      map.on('click', handleMapClick);
+      // Change cursor to crosshair
+      map.getContainer().style.cursor = 'crosshair';
+    } else {
+      map.getContainer().style.cursor = '';
+    }
+    
+    return () => {
+      map.off('click', handleMapClick);
+      if (map.getContainer()) {
+        map.getContainer().style.cursor = '';
+      }
+    };
+  }, [isSelectingLocation, onManualLocationSelect]);
+  
   // Update map content when data changes
   useEffect(() => {
     const map = mapRef.current;
@@ -454,9 +491,35 @@ export function RouteMap({
   };
   
   return (
-    <div className="relative h-[500px] w-full overflow-hidden rounded-lg border">
+    <div className={cn(
+      "relative h-[500px] w-full overflow-hidden rounded-lg border",
+      isSelectingLocation && "ring-2 ring-primary ring-offset-2"
+    )}>
+      {/* Selection mode indicator */}
+      {isSelectingLocation && (
+        <div className="absolute left-1/2 top-4 z-[1000] -translate-x-1/2 transform">
+          <div className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-primary-foreground shadow-lg">
+            <MousePointer className="h-4 w-4 animate-pulse" />
+            <span className="font-medium">
+              Clique no mapa para marcar: {selectingForClient}
+            </span>
+            {onCancelSelection && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={onCancelSelection}
+                className="ml-2 h-6 px-2"
+              >
+                <X className="h-3 w-3 mr-1" />
+                Cancelar
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+      
       {/* Edit controls */}
-      {editable && (
+      {editable && !isSelectingLocation && (
         <div className="absolute right-4 top-4 z-[1000] flex items-center gap-2">
           {hasChanges && (
             <>
