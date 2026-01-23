@@ -69,25 +69,27 @@ export function GeocodingProgress({
       )}
 
       {status === 'complete' && (successCount > 0 || failedCount > 0) && (
-        <div className="flex items-center gap-4 text-xs">
-          {successCount > 0 && (
-            <span className={cn(
-              "flex items-center gap-1",
-              "text-green-600"
-            )}>
-              <CheckCircle2 className="h-3 w-3" />
-              {successCount} encontrados
-            </span>
-          )}
-          {failedCount > 0 && (
-            <span className={cn(
-              "flex items-center gap-1",
-              "text-amber-600"
-            )}>
-              <XCircle className="h-3 w-3" />
-              {failedCount} não encontrados
-            </span>
-          )}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4 text-xs">
+            {successCount > 0 && (
+              <span className={cn(
+                "flex items-center gap-1",
+                "text-green-600"
+              )}>
+                <CheckCircle2 className="h-3 w-3" />
+                {successCount} encontrados
+              </span>
+            )}
+            {failedCount > 0 && (
+              <span className={cn(
+                "flex items-center gap-1",
+                "text-amber-600"
+              )}>
+                <XCircle className="h-3 w-3" />
+                {failedCount} não encontrados
+              </span>
+            )}
+          </div>
         </div>
       )}
     </div>
