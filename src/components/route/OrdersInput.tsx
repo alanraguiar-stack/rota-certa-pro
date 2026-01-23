@@ -24,8 +24,11 @@ import {
   parsePastedData, 
   downloadTemplate,
   generateTestData,
+  parseExcelWithValidation,
+  TEMPLATE_COLUMNS,
   ParseResult, 
-  ValidationError 
+  ValidationError,
+  TemplateValidation,
 } from '@/lib/orderParser';
 
 interface OrdersInputProps {
@@ -142,33 +145,69 @@ function ManualOrderForm({ onAdd }: { onAdd: (order: OrderFormData) => void }) {
   );
 }
 
+// Extended result type for template validation
+interface ExtendedParseResult extends ParseResult {
+  templateValidation?: TemplateValidation;
+}
+
 // ============ File Upload Component ============
-function FileUpload({ onParsed }: { onParsed: (result: ParseResult) => void }) {
+function FileUpload({ onParsed }: { onParsed: (result: ExtendedParseResult) => void }) {
   const { toast } = useToast();
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [templateWarning, setTemplateWarning] = useState<TemplateValidation | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
     if (!file.name.match(/\.(csv|xlsx|xls)$/i)) {
       toast({
         title: 'Formato inválido',
-        description: 'Por favor, envie um arquivo CSV ou Excel (.xlsx)',
+        description: 'Por favor, envie um arquivo Excel (.xlsx). Baixe o template modelo.',
         variant: 'destructive',
       });
       return;
     }
 
     setIsProcessing(true);
+    setTemplateWarning(null);
     
     try {
-      const result = await parseFile(file);
-      onParsed(result);
+      // Use enhanced parsing with template validation for Excel files
+      if (file.name.match(/\.xlsx?$/i)) {
+        const result = await parseExcelWithValidation(file);
+        
+        // Show template validation feedback
+        if (!result.templateValidation.isValid) {
+          setTemplateWarning(result.templateValidation);
+          toast({
+            title: 'Estrutura do arquivo incorreta',
+            description: result.templateValidation.message,
+            variant: 'destructive',
+          });
+          
+          if (result.orders.length === 0) {
+            return;
+          }
+        } else if (result.templateValidation.renamedColumns.length > 0) {
+          setTemplateWarning(result.templateValidation);
+          toast({
+            title: 'Colunas renomeadas detectadas',
+            description: 'O arquivo foi importado, mas recomendamos usar o template oficial.',
+            variant: 'default',
+          });
+        }
+        
+        onParsed(result);
+      } else {
+        // CSV fallback
+        const result = await parseFile(file);
+        onParsed(result);
+      }
     } catch (error) {
       console.error('Error parsing file:', error);
       toast({
         title: 'Erro ao processar arquivo',
-        description: 'Não foi possível ler o arquivo. Verifique o formato.',
+        description: 'Não foi possível ler o arquivo. Baixe o template modelo e tente novamente.',
         variant: 'destructive',
       });
     } finally {
@@ -191,11 +230,11 @@ function FileUpload({ onParsed }: { onParsed: (result: ParseResult) => void }) {
     if (file) handleFile(file);
   };
 
-  const handleDownloadTemplate = (format: 'csv' | 'xlsx') => {
-    downloadTemplate(format);
+  const handleDownloadTemplate = () => {
+    downloadTemplate();
     toast({
       title: 'Template baixado!',
-      description: `Arquivo template_pedidos.${format} salvo.`,
+      description: 'Arquivo template_pedidos_rota_certa.xlsx salvo. Consulte a aba "Instruções".',
     });
   };
 
@@ -218,49 +257,48 @@ function FileUpload({ onParsed }: { onParsed: (result: ParseResult) => void }) {
 
   return (
     <div className="space-y-4">
-      {/* Template Download + Test Data */}
-      <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Download className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm">Baixar template:</span>
+      {/* Template Download - Prominent */}
+      <div className="rounded-lg border-2 border-primary/20 bg-primary/5 p-4">
+        <div className="flex items-start gap-3">
+          <div className="rounded-full bg-primary/10 p-2">
+            <FileSpreadsheet className="h-5 w-5 text-primary" />
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleDownloadTemplate('xlsx')}
-            >
-              <Table className="mr-1 h-3 w-3" />
-              Excel
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleDownloadTemplate('csv')}
-            >
-              <FileText className="mr-1 h-3 w-3" />
-              CSV
+          <div className="flex-1">
+            <h4 className="font-medium text-sm mb-1">Planilha Modelo Oficial</h4>
+            <p className="text-xs text-muted-foreground mb-3">
+              Baixe o template com a estrutura correta e instruções de preenchimento.
+            </p>
+            <Button onClick={handleDownloadTemplate} size="sm" className="w-full sm:w-auto">
+              <Download className="mr-2 h-4 w-4" />
+              Baixar Planilha Modelo (.xlsx)
             </Button>
           </div>
-        </div>
-        
-        {/* Test Data Button */}
-        <div className="flex items-center justify-between border-t pt-2 mt-1">
-          <div className="flex items-center gap-2">
-            <Package className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm">Para testes:</span>
-          </div>
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleLoadTestData}
-          >
-            <Plus className="mr-1 h-3 w-3" />
-            Carregar 10 Pedidos de Teste
-          </Button>
         </div>
       </div>
+
+      {/* Template Validation Warning */}
+      {templateWarning && (
+        <Alert variant={templateWarning.isValid ? 'default' : 'destructive'}>
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="space-y-2">
+            <p>{templateWarning.message}</p>
+            {templateWarning.missingColumns.length > 0 && (
+              <div className="text-xs">
+                <strong>Colunas faltando:</strong> {templateWarning.missingColumns.join(', ')}
+              </div>
+            )}
+            {templateWarning.renamedColumns.length > 0 && (
+              <div className="text-xs">
+                <strong>Colunas renomeadas:</strong> {templateWarning.renamedColumns.join(', ')}
+              </div>
+            )}
+            <Button variant="outline" size="sm" onClick={handleDownloadTemplate} className="mt-2">
+              <Download className="mr-1 h-3 w-3" />
+              Baixar Template Correto
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Drop Zone */}
       <div
@@ -279,21 +317,21 @@ function FileUpload({ onParsed }: { onParsed: (result: ParseResult) => void }) {
         {isProcessing ? (
           <>
             <RefreshCcw className="mb-4 h-10 w-10 animate-spin text-primary" />
-            <p className="font-medium">Processando arquivo...</p>
+            <p className="font-medium">Processando e validando arquivo...</p>
           </>
         ) : (
           <>
             <Upload className="mb-4 h-10 w-10 text-muted-foreground" />
             <p className="mb-2 text-center font-medium">
-              Arraste um arquivo CSV ou Excel aqui
+              Arraste o arquivo Excel aqui
             </p>
             <p className="mb-4 text-center text-sm text-muted-foreground">
-              ou clique para selecionar
+              Use o template modelo para evitar erros
             </p>
             <Input
               ref={inputRef}
               type="file"
-              accept=".csv,.xlsx,.xls"
+              accept=".xlsx,.xls"
               onChange={handleChange}
               className="hidden"
               id="file-upload"
@@ -310,14 +348,40 @@ function FileUpload({ onParsed }: { onParsed: (result: ParseResult) => void }) {
         )}
       </div>
 
-      {/* Format Info */}
-      <div className="rounded-lg bg-muted/50 p-3">
-        <p className="text-xs font-medium text-muted-foreground mb-2">Colunas detectadas automaticamente:</p>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary" className="text-xs">Cliente / Nome</Badge>
-          <Badge variant="secondary" className="text-xs">Endereço / Local</Badge>
-          <Badge variant="secondary" className="text-xs">Peso / Kg</Badge>
+      {/* Test Data - Secondary */}
+      <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
+        <div className="flex items-center gap-2">
+          <Package className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Para testes rápidos:</span>
         </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleLoadTestData}
+        >
+          <Plus className="mr-1 h-3 w-3" />
+          Carregar 10 Pedidos de Teste
+        </Button>
+      </div>
+
+      {/* Expected Columns Info */}
+      <div className="rounded-lg bg-muted/50 p-3">
+        <p className="text-xs font-medium text-muted-foreground mb-2">Colunas esperadas no template:</p>
+        <div className="flex flex-wrap gap-1">
+          {TEMPLATE_COLUMNS.map((col) => (
+            <Badge 
+              key={col} 
+              variant="secondary" 
+              className={cn(
+                "text-xs",
+                ['Cliente', 'Peso_kg', 'Rua', 'Cidade'].includes(col) && 'bg-primary/10 text-primary'
+              )}
+            >
+              {col}{['Cliente', 'Peso_kg', 'Rua', 'Cidade'].includes(col) && '*'}
+            </Badge>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">* Campos obrigatórios</p>
       </div>
     </div>
   );
