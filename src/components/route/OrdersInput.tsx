@@ -561,9 +561,45 @@ export function OrdersInput({ orders, onOrdersChange }: OrdersInputProps) {
   const { toast } = useToast();
   const [previewResult, setPreviewResult] = useState<ParseResult | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [currentErrorIndex, setCurrentErrorIndex] = useState<number>(-1);
+  const orderRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const validOrders = orders.filter((o) => o.isValid);
   const invalidOrders = orders.filter((o) => !o.isValid);
+  
+  // Get indices of invalid orders
+  const invalidIndices = orders
+    .map((order, index) => (!order.isValid ? index : -1))
+    .filter((index) => index !== -1);
+
+  const scrollToError = useCallback((startFromIndex = -1) => {
+    // Find next error after current index
+    const nextErrorIndex = invalidIndices.find((idx) => idx > startFromIndex);
+    
+    // If no more errors after current, wrap to first error
+    const targetIndex = nextErrorIndex !== undefined ? nextErrorIndex : invalidIndices[0];
+    
+    if (targetIndex !== undefined) {
+      // Scroll to element
+      orderRefs.current[targetIndex]?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      
+      // Highlight the element
+      setHighlightedIndex(targetIndex);
+      setCurrentErrorIndex(targetIndex);
+      
+      // Remove highlight after animation
+      setTimeout(() => setHighlightedIndex(null), 2000);
+    }
+  }, [invalidIndices]);
+
+  const scrollToNextError = useCallback(() => {
+    scrollToError(currentErrorIndex);
+  }, [scrollToError, currentErrorIndex]);
   const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
 
   const handleAddOrder = (order: OrderFormData) => {
@@ -676,7 +712,15 @@ export function OrdersInput({ orders, onOrdersChange }: OrdersInputProps) {
                   Pedidos 
                   <Badge variant="outline">{validOrders.length}</Badge>
                   {invalidOrders.length > 0 && (
-                    <Badge variant="destructive">{invalidOrders.length} erro{invalidOrders.length !== 1 ? 's' : ''}</Badge>
+                    <Badge 
+                      variant="destructive" 
+                      className="cursor-pointer hover:bg-destructive/80 transition-colors"
+                      onClick={scrollToNextError}
+                      title="Clique para navegar até o próximo erro"
+                    >
+                      <AlertCircle className="h-3 w-3 mr-1" />
+                      {invalidOrders.length} erro{invalidOrders.length !== 1 ? 's' : ''}
+                    </Badge>
                   )}
                 </CardTitle>
                 <CardDescription>
@@ -706,46 +750,109 @@ export function OrdersInput({ orders, onOrdersChange }: OrdersInputProps) {
                   {orders.map((order, index) => (
                     <div
                       key={index}
+                      ref={(el) => (orderRefs.current[index] = el)}
                       className={cn(
-                        'group flex items-center justify-between rounded-lg border p-3 transition-colors',
-                        order.isValid ? 'hover:bg-muted/30' : 'border-destructive/50 bg-destructive/5'
+                        'group flex flex-col rounded-lg border p-3 transition-all duration-300',
+                        order.isValid ? 'hover:bg-muted/30' : 'border-destructive/50 bg-destructive/5',
+                        highlightedIndex === index && 'ring-2 ring-destructive ring-offset-2 animate-pulse bg-destructive/10'
                       )}
                     >
-                      <div className="flex min-w-0 flex-1 items-center gap-3">
-                        <span className={cn(
-                          'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium',
-                          order.isValid ? 'bg-muted' : 'bg-destructive/20 text-destructive'
-                        )}>
-                          {order.isValid ? index + 1 : '!'}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate font-medium">
-                            {order.client_name || '(sem nome)'}
-                          </p>
-                          <p className="truncate text-sm text-muted-foreground">
-                            {order.address || '(sem endereço)'}
-                          </p>
-                          {order.error && (
-                            <div className="mt-1 flex items-center gap-1 text-xs text-destructive">
-                              <AlertCircle className="h-3 w-3" />
-                              {order.error}
+                      {editingIndex === index ? (
+                        // Inline editing mode
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary text-xs font-medium">
+                              ✎
+                            </span>
+                            <span className="text-sm font-medium text-muted-foreground">Editando pedido #{index + 1}</span>
+                          </div>
+                          <div className="grid gap-2">
+                            <Input
+                              value={order.client_name}
+                              onChange={(e) => handleFixOrder(index, 'client_name', e.target.value)}
+                              placeholder="Nome do cliente"
+                              className="text-sm"
+                            />
+                            <Input
+                              value={order.address}
+                              onChange={(e) => handleFixOrder(index, 'address', e.target.value)}
+                              placeholder="Endereço completo"
+                              className="text-sm"
+                            />
+                            <div className="flex gap-2">
+                              <Input
+                                type="number"
+                                value={order.weight_kg || ''}
+                                onChange={(e) => handleFixOrder(index, 'weight_kg', e.target.value)}
+                                placeholder="Peso (kg)"
+                                className="text-sm w-32"
+                              />
+                              <Button 
+                                size="sm" 
+                                onClick={() => setEditingIndex(null)}
+                                className="flex-1"
+                              >
+                                <CheckCircle2 className="h-4 w-4 mr-1" />
+                                Concluir
+                              </Button>
                             </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="whitespace-nowrap text-sm font-medium">
-                          {formatWeight(order.weight_kg)}
-                        </span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleRemoveOrder(index)}
-                          className="h-8 w-8 p-0 opacity-0 transition-opacity group-hover:opacity-100"
-                        >
-                          <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
-                        </Button>
-                      </div>
+                      ) : (
+                        // Normal display mode
+                        <div className="flex items-center justify-between">
+                          <div className="flex min-w-0 flex-1 items-center gap-3">
+                            <span className={cn(
+                              'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-medium',
+                              order.isValid ? 'bg-muted' : 'bg-destructive/20 text-destructive'
+                            )}>
+                              {order.isValid ? index + 1 : '!'}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate font-medium">
+                                {order.client_name || '(sem nome)'}
+                              </p>
+                              <p className="truncate text-sm text-muted-foreground">
+                                {order.address || '(sem endereço)'}
+                              </p>
+                              {order.error && (
+                                <div 
+                                  className="mt-1 flex items-center gap-1 text-xs text-destructive cursor-pointer hover:underline"
+                                  onClick={() => setEditingIndex(index)}
+                                  title="Clique para corrigir"
+                                >
+                                  <AlertCircle className="h-3 w-3" />
+                                  {order.error} - <span className="font-medium">Clique para corrigir</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className="whitespace-nowrap text-sm font-medium">
+                              {formatWeight(order.weight_kg)}
+                            </span>
+                            {!order.isValid && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setEditingIndex(index)}
+                                className="h-8 px-2 border-destructive/50 text-destructive hover:bg-destructive/10"
+                              >
+                                <RefreshCcw className="h-3 w-3 mr-1" />
+                                Corrigir
+                              </Button>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRemoveOrder(index)}
+                              className="h-8 w-8 p-0 opacity-0 transition-opacity group-hover:opacity-100"
+                            >
+                              <Trash2 className="h-4 w-4 text-muted-foreground hover:text-destructive" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
