@@ -122,6 +122,7 @@ export type Database = {
           id: string
           latitude: number | null
           longitude: number | null
+          product_description: string | null
           route_id: string
           sequence_order: number | null
           weight_kg: number
@@ -134,6 +135,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
+          product_description?: string | null
           route_id: string
           sequence_order?: number | null
           weight_kg: number
@@ -146,6 +148,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
+          product_description?: string | null
           route_id?: string
           sequence_order?: number | null
           weight_kg?: number
@@ -263,6 +266,8 @@ export type Database = {
         Row: {
           created_at: string
           id: string
+          loading_confirmed_at: string | null
+          loading_confirmed_by: string | null
           name: string
           status: string
           total_orders: number
@@ -273,6 +278,8 @@ export type Database = {
         Insert: {
           created_at?: string
           id?: string
+          loading_confirmed_at?: string | null
+          loading_confirmed_by?: string | null
           name: string
           status?: string
           total_orders?: number
@@ -283,6 +290,8 @@ export type Database = {
         Update: {
           created_at?: string
           id?: string
+          loading_confirmed_at?: string | null
+          loading_confirmed_by?: string | null
           name?: string
           status?: string
           total_orders?: number

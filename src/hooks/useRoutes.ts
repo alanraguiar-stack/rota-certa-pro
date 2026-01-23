@@ -16,6 +16,7 @@ function toOrder(o: unknown): Order | undefined {
     client_name: String(obj.client_name ?? ''),
     address: String(obj.address ?? ''),
     weight_kg: Number(obj.weight_kg ?? 0),
+    product_description: obj.product_description != null ? String(obj.product_description) : null,
     sequence_order: obj.sequence_order != null ? Number(obj.sequence_order) : null,
     created_at: String(obj.created_at ?? ''),
     latitude: obj.latitude != null ? Number(obj.latitude) : null,
@@ -188,12 +189,13 @@ export function useRouteDetails(routeId: string | undefined) {
   });
 
   const addOrders = useMutation({
-    mutationFn: async (orders: Array<{ client_name: string; address: string; weight_kg: number }>) => {
+    mutationFn: async (orders: Array<{ client_name: string; address: string; weight_kg: number; product_description?: string }>) => {
       const ordersToInsert = orders.map((o, index) => ({
         route_id: routeId!,
         client_name: o.client_name,
         address: o.address,
         weight_kg: o.weight_kg,
+        product_description: o.product_description || null,
         sequence_order: index + 1,
       }));
 
@@ -278,10 +280,18 @@ export function useRouteDetails(routeId: string | undefined) {
         .select();
 
       if (error) throw error;
+
+      // Update route status to trucks_assigned
+      await supabase
+        .from('routes')
+        .update({ status: 'trucks_assigned' })
+        .eq('id', routeId!);
+
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      queryClient.invalidateQueries({ queryKey: ['routes'] });
     },
     onError: (error) => {
       toast({
@@ -292,6 +302,164 @@ export function useRouteDetails(routeId: string | undefined) {
     },
   });
 
+  // Step 1: Distribute orders to trucks (Romaneio de Carga - without route optimization)
+  const distributeLoadMutation = useMutation({
+    mutationFn: async () => {
+      const route = routeQuery.data;
+      if (!route || route.route_trucks.length === 0 || route.orders.length === 0) {
+        throw new Error('É necessário ter pedidos e caminhões atribuídos');
+      }
+
+      // Use the distribution algorithm to assign orders to trucks
+      const routeTrucks = route.route_trucks.map(rt => ({
+        id: rt.id,
+        truck: rt.truck!,
+      }));
+
+      const distributionResult = distributeOrders(
+        route.orders,
+        routeTrucks,
+        'economy' // Strategy for load distribution
+      );
+
+      // Clear existing assignments
+      for (const rt of route.route_trucks) {
+        await supabase.from('order_assignments').delete().eq('route_truck_id', rt.id);
+      }
+
+      // Create new assignments (without route optimization - just distribute by weight/capacity)
+      for (const dist of distributionResult.distributions) {
+        if (dist.orders.length > 0) {
+          const assignmentsToInsert = dist.orders.map((o, idx) => ({
+            order_id: o.orderId,
+            route_truck_id: dist.routeTruckId,
+            delivery_sequence: idx + 1, // Temporary sequence, will be optimized later
+          }));
+
+          await supabase.from('order_assignments').insert(assignmentsToInsert);
+        }
+
+        // Update route_truck totals (without route metrics yet)
+        await supabase
+          .from('route_trucks')
+          .update({
+            total_weight_kg: dist.currentWeight,
+            total_orders: dist.orders.length,
+          })
+          .eq('id', dist.routeTruckId);
+      }
+
+      // Update route status to 'loading' (ready for loading manifest)
+      await supabase
+        .from('routes')
+        .update({ status: 'loading' })
+        .eq('id', routeId!);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      queryClient.invalidateQueries({ queryKey: ['routes'] });
+      toast({ title: 'Carga distribuída! Gere o Romaneio de Carga.' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro na distribuição de carga',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Step 2: Confirm loading (after physical loading is done)
+  const confirmLoadingMutation = useMutation({
+    mutationFn: async (confirmedBy: string) => {
+      await supabase
+        .from('routes')
+        .update({ 
+          status: 'loading_confirmed',
+          loading_confirmed_at: new Date().toISOString(),
+          loading_confirmed_by: confirmedBy,
+        })
+        .eq('id', routeId!);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      queryClient.invalidateQueries({ queryKey: ['routes'] });
+      toast({ title: 'Carregamento confirmado! Pronto para roteirizar.' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao confirmar carregamento',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Step 3: Route optimization (after loading is confirmed)
+  const optimizeRoutesMutation = useMutation({
+    mutationFn: async (strategy: RoutingStrategy = 'economy') => {
+      const route = routeQuery.data;
+      if (!route || route.route_trucks.length === 0) {
+        throw new Error('É necessário ter caminhões com carga atribuída');
+      }
+
+      const ordersMap = new Map(route.orders.map(o => [o.id, toOrder(o)]).filter((entry): entry is [string, Order] => entry[1] !== undefined));
+
+      // Optimize each truck's route
+      for (const rt of route.route_trucks) {
+        const assignments = rt.assignments || [];
+        const truckOrders = assignments
+          .map(a => ordersMap.get(a.order?.id || ''))
+          .filter((o): o is Order => o !== undefined);
+
+        if (truckOrders.length === 0) continue;
+
+        // Optimize route based on actual addresses
+        const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+
+        // Update assignment sequences based on optimized route
+        for (let i = 0; i < optimizedRoute.orderedDeliveries.length; i++) {
+          const delivery = optimizedRoute.orderedDeliveries[i];
+          const assignment = assignments.find(a => a.order?.id === delivery.order.id);
+          if (assignment) {
+            await supabase
+              .from('order_assignments')
+              .update({ delivery_sequence: i + 1 })
+              .eq('id', assignment.id);
+          }
+        }
+
+        // Update route_truck with distance and time estimates
+        await supabase
+          .from('route_trucks')
+          .update({
+            estimated_distance_km: optimizedRoute.totalDistance,
+            estimated_time_minutes: optimizedRoute.estimatedMinutes,
+          })
+          .eq('id', rt.id);
+      }
+
+      // Update route status to 'distributed'
+      await supabase
+        .from('routes')
+        .update({ status: 'distributed' })
+        .eq('id', routeId!);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      queryClient.invalidateQueries({ queryKey: ['routes'] });
+      toast({ title: 'Rotas otimizadas! Gere os Romaneios de Entrega.' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro na roteirização',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Legacy: Combined distribution (for backwards compatibility)
   const distributeOrdersMutation = useMutation({
     mutationFn: async (strategy: RoutingStrategy = 'economy') => {
       const route = routeQuery.data;
@@ -377,7 +545,7 @@ export function useRouteDetails(routeId: string | undefined) {
       // Update route status
       await supabase
         .from('routes')
-        .update({ status: 'planned' })
+        .update({ status: 'distributed' })
         .eq('id', routeId!);
     },
     onSuccess: () => {
@@ -583,6 +751,9 @@ export function useRouteDetails(routeId: string | undefined) {
     addOrders,
     deleteOrder,
     assignTrucks,
+    distributeLoad: distributeLoadMutation,
+    confirmLoading: confirmLoadingMutation,
+    optimizeRoutes: optimizeRoutesMutation,
     distributeOrders: distributeOrdersMutation,
     reorderDeliveries,
     updateDepartureTimes,
