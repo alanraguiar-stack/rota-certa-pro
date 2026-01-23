@@ -5,6 +5,24 @@ import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy } from '@/ty
 import { useToast } from '@/hooks/use-toast';
 import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distribution';
 import { optimizeDeliveryOrder } from '@/lib/routing';
+
+// Helper to convert Supabase order to local Order type
+function toOrder(o: unknown): Order | undefined {
+  if (!o || typeof o !== 'object') return undefined;
+  const obj = o as Record<string, unknown>;
+  return {
+    id: String(obj.id ?? ''),
+    route_id: String(obj.route_id ?? ''),
+    client_name: String(obj.client_name ?? ''),
+    address: String(obj.address ?? ''),
+    weight_kg: Number(obj.weight_kg ?? 0),
+    sequence_order: obj.sequence_order != null ? Number(obj.sequence_order) : null,
+    created_at: String(obj.created_at ?? ''),
+    latitude: obj.latitude != null ? Number(obj.latitude) : null,
+    longitude: obj.longitude != null ? Number(obj.longitude) : null,
+    geocoding_status: obj.geocoding_status != null ? String(obj.geocoding_status) : null,
+  };
+}
 export function useRoutes() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -301,7 +319,7 @@ export function useRouteDetails(routeId: string | undefined) {
       );
 
       // Now optimize each truck's route using real address-based routing
-      const ordersMap = new Map(route.orders.map(o => [o.id, o]));
+      const ordersMap = new Map(route.orders.map(o => [o.id, toOrder(o)]).filter((entry): entry is [string, Order] => entry[1] !== undefined));
 
       for (const dist of reorderedDistributions) {
         // Get orders for this truck
@@ -414,7 +432,7 @@ export function useRouteDetails(routeId: string | undefined) {
         if (routeTruck) {
           const truckOrders = truckReorders
             .sort((a, b) => a.newSequence - b.newSequence)
-            .map(r => route.orders.find(o => o.id === r.orderId))
+            .map(r => toOrder(route.orders.find(o => o.id === r.orderId)))
             .filter((o): o is Order => o !== undefined);
           
           const routeMetrics = optimizeDeliveryOrder(truckOrders, 'economy');

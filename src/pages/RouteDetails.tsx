@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useRouteDetails } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
+import { useGeocoding } from '@/hooks/useGeocoding';
 import { Truck as TruckType, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -15,6 +16,7 @@ import { ManifestViewer } from '@/components/route/ManifestViewer';
 import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
+import { GeocodingProgress } from '@/components/route/GeocodingProgress';
 export default function RouteDetails() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
@@ -22,6 +24,7 @@ export default function RouteDetails() {
   const { toast } = useToast();
   const { route, isLoading, addOrders, assignTrucks, distributeOrders, reorderDeliveries, updateDepartureTimes, refetch } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
+  const { progress: geocodingProgress, geocodeOrders, resetProgress: resetGeocodingProgress } = useGeocoding();
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
   const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
@@ -29,6 +32,7 @@ export default function RouteDetails() {
   const [showManifest, setShowManifest] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [isGeocoding, setIsGeocoding] = useState(false);
 
   // Handle order reordering from the map
   const handleOrderReorder = async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
@@ -51,12 +55,63 @@ export default function RouteDetails() {
           client_name: o.client_name,
           address: o.address,
           weight_kg: o.weight_kg,
-        }))
+        })),
+        {
+          onSuccess: () => {
+            // Start geocoding after orders are added
+            setTimeout(() => {
+              startGeocoding();
+            }, 500);
+          }
+        }
       );
       // Clear the state
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, hasAddedPendingOrders, route, addOrders, navigate, location.pathname]);
+
+  // Function to start geocoding
+  const startGeocoding = async () => {
+    if (!route || isGeocoding) return;
+    
+    // Get order IDs that need geocoding
+    const orderIdsToGeocode = route.orders
+      .filter(o => !o.geocoding_status || o.geocoding_status === 'pending')
+      .map(o => o.id);
+    
+    if (orderIdsToGeocode.length === 0) return;
+    
+    setIsGeocoding(true);
+    
+    try {
+      const result = await geocodeOrders(orderIdsToGeocode);
+      
+      if (result.success > 0) {
+        toast({
+          title: 'Geocodificação concluída',
+          description: `${result.success} endereços localizados${result.failed > 0 ? `, ${result.failed} não encontrados` : ''}`,
+        });
+        refetch();
+      }
+    } catch (error) {
+      console.error('Geocoding error:', error);
+    } finally {
+      setIsGeocoding(false);
+    }
+  };
+
+  // Check for pending geocoding when route loads
+  useEffect(() => {
+    if (route && route.orders.length > 0 && !isGeocoding) {
+      const needsGeocoding = route.orders.some(
+        o => !o.geocoding_status || o.geocoding_status === 'pending'
+      );
+      
+      if (needsGeocoding && geocodingProgress.status === 'idle') {
+        startGeocoding();
+      }
+    }
+  }, [route?.orders]);
 
   const formatWeight = (weight: number) => {
     if (weight >= 1000) {
@@ -166,6 +221,17 @@ export default function RouteDetails() {
   return (
     <AppLayout>
       <div className="space-y-6">
+        {/* Geocoding Progress */}
+        {(geocodingProgress.status === 'processing' || geocodingProgress.status === 'complete') && (
+          <GeocodingProgress
+            current={geocodingProgress.current}
+            total={geocodingProgress.total}
+            currentAddress={geocodingProgress.currentAddress}
+            status={geocodingProgress.status}
+            successCount={geocodingProgress.successCount}
+            failedCount={geocodingProgress.failedCount}
+          />
+        )}
         {/* Header */}
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>

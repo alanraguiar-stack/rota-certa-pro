@@ -155,9 +155,19 @@ export function RouteMap({
       const polylinePoints: [number, number][] = [cdPosition];
       
       truckRoute.orders.forEach((order, orderIndex) => {
-        const geocoded = parseAddress(order.address);
-        const lat = geocoded.estimatedLat;
-        const lng = geocoded.estimatedLng;
+        // Use real coordinates if available, otherwise fall back to estimated
+        let lat: number;
+        let lng: number;
+        
+        if (order.latitude != null && order.longitude != null && 
+            order.geocoding_status === 'success') {
+          lat = Number(order.latitude);
+          lng = Number(order.longitude);
+        } else {
+          const geocoded = parseAddress(order.address);
+          lat = geocoded.estimatedLat;
+          lng = geocoded.estimatedLng;
+        }
         
         polylinePoints.push([lat, lng]);
         
