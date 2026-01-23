@@ -26,23 +26,69 @@ export interface ParseResult {
 }
 
 export interface ColumnMapping {
+  pedidoId?: number;
   clientName: number;
+  rua?: number;
+  numero?: number;
+  bairro?: number;
+  cidade?: number;
+  estado?: number;
   address: number;
   weight: number;
   product?: number;
+}
+
+// Template required columns (new structured format)
+export const TEMPLATE_COLUMNS = [
+  'Pedido_ID',
+  'Cliente',
+  'Rua',
+  'Numero',
+  'Bairro',
+  'Cidade',
+  'Estado',
+  'Produto',
+  'Peso_kg',
+] as const;
+
+export type TemplateColumn = typeof TEMPLATE_COLUMNS[number];
+
+// Validation result for template structure
+export interface TemplateValidation {
+  isValid: boolean;
+  missingColumns: string[];
+  renamedColumns: string[];
+  message?: string;
 }
 
 /**
  * Common column name patterns for auto-detection
  */
 const COLUMN_PATTERNS = {
+  pedidoId: [
+    /pedido.?id/i, /pedido/i, /order.?id/i, /id.?pedido/i, /numero.?pedido/i
+  ],
   clientName: [
     /cliente/i, /nome/i, /customer/i, /name/i, /razao/i, /fantasia/i, 
     /destinat[áa]rio/i, /empresa/i, /company/i
   ],
+  rua: [
+    /^rua$/i, /logradouro/i, /street/i
+  ],
+  numero: [
+    /^n[uú]mero$/i, /^num$/i, /^n[º°]?$/i, /number/i
+  ],
+  bairro: [
+    /bairro/i, /neighborhood/i, /distrito/i
+  ],
+  cidade: [
+    /cidade/i, /city/i, /munic[íi]pio/i
+  ],
+  estado: [
+    /^estado$/i, /^uf$/i, /state/i
+  ],
   address: [
-    /endere[çc]o/i, /address/i, /logradouro/i, /local/i, /destino/i,
-    /rua/i, /avenida/i, /location/i
+    /endere[çc]o/i, /address/i, /local/i, /destino/i, /location/i
   ],
   weight: [
     /peso/i, /weight/i, /kg/i, /kilos?/i, /massa/i, /carga/i
@@ -54,7 +100,7 @@ const COLUMN_PATTERNS = {
 };
 
 /**
- * Detect column mapping from header row
+ * Detect column mapping from header row (legacy format - combined address)
  */
 export function detectColumnMapping(headers: string[]): ColumnMapping | null {
   const normalizedHeaders = headers.map(h => normalizeText(h?.toString() || '').toLowerCase());
@@ -558,71 +604,429 @@ export function generateTestData(): ParsedOrder[] {
 }
 
 /**
- * Generate template CSV content
+ * Validate if file follows the template structure
  */
-export function generateTemplateCSV(): string {
-  const header = 'Cliente,Endereço,Peso (kg),Produto';
-  const examples = [
-    'Padaria Central Barueri,"Rua Campos Sales 150 - Centro Barueri SP",50,Mussarela',
-    'Mercado Jardim Paulista,"Rua Espírito Santo 200 - Jardim Paulista Barueri SP",80,Mussarela',
-    'Restaurante Sabor do Centro,"Rua da Prata 500 - Centro Barueri SP",120,Presunto',
-    'Açougue Bom Corte,"Rua Benedita Guerra Zendron 300 - Belval Barueri SP",200,Mussarela',
-    'Hamburgueria Prime Grill,"Alameda Rio Negro 500 - Alphaville Barueri SP",75,Hambúrguer',
-  ];
+export function validateTemplateStructure(headers: string[]): TemplateValidation {
+  const normalizedHeaders = headers.map(h => normalizeText(h?.toString() || '').toLowerCase().trim());
+  const expectedHeaders = TEMPLATE_COLUMNS.map(c => c.toLowerCase());
   
-  return [header, ...examples].join('\n');
+  const missingColumns: string[] = [];
+  const renamedColumns: string[] = [];
+  
+  // Check for required columns
+  const requiredColumns = ['cliente', 'peso_kg'];
+  const addressColumns = ['rua', 'numero', 'bairro', 'cidade', 'estado'];
+  
+  for (const required of requiredColumns) {
+    const found = normalizedHeaders.some(h => h.includes(required) || required.includes(h));
+    if (!found) {
+      missingColumns.push(required.charAt(0).toUpperCase() + required.slice(1));
+    }
+  }
+  
+  // Check if using structured address OR combined address
+  const hasStructuredAddress = addressColumns.every(col => 
+    normalizedHeaders.some(h => h.includes(col) || col.includes(h))
+  );
+  const hasCombinedAddress = normalizedHeaders.some(h => 
+    h.includes('endereco') || h.includes('address') || h.includes('local')
+  );
+  
+  if (!hasStructuredAddress && !hasCombinedAddress) {
+    missingColumns.push('Endereço (Rua, Número, Bairro, Cidade, Estado)');
+  }
+  
+  // Detect potentially renamed columns
+  for (const expected of expectedHeaders) {
+    const exactMatch = normalizedHeaders.includes(expected);
+    const similarMatch = normalizedHeaders.some(h => 
+      h.includes(expected) || expected.includes(h)
+    );
+    
+    if (!exactMatch && similarMatch) {
+      const foundHeader = headers[normalizedHeaders.findIndex(h => 
+        h.includes(expected) || expected.includes(h)
+      )];
+      if (foundHeader) {
+        renamedColumns.push(`"${foundHeader}" → "${TEMPLATE_COLUMNS.find(c => c.toLowerCase() === expected)}"`);
+      }
+    }
+  }
+  
+  const isValid = missingColumns.length === 0;
+  
+  return {
+    isValid,
+    missingColumns,
+    renamedColumns,
+    message: !isValid 
+      ? `Colunas faltando: ${missingColumns.join(', ')}. Baixe o template modelo para ver o formato correto.`
+      : renamedColumns.length > 0 
+        ? `Colunas renomeadas detectadas: ${renamedColumns.join(', ')}`
+        : undefined,
+  };
 }
 
 /**
- * Generate template Excel file
+ * Detect column mapping from header row (supports both structured and combined formats)
+ */
+export function detectStructuredMapping(headers: string[]): ColumnMapping | null {
+  const normalizedHeaders = headers.map(h => normalizeText(h?.toString() || '').toLowerCase());
+  
+  const findColumn = (patterns: RegExp[]): number => {
+    for (let idx = 0; idx < normalizedHeaders.length; idx++) {
+      for (const pattern of patterns) {
+        if (pattern.test(normalizedHeaders[idx])) {
+          return idx;
+        }
+      }
+    }
+    return -1;
+  };
+  
+  const pedidoIdIdx = findColumn(COLUMN_PATTERNS.pedidoId);
+  const clientNameIdx = findColumn(COLUMN_PATTERNS.clientName);
+  const ruaIdx = findColumn(COLUMN_PATTERNS.rua);
+  const numeroIdx = findColumn(COLUMN_PATTERNS.numero);
+  const bairroIdx = findColumn(COLUMN_PATTERNS.bairro);
+  const cidadeIdx = findColumn(COLUMN_PATTERNS.cidade);
+  const estadoIdx = findColumn(COLUMN_PATTERNS.estado);
+  const addressIdx = findColumn(COLUMN_PATTERNS.address);
+  const weightIdx = findColumn(COLUMN_PATTERNS.weight);
+  const productIdx = findColumn(COLUMN_PATTERNS.product);
+  
+  // Must have at least client and weight
+  if (clientNameIdx === -1 || weightIdx === -1) {
+    return null;
+  }
+  
+  // Must have either structured address OR combined address
+  const hasStructured = ruaIdx !== -1 && numeroIdx !== -1 && cidadeIdx !== -1;
+  const hasCombined = addressIdx !== -1;
+  
+  if (!hasStructured && !hasCombined) {
+    return null;
+  }
+  
+  return {
+    pedidoId: pedidoIdIdx !== -1 ? pedidoIdIdx : undefined,
+    clientName: clientNameIdx,
+    rua: ruaIdx !== -1 ? ruaIdx : undefined,
+    numero: numeroIdx !== -1 ? numeroIdx : undefined,
+    bairro: bairroIdx !== -1 ? bairroIdx : undefined,
+    cidade: cidadeIdx !== -1 ? cidadeIdx : undefined,
+    estado: estadoIdx !== -1 ? estadoIdx : undefined,
+    address: hasCombined ? addressIdx : -1, // Will be built from structured
+    weight: weightIdx,
+    product: productIdx !== -1 ? productIdx : undefined,
+  };
+}
+
+/**
+ * Build full address from structured columns
+ */
+function buildAddressFromStructured(
+  row: unknown[],
+  mapping: ColumnMapping
+): string {
+  const parts: string[] = [];
+  
+  if (mapping.rua !== undefined) {
+    const rua = String(row[mapping.rua] ?? '').trim();
+    const numero = mapping.numero !== undefined ? String(row[mapping.numero] ?? '').trim() : '';
+    if (rua) {
+      parts.push(numero ? `${rua}, ${numero}` : rua);
+    }
+  }
+  
+  if (mapping.bairro !== undefined) {
+    const bairro = String(row[mapping.bairro] ?? '').trim();
+    if (bairro) parts.push(bairro);
+  }
+  
+  if (mapping.cidade !== undefined) {
+    const cidade = String(row[mapping.cidade] ?? '').trim();
+    if (cidade) parts.push(cidade);
+  }
+  
+  if (mapping.estado !== undefined) {
+    const estado = String(row[mapping.estado] ?? '').trim();
+    if (estado) parts.push(estado);
+  }
+  
+  return parts.join(' - ');
+}
+
+/**
+ * Generate professional template Excel file with two sheets
  */
 export function generateTemplateExcel(): Blob {
-  const data = [
-    ['Cliente', 'Endereço', 'Peso (kg)', 'Produto'],
-    ['Padaria Central Barueri', 'Rua Campos Sales 150 - Centro Barueri SP', 50, 'Mussarela'],
-    ['Mercado Jardim Paulista', 'Rua Espírito Santo 200 - Jardim Paulista Barueri SP', 80, 'Mussarela'],
-    ['Restaurante Sabor do Centro', 'Rua da Prata 500 - Centro Barueri SP', 120, 'Presunto'],
-    ['Açougue Bom Corte', 'Rua Benedita Guerra Zendron 300 - Belval Barueri SP', 200, 'Mussarela'],
-    ['Hamburgueria Prime Grill', 'Alameda Rio Negro 500 - Alphaville Barueri SP', 75, 'Hambúrguer'],
+  const wb = XLSX.utils.book_new();
+  
+  // ============ Sheet 1: Pedidos (Orders) ============
+  const ordersData = [
+    TEMPLATE_COLUMNS.slice(), // Header row
+    // Example rows (can be deleted by user)
+    ['PED001', 'Padaria Central', 'Rua Campos Sales', '150', 'Centro', 'Barueri', 'SP', 'Mussarela', 50],
+    ['PED002', 'Mercado Jardim', 'Rua Espírito Santo', '200', 'Jardim Paulista', 'Barueri', 'SP', 'Presunto', 80],
+    ['PED003', 'Restaurante Sabor', 'Rua da Prata', '500', 'Centro', 'Barueri', 'SP', 'Mortadela', 120],
+    ['PED004', 'Açougue Bom Corte', 'Rua Benedita Guerra Zendron', '300', 'Belval', 'Barueri', 'SP', 'Mussarela', 200],
+    ['PED005', 'Hamburgueria Prime', 'Alameda Rio Negro', '500', 'Alphaville', 'Barueri', 'SP', 'Hambúrguer', 75],
   ];
   
-  const ws = XLSX.utils.aoa_to_sheet(data);
+  const wsOrders = XLSX.utils.aoa_to_sheet(ordersData);
   
   // Set column widths
-  ws['!cols'] = [
-    { wch: 30 }, // Cliente
-    { wch: 55 }, // Endereço
-    { wch: 12 }, // Peso
+  wsOrders['!cols'] = [
+    { wch: 12 }, // Pedido_ID
+    { wch: 25 }, // Cliente
+    { wch: 30 }, // Rua
+    { wch: 8 },  // Numero
+    { wch: 18 }, // Bairro
+    { wch: 15 }, // Cidade
+    { wch: 6 },  // Estado
     { wch: 15 }, // Produto
+    { wch: 10 }, // Peso_kg
   ];
   
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Pedidos');
+  // Highlight header row (requires styling support)
+  // XLSX basic doesn't support full styling, but we set the structure
+  
+  // Add data validation for Estado (dropdown) and Peso_kg (numbers only)
+  // Note: XLSX library has limited validation support, but we define the structure
+  wsOrders['!dataValidation'] = [
+    {
+      sqref: 'G2:G1000', // Estado column
+      type: 'list',
+      formula1: '"SP,RJ,MG,RS,PR,SC,BA,PE,CE,GO,DF,ES,PA,MA,MT,MS,PB,RN,PI,AL,SE,TO,RO,AC,AP,AM,RR"',
+    },
+    {
+      sqref: 'I2:I1000', // Peso_kg column
+      type: 'decimal',
+      operator: 'greaterThan',
+      formula1: '0',
+    },
+  ];
+  
+  XLSX.utils.book_append_sheet(wb, wsOrders, 'Pedidos');
+  
+  // ============ Sheet 2: Instruções (Instructions) ============
+  const instructionsData = [
+    ['📋 INSTRUÇÕES DE PREENCHIMENTO'],
+    [''],
+    ['Este arquivo é o modelo oficial para importação de pedidos no sistema Rota Certa.'],
+    ['Por favor, siga as orientações abaixo para evitar erros na importação.'],
+    [''],
+    ['═══════════════════════════════════════════════════════════════════════════'],
+    [''],
+    ['COLUNAS E SUAS DESCRIÇÕES:'],
+    [''],
+    ['Coluna', 'Obrigatório', 'Descrição', 'Exemplo'],
+    ['Pedido_ID', 'Não', 'Identificador único do pedido (opcional)', 'PED001'],
+    ['Cliente', 'Sim', 'Nome do cliente ou estabelecimento', 'Padaria Central'],
+    ['Rua', 'Sim', 'Nome da rua/avenida/logradouro', 'Rua das Flores'],
+    ['Numero', 'Sim', 'Número do endereço', '150'],
+    ['Bairro', 'Sim', 'Nome do bairro', 'Centro'],
+    ['Cidade', 'Sim', 'Nome da cidade', 'Barueri'],
+    ['Estado', 'Sim', 'Sigla do estado (2 letras)', 'SP'],
+    ['Produto', 'Não', 'Descrição do produto (para romaneio)', 'Mussarela'],
+    ['Peso_kg', 'Sim', 'Peso em quilogramas (número positivo)', '50'],
+    [''],
+    ['═══════════════════════════════════════════════════════════════════════════'],
+    [''],
+    ['⚠️  REGRAS IMPORTANTES:'],
+    [''],
+    ['1. NÃO altere os nomes das colunas na aba "Pedidos"'],
+    ['2. NÃO remova ou reordene as colunas'],
+    ['3. O campo Peso_kg deve conter apenas números (sem "kg" ou texto)'],
+    ['4. Use a sigla do estado com 2 letras maiúsculas (SP, RJ, MG, etc.)'],
+    ['5. Apague as linhas de exemplo antes de inserir seus dados'],
+    ['6. Cada linha representa um pedido/entrega'],
+    [''],
+    ['═══════════════════════════════════════════════════════════════════════════'],
+    [''],
+    ['✅ EXEMPLOS VÁLIDOS:'],
+    [''],
+    ['PED001 | Padaria Central | Rua Campos Sales | 150 | Centro | Barueri | SP | Mussarela | 50'],
+    ['PED002 | Mercado ABC | Av. Brasil | 1200 | Jardim | São Paulo | SP | Presunto | 120'],
+    [''],
+    ['❌ EXEMPLOS INVÁLIDOS:'],
+    [''],
+    ['• Peso com texto: "50kg" → Use apenas: 50'],
+    ['• Estado por extenso: "São Paulo" → Use apenas: SP'],
+    ['• Endereço incompleto: Faltando número ou bairro'],
+    [''],
+    ['═══════════════════════════════════════════════════════════════════════════'],
+    [''],
+    ['📞 Em caso de dúvidas, entre em contato com o suporte.'],
+    [''],
+    ['Versão do template: 2.0'],
+    ['Última atualização: ' + new Date().toLocaleDateString('pt-BR')],
+  ];
+  
+  const wsInstructions = XLSX.utils.aoa_to_sheet(instructionsData);
+  
+  // Set column widths for instructions
+  wsInstructions['!cols'] = [
+    { wch: 15 },
+    { wch: 12 },
+    { wch: 50 },
+    { wch: 20 },
+  ];
+  
+  XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instruções');
   
   const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   return new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
 
 /**
- * Download template file
+ * Download template file (Excel only for structured format)
  */
-export function downloadTemplate(format: 'csv' | 'xlsx'): void {
-  if (format === 'csv') {
-    const content = generateTemplateCSV();
-    const blob = new Blob(['\ufeff' + content], { type: 'text/csv;charset=utf-8' }); // BOM for Excel UTF-8
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'template_pedidos.csv';
-    a.click();
-    URL.revokeObjectURL(url);
-  } else {
-    const blob = generateTemplateExcel();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'template_pedidos.xlsx';
-    a.click();
-    URL.revokeObjectURL(url);
+export function downloadTemplate(format: 'csv' | 'xlsx' = 'xlsx'): void {
+  const blob = generateTemplateExcel();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'template_pedidos_rota_certa.xlsx';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Parse rows with structured address support
+ */
+export function parseRowsStructured(
+  rows: unknown[][],
+  mapping: ColumnMapping,
+  hasHeader: boolean = true
+): ParseResult {
+  const orders: ParsedOrder[] = [];
+  const errors: ValidationError[] = [];
+  const warnings: string[] = [];
+  
+  const startIdx = hasHeader ? 1 : 0;
+  const dataRows = rows.slice(startIdx);
+  
+  if (dataRows.length === 0) {
+    warnings.push('Nenhuma linha de dados encontrada');
+    return { orders, errors, warnings, totalRows: 0, validRows: 0, invalidRows: 0 };
   }
+  
+  for (let i = 0; i < dataRows.length; i++) {
+    const row = dataRows[i];
+    const rowNum = i + startIdx + 1;
+    
+    // Skip empty rows
+    if (!row || row.every(cell => !cell || String(cell).trim() === '')) {
+      continue;
+    }
+    
+    const clientName = String(row[mapping.clientName] ?? '');
+    
+    // Build address from structured columns or use combined
+    let address: string;
+    if (mapping.rua !== undefined && mapping.cidade !== undefined) {
+      address = buildAddressFromStructured(row, mapping);
+    } else {
+      address = String(row[mapping.address] ?? '');
+    }
+    
+    const weightRaw = row[mapping.weight];
+    const weight = parseWeight(weightRaw);
+    const product = mapping.product !== undefined ? String(row[mapping.product] ?? '') : undefined;
+    
+    const result = validateOrder(clientName, address, weight, product, rowNum);
+    orders.push(result.order);
+    errors.push(...result.errors);
+  }
+  
+  const validRows = orders.filter(o => o.isValid).length;
+  const invalidRows = orders.filter(o => !o.isValid).length;
+  
+  return {
+    orders,
+    errors,
+    warnings,
+    totalRows: orders.length,
+    validRows,
+    invalidRows,
+  };
+}
+
+/**
+ * Parse Excel file with template validation
+ */
+export async function parseExcelWithValidation(file: File): Promise<ParseResult & { templateValidation: TemplateValidation }> {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  
+  // Look for "Pedidos" sheet first, then fall back to first sheet
+  let sheetName = workbook.SheetNames.find(name => 
+    name.toLowerCase() === 'pedidos' || name.toLowerCase() === 'orders'
+  );
+  if (!sheetName) {
+    sheetName = workbook.SheetNames[0];
+  }
+  
+  if (!sheetName) {
+    return {
+      orders: [],
+      errors: [],
+      warnings: ['Arquivo Excel vazio'],
+      totalRows: 0,
+      validRows: 0,
+      invalidRows: 0,
+      templateValidation: { isValid: false, missingColumns: ['Todas'], renamedColumns: [] },
+    };
+  }
+  
+  const sheet = workbook.Sheets[sheetName];
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  
+  if (rows.length === 0) {
+    return {
+      orders: [],
+      errors: [],
+      warnings: ['Planilha vazia'],
+      totalRows: 0,
+      validRows: 0,
+      invalidRows: 0,
+      templateValidation: { isValid: false, missingColumns: ['Dados'], renamedColumns: [] },
+    };
+  }
+  
+  const headers = rows[0].map(cell => String(cell ?? ''));
+  
+  // Validate template structure
+  const templateValidation = validateTemplateStructure(headers);
+  
+  // Try structured mapping first, then fall back to auto-detection
+  let mapping = detectStructuredMapping(headers);
+  if (!mapping) {
+    mapping = detectColumnMapping(headers);
+  }
+  
+  if (!mapping) {
+    return {
+      orders: [],
+      errors: [{
+        row: 1,
+        field: 'colunas',
+        message: templateValidation.message || 'Estrutura inválida. Baixe o template modelo.',
+      }],
+      warnings: [],
+      totalRows: 0,
+      validRows: 0,
+      invalidRows: 0,
+      templateValidation,
+    };
+  }
+  
+  const result = parseRowsStructured(rows, mapping, true);
+  
+  return {
+    ...result,
+    templateValidation,
+  };
 }
