@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { 
   Upload, Plus, FileSpreadsheet, Keyboard, Trash2, AlertCircle, 
   ClipboardPaste, Download, CheckCircle2, XCircle, Eye, 
-  FileText, Table, RefreshCcw
+  FileText, Table, RefreshCcw, Package
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,8 @@ import { normalizeText } from '@/lib/encoding';
 import { 
   parseFile, 
   parsePastedData, 
-  downloadTemplate, 
+  downloadTemplate,
+  generateTestData,
   ParseResult, 
   ValidationError 
 } from '@/lib/orderParser';
@@ -198,30 +199,65 @@ function FileUpload({ onParsed }: { onParsed: (result: ParseResult) => void }) {
     });
   };
 
+  const handleLoadTestData = () => {
+    const testOrders = generateTestData();
+    const result: ParseResult = {
+      orders: testOrders,
+      errors: [],
+      warnings: [],
+      totalRows: testOrders.length,
+      validRows: testOrders.length,
+      invalidRows: 0,
+    };
+    onParsed(result);
+    toast({
+      title: 'Dados de teste carregados!',
+      description: `${testOrders.length} pedidos de exemplo adicionados (900kg total)`,
+    });
+  };
+
   return (
     <div className="space-y-4">
-      {/* Template Download */}
-      <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
-        <div className="flex items-center gap-2">
-          <Download className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm">Baixar template:</span>
+      {/* Template Download + Test Data */}
+      <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Download className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm">Baixar template:</span>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDownloadTemplate('xlsx')}
+            >
+              <Table className="mr-1 h-3 w-3" />
+              Excel
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDownloadTemplate('csv')}
+            >
+              <FileText className="mr-1 h-3 w-3" />
+              CSV
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
+        
+        {/* Test Data Button */}
+        <div className="flex items-center justify-between border-t pt-2 mt-1">
+          <div className="flex items-center gap-2">
+            <Package className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm">Para testes:</span>
+          </div>
           <Button
-            variant="outline"
+            variant="secondary"
             size="sm"
-            onClick={() => handleDownloadTemplate('xlsx')}
+            onClick={handleLoadTestData}
           >
-            <Table className="mr-1 h-3 w-3" />
-            Excel
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleDownloadTemplate('csv')}
-          >
-            <FileText className="mr-1 h-3 w-3" />
-            CSV
+            <Plus className="mr-1 h-3 w-3" />
+            Carregar 10 Pedidos de Teste
           </Button>
         </div>
       </div>
