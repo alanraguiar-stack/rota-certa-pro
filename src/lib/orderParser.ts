@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { ParsedOrder } from '@/types';
+import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { decodeFileContent, normalizeText } from './encoding';
 
 // Validation constants
@@ -316,6 +316,7 @@ function validateOrder(
       address: normalizedAddress,
       weight_kg: weight ?? 0,
       product_description: normalizedProduct,
+      items: normalizedProduct ? [{ product_name: normalizedProduct, weight_kg: weight ?? 0, quantity: 1 }] : [],
       isValid,
       error: isValid ? undefined : errors.map(e => e.message).join('; '),
     },
@@ -589,18 +590,27 @@ export function parsePastedData(text: string): ParseResult {
  * Returns orders with real addresses near Barueri CD
  */
 export function generateTestData(): ParsedOrder[] {
-  return [
-    { client_name: 'Padaria Central Barueri', address: 'Rua Campos Sales 150 - Centro Barueri SP', weight_kg: 50, product_description: 'Mussarela', isValid: true },
-    { client_name: 'Mercado Jardim Paulista', address: 'Rua Espírito Santo 200 - Jardim Paulista Barueri SP', weight_kg: 80, product_description: 'Mussarela', isValid: true },
-    { client_name: 'Restaurante Sabor do Centro', address: 'Rua da Prata 500 - Centro Barueri SP', weight_kg: 120, product_description: 'Presunto', isValid: true },
-    { client_name: 'Empório Vila São Silvestre', address: 'Rua Irene 75 - Vila São Silvestre Barueri SP', weight_kg: 45, product_description: 'Mortadela', isValid: true },
-    { client_name: 'Açougue Bom Corte', address: 'Rua Benedita Guerra Zendron 300 - Belval Barueri SP', weight_kg: 200, product_description: 'Mussarela', isValid: true },
-    { client_name: 'Padaria Doce Pão', address: 'Rua da Prata 850 - Centro Barueri SP', weight_kg: 30, product_description: 'Pão de Forma', isValid: true },
-    { client_name: 'Mini Mercado Belval', address: 'Rua Benedita Guerra Zendron 150 - Belval Barueri SP', weight_kg: 60, product_description: 'Presunto', isValid: true },
-    { client_name: 'Restaurante Bella Massa', address: 'Alameda Araguaia 1200 - Alphaville Barueri SP', weight_kg: 90, product_description: 'Mussarela', isValid: true },
-    { client_name: 'Hamburgueria Prime Grill', address: 'Alameda Rio Negro 500 - Alphaville Barueri SP', weight_kg: 75, product_description: 'Hambúrguer', isValid: true },
-    { client_name: 'Mercado Alpha Plus', address: 'Alameda Madeira 800 - Alphaville Barueri SP', weight_kg: 150, product_description: 'Mortadela', isValid: true },
+  const testItems = [
+    { client: 'Padaria Central Barueri', addr: 'Rua Campos Sales 150 - Centro Barueri SP', items: [{ product_name: 'Mussarela', weight_kg: 30, quantity: 1 }, { product_name: 'Presunto', weight_kg: 20, quantity: 1 }] },
+    { client: 'Mercado Jardim Paulista', addr: 'Rua Espírito Santo 200 - Jardim Paulista Barueri SP', items: [{ product_name: 'Mussarela', weight_kg: 50, quantity: 1 }, { product_name: 'Mortadela', weight_kg: 30, quantity: 1 }] },
+    { client: 'Restaurante Sabor do Centro', addr: 'Rua da Prata 500 - Centro Barueri SP', items: [{ product_name: 'Presunto', weight_kg: 80, quantity: 1 }, { product_name: 'Mussarela', weight_kg: 40, quantity: 1 }] },
+    { client: 'Empório Vila São Silvestre', addr: 'Rua Irene 75 - Vila São Silvestre Barueri SP', items: [{ product_name: 'Mortadela', weight_kg: 45, quantity: 1 }] },
+    { client: 'Açougue Bom Corte', addr: 'Rua Benedita Guerra Zendron 300 - Belval Barueri SP', items: [{ product_name: 'Mussarela', weight_kg: 100, quantity: 1 }, { product_name: 'Presunto', weight_kg: 60, quantity: 1 }, { product_name: 'Mortadela', weight_kg: 40, quantity: 1 }] },
+    { client: 'Padaria Doce Pão', addr: 'Rua da Prata 850 - Centro Barueri SP', items: [{ product_name: 'Pão de Forma', weight_kg: 30, quantity: 1 }] },
+    { client: 'Mini Mercado Belval', addr: 'Rua Benedita Guerra Zendron 150 - Belval Barueri SP', items: [{ product_name: 'Presunto', weight_kg: 40, quantity: 1 }, { product_name: 'Mussarela', weight_kg: 20, quantity: 1 }] },
+    { client: 'Restaurante Bella Massa', addr: 'Alameda Araguaia 1200 - Alphaville Barueri SP', items: [{ product_name: 'Mussarela', weight_kg: 60, quantity: 1 }, { product_name: 'Mortadela', weight_kg: 30, quantity: 1 }] },
+    { client: 'Hamburgueria Prime Grill', addr: 'Alameda Rio Negro 500 - Alphaville Barueri SP', items: [{ product_name: 'Hambúrguer', weight_kg: 75, quantity: 1 }] },
+    { client: 'Mercado Alpha Plus', addr: 'Alameda Madeira 800 - Alphaville Barueri SP', items: [{ product_name: 'Mortadela', weight_kg: 80, quantity: 1 }, { product_name: 'Mussarela', weight_kg: 70, quantity: 1 }] },
   ];
+  
+  return testItems.map(({ client, addr, items }) => ({
+    client_name: client,
+    address: addr,
+    weight_kg: items.reduce((sum, i) => sum + i.weight_kg, 0),
+    product_description: items.map(i => i.product_name).join(', '),
+    items,
+    isValid: true,
+  }));
 }
 
 /**
@@ -759,18 +769,26 @@ function buildAddressFromStructured(
 
 /**
  * Generate professional template Excel file with two sheets
+ * Now supports multiple items per order - same Pedido_ID groups items together
  */
 export function generateTemplateExcel(): Blob {
   const wb = XLSX.utils.book_new();
   
-  // ============ Sheet 1: Pedidos (Orders) ============
+  // ============ Sheet 1: Pedidos (Orders with Multiple Items) ============
   const ordersData = [
     TEMPLATE_COLUMNS.slice(), // Header row
-    // Example rows (can be deleted by user)
-    ['PED001', 'Padaria Central', 'Rua Campos Sales', '150', 'Centro', 'Barueri', 'SP', 'Mussarela', 50],
-    ['PED002', 'Mercado Jardim', 'Rua Espírito Santo', '200', 'Jardim Paulista', 'Barueri', 'SP', 'Presunto', 80],
-    ['PED003', 'Restaurante Sabor', 'Rua da Prata', '500', 'Centro', 'Barueri', 'SP', 'Mortadela', 120],
-    ['PED004', 'Açougue Bom Corte', 'Rua Benedita Guerra Zendron', '300', 'Belval', 'Barueri', 'SP', 'Mussarela', 200],
+    // Example: Multiple items for same client (PED001)
+    ['PED001', 'Padaria Central', 'Rua Campos Sales', '150', 'Centro', 'Barueri', 'SP', 'Mussarela', 30],
+    ['PED001', 'Padaria Central', 'Rua Campos Sales', '150', 'Centro', 'Barueri', 'SP', 'Presunto', 20],
+    // Single item orders
+    ['PED002', 'Mercado Jardim', 'Rua Espírito Santo', '200', 'Jardim Paulista', 'Barueri', 'SP', 'Mortadela', 80],
+    // Multiple items (PED003)
+    ['PED003', 'Restaurante Sabor', 'Rua da Prata', '500', 'Centro', 'Barueri', 'SP', 'Mussarela', 60],
+    ['PED003', 'Restaurante Sabor', 'Rua da Prata', '500', 'Centro', 'Barueri', 'SP', 'Presunto', 40],
+    ['PED003', 'Restaurante Sabor', 'Rua da Prata', '500', 'Centro', 'Barueri', 'SP', 'Mortadela', 20],
+    // More examples
+    ['PED004', 'Açougue Bom Corte', 'Rua Benedita Guerra Zendron', '300', 'Belval', 'Barueri', 'SP', 'Mussarela', 150],
+    ['PED004', 'Açougue Bom Corte', 'Rua Benedita Guerra Zendron', '300', 'Belval', 'Barueri', 'SP', 'Hambúrguer', 50],
     ['PED005', 'Hamburgueria Prime', 'Alameda Rio Negro', '500', 'Alphaville', 'Barueri', 'SP', 'Hambúrguer', 75],
   ];
   
@@ -789,11 +807,7 @@ export function generateTemplateExcel(): Blob {
     { wch: 10 }, // Peso_kg
   ];
   
-  // Highlight header row (requires styling support)
-  // XLSX basic doesn't support full styling, but we set the structure
-  
   // Add data validation for Estado (dropdown) and Peso_kg (numbers only)
-  // Note: XLSX library has limited validation support, but we define the structure
   wsOrders['!dataValidation'] = [
     {
       sqref: 'G2:G1000', // Estado column
@@ -812,55 +826,63 @@ export function generateTemplateExcel(): Blob {
   
   // ============ Sheet 2: Instruções (Instructions) ============
   const instructionsData = [
-    ['📋 INSTRUÇÕES DE PREENCHIMENTO'],
+    ['📋 INSTRUÇÕES DE PREENCHIMENTO - ROTA CERTA'],
     [''],
     ['Este arquivo é o modelo oficial para importação de pedidos no sistema Rota Certa.'],
     ['Por favor, siga as orientações abaixo para evitar erros na importação.'],
     [''],
     ['═══════════════════════════════════════════════════════════════════════════'],
     [''],
+    ['🔄 MÚLTIPLOS ITENS POR PEDIDO:'],
+    [''],
+    ['Para pedidos com vários produtos, repita o mesmo Pedido_ID em linhas diferentes:'],
+    [''],
+    ['PED001 | Padaria Central | Rua Campos Sales | 150 | Centro | Barueri | SP | Mussarela | 30'],
+    ['PED001 | Padaria Central | Rua Campos Sales | 150 | Centro | Barueri | SP | Presunto | 20'],
+    [''],
+    ['O sistema irá agrupar todos os itens com o mesmo Pedido_ID em uma única entrega.'],
+    ['O peso total do pedido será a soma dos pesos de todos os itens.'],
+    [''],
+    ['═══════════════════════════════════════════════════════════════════════════'],
+    [''],
     ['COLUNAS E SUAS DESCRIÇÕES:'],
     [''],
     ['Coluna', 'Obrigatório', 'Descrição', 'Exemplo'],
-    ['Pedido_ID', 'Não', 'Identificador único do pedido (opcional)', 'PED001'],
+    ['Pedido_ID', 'Recomendado', 'Identificador para agrupar itens do mesmo pedido', 'PED001'],
     ['Cliente', 'Sim', 'Nome do cliente ou estabelecimento', 'Padaria Central'],
     ['Rua', 'Sim', 'Nome da rua/avenida/logradouro', 'Rua das Flores'],
     ['Numero', 'Sim', 'Número do endereço', '150'],
     ['Bairro', 'Sim', 'Nome do bairro', 'Centro'],
     ['Cidade', 'Sim', 'Nome da cidade', 'Barueri'],
     ['Estado', 'Sim', 'Sigla do estado (2 letras)', 'SP'],
-    ['Produto', 'Não', 'Descrição do produto (para romaneio)', 'Mussarela'],
-    ['Peso_kg', 'Sim', 'Peso em quilogramas (número positivo)', '50'],
+    ['Produto', 'Sim', 'Nome do produto (usado no Romaneio de Carga)', 'Mussarela'],
+    ['Peso_kg', 'Sim', 'Peso do item em quilogramas', '50'],
     [''],
     ['═══════════════════════════════════════════════════════════════════════════'],
     [''],
     ['⚠️  REGRAS IMPORTANTES:'],
     [''],
-    ['1. NÃO altere os nomes das colunas na aba "Pedidos"'],
-    ['2. NÃO remova ou reordene as colunas'],
+    ['1. Use o mesmo Pedido_ID para agrupar itens do mesmo cliente'],
+    ['2. NÃO altere os nomes das colunas'],
     ['3. O campo Peso_kg deve conter apenas números (sem "kg" ou texto)'],
     ['4. Use a sigla do estado com 2 letras maiúsculas (SP, RJ, MG, etc.)'],
-    ['5. Apague as linhas de exemplo antes de inserir seus dados'],
-    ['6. Cada linha representa um pedido/entrega'],
+    ['5. Cada linha representa um ITEM do pedido'],
+    ['6. O Produto é obrigatório para gerar o Romaneio de Carga corretamente'],
     [''],
     ['═══════════════════════════════════════════════════════════════════════════'],
     [''],
-    ['✅ EXEMPLOS VÁLIDOS:'],
+    ['📦 FLUXO OPERACIONAL:'],
     [''],
-    ['PED001 | Padaria Central | Rua Campos Sales | 150 | Centro | Barueri | SP | Mussarela | 50'],
-    ['PED002 | Mercado ABC | Av. Brasil | 1200 | Jardim | São Paulo | SP | Presunto | 120'],
-    [''],
-    ['❌ EXEMPLOS INVÁLIDOS:'],
-    [''],
-    ['• Peso com texto: "50kg" → Use apenas: 50'],
-    ['• Estado por extenso: "São Paulo" → Use apenas: SP'],
-    ['• Endereço incompleto: Faltando número ou bairro'],
+    ['1. Importar pedidos (esta planilha)'],
+    ['2. Sistema consolida itens por produto (Romaneio de Carga)'],
+    ['3. Separação e conferência no CD'],
+    ['4. Validação da carga'],
+    ['5. Roteirização'],
+    ['6. Romaneio de Entrega (itens por cliente)'],
     [''],
     ['═══════════════════════════════════════════════════════════════════════════'],
     [''],
-    ['📞 Em caso de dúvidas, entre em contato com o suporte.'],
-    [''],
-    ['Versão do template: 2.0'],
+    ['Versão do template: 3.0 (Múltiplos Itens)'],
     ['Última atualização: ' + new Date().toLocaleDateString('pt-BR')],
   ];
   
@@ -894,14 +916,13 @@ export function downloadTemplate(format: 'csv' | 'xlsx' = 'xlsx'): void {
 }
 
 /**
- * Parse rows with structured address support
+ * Parse rows with structured address support and group by Pedido_ID
  */
 export function parseRowsStructured(
   rows: unknown[][],
   mapping: ColumnMapping,
   hasHeader: boolean = true
 ): ParseResult {
-  const orders: ParsedOrder[] = [];
   const errors: ValidationError[] = [];
   const warnings: string[] = [];
   
@@ -910,8 +931,17 @@ export function parseRowsStructured(
   
   if (dataRows.length === 0) {
     warnings.push('Nenhuma linha de dados encontrada');
-    return { orders, errors, warnings, totalRows: 0, validRows: 0, invalidRows: 0 };
+    return { orders: [], errors, warnings, totalRows: 0, validRows: 0, invalidRows: 0 };
   }
+  
+  // First pass: collect all items, grouped by Pedido_ID or client+address
+  const orderMap = new Map<string, { 
+    pedidoId?: string;
+    clientName: string; 
+    address: string; 
+    items: ParsedOrderItem[];
+    rowNumbers: number[];
+  }>();
   
   for (let i = 0; i < dataRows.length; i++) {
     const row = dataRows[i];
@@ -922,33 +952,97 @@ export function parseRowsStructured(
       continue;
     }
     
-    const clientName = String(row[mapping.clientName] ?? '');
+    // Get Pedido_ID if available
+    const pedidoId = mapping.pedidoId !== undefined 
+      ? normalizeText(String(row[mapping.pedidoId] ?? '')).trim()
+      : '';
+    
+    const clientName = normalizeText(String(row[mapping.clientName] ?? '')).trim();
     
     // Build address from structured columns or use combined
     let address: string;
     if (mapping.rua !== undefined && mapping.cidade !== undefined) {
       address = buildAddressFromStructured(row, mapping);
     } else {
-      address = String(row[mapping.address] ?? '');
+      address = normalizeText(String(row[mapping.address] ?? '')).trim();
     }
     
     const weightRaw = row[mapping.weight];
     const weight = parseWeight(weightRaw);
-    const product = mapping.product !== undefined ? String(row[mapping.product] ?? '') : undefined;
+    const product = mapping.product !== undefined 
+      ? normalizeText(String(row[mapping.product] ?? '')).trim() 
+      : '';
     
-    const result = validateOrder(clientName, address, weight, product, rowNum);
-    orders.push(result.order);
-    errors.push(...result.errors);
+    // Validate individual row
+    if (!clientName) {
+      errors.push({ row: rowNum, field: 'cliente', message: 'Nome do cliente é obrigatório' });
+      continue;
+    }
+    if (!address || address.length < 10) {
+      errors.push({ row: rowNum, field: 'endereço', message: 'Endereço inválido ou muito curto' });
+      continue;
+    }
+    if (weight === null || weight <= 0) {
+      errors.push({ row: rowNum, field: 'peso', message: 'Peso inválido' });
+      continue;
+    }
+    
+    // Create grouping key: prefer Pedido_ID, fallback to client+address
+    const groupKey = pedidoId || `${clientName}::${address}`.toLowerCase();
+    
+    const item: ParsedOrderItem = {
+      product_name: product || 'Produto não especificado',
+      weight_kg: weight,
+      quantity: 1,
+    };
+    
+    if (orderMap.has(groupKey)) {
+      const existing = orderMap.get(groupKey)!;
+      existing.items.push(item);
+      existing.rowNumbers.push(rowNum);
+    } else {
+      orderMap.set(groupKey, {
+        pedidoId: pedidoId || undefined,
+        clientName,
+        address,
+        items: [item],
+        rowNumbers: [rowNum],
+      });
+    }
   }
   
-  const validRows = orders.filter(o => o.isValid).length;
-  const invalidRows = orders.filter(o => !o.isValid).length;
+  // Second pass: create ParsedOrder objects from grouped items
+  const orders: ParsedOrder[] = [];
+  
+  for (const [, data] of orderMap) {
+    const totalWeight = data.items.reduce((sum, item) => sum + item.weight_kg, 0);
+    const productList = data.items.map(i => i.product_name).join(', ');
+    
+    orders.push({
+      pedido_id: data.pedidoId,
+      client_name: data.clientName,
+      address: data.address,
+      weight_kg: totalWeight,
+      product_description: productList,
+      items: data.items,
+      isValid: true,
+    });
+  }
+  
+  const validRows = orders.length;
+  const invalidRows = errors.length;
+  
+  // Add warning if items were grouped
+  const groupedCount = Array.from(orderMap.values()).filter(o => o.items.length > 1).length;
+  if (groupedCount > 0) {
+    warnings.push(`${groupedCount} pedidos com múltiplos itens foram agrupados automaticamente.`);
+  }
   
   return {
     orders,
     errors,
     warnings,
-    totalRows: orders.length,
+    totalRows: dataRows.filter(r => r && !r.every(cell => !cell || String(cell).trim() === '')).length,
     validRows,
     invalidRows,
   };

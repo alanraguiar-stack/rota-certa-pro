@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy } from '@/types';
+import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy, OrderItem, ParsedOrderItem } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distribution';
 import { optimizeDeliveryOrder } from '@/lib/routing';
@@ -147,6 +147,33 @@ export function useRouteDetails(routeId: string | undefined) {
 
       if (ordersError) throw ordersError;
 
+      // Fetch order items for all orders
+      const orderIds = (orders ?? []).map(o => o.id);
+      let orderItems: Record<string, OrderItem[]> = {};
+      
+      if (orderIds.length > 0) {
+        const { data: items, error: itemsError } = await supabase
+          .from('order_items')
+          .select('*')
+          .in('order_id', orderIds);
+
+        if (!itemsError && items) {
+          // Group items by order_id
+          items.forEach(item => {
+            if (!orderItems[item.order_id]) {
+              orderItems[item.order_id] = [];
+            }
+            orderItems[item.order_id].push(item as OrderItem);
+          });
+        }
+      }
+
+      // Attach items to orders
+      const ordersWithItems = (orders ?? []).map(order => ({
+        ...order,
+        items: orderItems[order.id] || [],
+      }));
+
       const { data: routeTrucks, error: trucksError } = await supabase
         .from('route_trucks')
         .select(`
@@ -169,9 +196,24 @@ export function useRouteDetails(routeId: string | undefined) {
             .eq('route_truck_id', rt.id)
             .order('delivery_sequence', { ascending: true });
 
+          // Attach items to orders in assignments
+          const assignmentsWithItems = (assignments ?? []).map(assignment => {
+            const order = assignment.order as any;
+            if (order) {
+              return {
+                ...assignment,
+                order: {
+                  ...order,
+                  items: orderItems[order.id] || [],
+                },
+              };
+            }
+            return assignment;
+          });
+
           return {
             ...rt,
-            assignments: assignments ?? [],
+            assignments: assignmentsWithItems,
             occupancy_percent: rt.truck
               ? Math.round((Number(rt.total_weight_kg) / Number(rt.truck.capacity_kg)) * 100)
               : 0,
@@ -181,7 +223,7 @@ export function useRouteDetails(routeId: string | undefined) {
 
       return {
         ...route,
-        orders: orders ?? [],
+        orders: ordersWithItems,
         route_trucks: routeTrucksWithAssignments,
       };
     },
@@ -189,7 +231,13 @@ export function useRouteDetails(routeId: string | undefined) {
   });
 
   const addOrders = useMutation({
-    mutationFn: async (orders: Array<{ client_name: string; address: string; weight_kg: number; product_description?: string }>) => {
+    mutationFn: async (orders: Array<{ 
+      client_name: string; 
+      address: string; 
+      weight_kg: number; 
+      product_description?: string;
+      items?: ParsedOrderItem[];
+    }>) => {
       const ordersToInsert = orders.map((o, index) => ({
         route_id: routeId!,
         client_name: o.client_name,
@@ -199,12 +247,46 @@ export function useRouteDetails(routeId: string | undefined) {
         sequence_order: index + 1,
       }));
 
-      const { data, error } = await supabase
+      const { data: insertedOrders, error } = await supabase
         .from('orders')
         .insert(ordersToInsert)
         .select();
 
       if (error) throw error;
+      if (!insertedOrders) throw new Error('Falha ao inserir pedidos');
+
+      // Insert order items for each order
+      const itemsToInsert: Array<{
+        order_id: string;
+        product_name: string;
+        weight_kg: number;
+        quantity: number;
+      }> = [];
+
+      insertedOrders.forEach((insertedOrder, index) => {
+        const originalOrder = orders[index];
+        if (originalOrder.items && originalOrder.items.length > 0) {
+          originalOrder.items.forEach(item => {
+            itemsToInsert.push({
+              order_id: insertedOrder.id,
+              product_name: item.product_name,
+              weight_kg: item.weight_kg,
+              quantity: item.quantity,
+            });
+          });
+        }
+      });
+
+      if (itemsToInsert.length > 0) {
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(itemsToInsert);
+
+        if (itemsError) {
+          console.error('Failed to insert order items:', itemsError);
+          // Don't throw - orders are already inserted
+        }
+      }
 
       // Update route totals
       const totalWeight = orders.reduce((sum, o) => sum + o.weight_kg, 0);
@@ -216,7 +298,7 @@ export function useRouteDetails(routeId: string | undefined) {
         })
         .eq('id', routeId!);
 
-      return data;
+      return insertedOrders;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
