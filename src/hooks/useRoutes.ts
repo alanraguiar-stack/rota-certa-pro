@@ -524,6 +524,58 @@ export function useRouteDetails(routeId: string | undefined) {
     },
   });
 
+  const updateOrderAddress = useMutation({
+    mutationFn: async ({ orderId, newAddress }: { orderId: string; newAddress: string }) => {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          address: newAddress,
+          geocoding_status: 'pending',
+          latitude: null,
+          longitude: null,
+        })
+        .eq('id', orderId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao atualizar endereço',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  const setManualCoords = useMutation({
+    mutationFn: async ({ orderId, lat, lng }: { orderId: string; lat: number; lng: number }) => {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          latitude: lat,
+          longitude: lng,
+          geocoding_status: 'manual',
+        })
+        .eq('id', orderId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      toast({ title: 'Coordenadas definidas manualmente!' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao definir coordenadas',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   return {
     route: routeQuery.data,
     isLoading: routeQuery.isLoading,
@@ -534,6 +586,8 @@ export function useRouteDetails(routeId: string | undefined) {
     distributeOrders: distributeOrdersMutation,
     reorderDeliveries,
     updateDepartureTimes,
+    updateOrderAddress,
+    setManualCoords,
     refetch: routeQuery.refetch,
   };
 }

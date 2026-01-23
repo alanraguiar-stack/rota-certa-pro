@@ -17,14 +17,15 @@ import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
 import { GeocodingProgress } from '@/components/route/GeocodingProgress';
+import { FailedAddressFixer } from '@/components/route/FailedAddressFixer';
 export default function RouteDetails() {
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { route, isLoading, addOrders, assignTrucks, distributeOrders, reorderDeliveries, updateDepartureTimes, refetch } = useRouteDetails(id);
+  const { route, isLoading, addOrders, assignTrucks, distributeOrders, reorderDeliveries, updateDepartureTimes, updateOrderAddress, setManualCoords, refetch } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
-  const { progress: geocodingProgress, geocodeOrders, resetProgress: resetGeocodingProgress } = useGeocoding();
+  const { progress: geocodingProgress, geocodeOrders, retryGeocode, resetProgress: resetGeocodingProgress } = useGeocoding();
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
   const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
@@ -185,6 +186,27 @@ export default function RouteDetails() {
     setShowManifest(true);
   };
 
+  // Handlers for failed address fixer
+  const handleRetryGeocode = async (orderId: string): Promise<boolean> => {
+    const success = await retryGeocode(orderId);
+    await refetch();
+    return success;
+  };
+
+  const handleUpdateAddress = async (orderId: string, newAddress: string): Promise<boolean> => {
+    try {
+      await updateOrderAddress.mutateAsync({ orderId, newAddress });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleSetManualCoords = async (orderId: string, lat: number, lng: number): Promise<void> => {
+    await setManualCoords.mutateAsync({ orderId, lat, lng });
+    await refetch();
+  };
+
   const handleShowManifest = () => {
     setShowManifest(true);
   };
@@ -230,6 +252,17 @@ export default function RouteDetails() {
             status={geocodingProgress.status}
             successCount={geocodingProgress.successCount}
             failedCount={geocodingProgress.failedCount}
+          />
+        )}
+
+        {/* Failed Address Fixer */}
+        {route.orders.some(o => o.geocoding_status === 'not_found' || o.geocoding_status === 'error') && (
+          <FailedAddressFixer
+            orders={route.orders}
+            onRetryGeocode={handleRetryGeocode}
+            onUpdateAddress={handleUpdateAddress}
+            onSetManualCoords={handleSetManualCoords}
+            isProcessing={geocodingProgress.status === 'processing'}
           />
         )}
         {/* Header */}

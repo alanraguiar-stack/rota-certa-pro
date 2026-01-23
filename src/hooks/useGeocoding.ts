@@ -110,6 +110,51 @@ export function useGeocoding() {
     return await geocodeAddress(address);
   }, []);
 
+  const retryGeocode = useCallback(async (orderId: string): Promise<boolean> => {
+    // Fetch the order's current address
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('id, address')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (error || !order) {
+      console.error('Failed to fetch order for retry:', error);
+      return false;
+    }
+
+    try {
+      const result = await geocodeAddress(order.address);
+
+      if (result.status === 'success') {
+        await supabase
+          .from('orders')
+          .update({
+            latitude: result.lat,
+            longitude: result.lng,
+            geocoding_status: 'success',
+          })
+          .eq('id', orderId);
+        return true;
+      } else {
+        await supabase
+          .from('orders')
+          .update({
+            geocoding_status: result.status === 'not_found' ? 'not_found' : 'error',
+          })
+          .eq('id', orderId);
+        return false;
+      }
+    } catch (err) {
+      console.error('Retry geocoding error:', err);
+      await supabase
+        .from('orders')
+        .update({ geocoding_status: 'error' })
+        .eq('id', orderId);
+      return false;
+    }
+  }, []);
+
   const resetProgress = useCallback(() => {
     setProgress({
       current: 0,
@@ -124,6 +169,7 @@ export function useGeocoding() {
     progress,
     geocodeOrders,
     geocodeSingleAddress,
+    retryGeocode,
     resetProgress,
   };
 }
