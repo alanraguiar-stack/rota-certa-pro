@@ -350,10 +350,14 @@ export function useRouteDetails(routeId: string | undefined) {
       }
 
       // Update route status to 'loading' (ready for loading manifest)
-      await supabase
+      const { error: statusError } = await supabase
         .from('routes')
         .update({ status: 'loading' })
         .eq('id', routeId!);
+
+      if (statusError) {
+        throw new Error(`Erro ao atualizar status: ${statusError.message}`);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });

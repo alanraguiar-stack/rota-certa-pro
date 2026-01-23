@@ -61,7 +61,10 @@ export default function RouteDetails() {
 
   // Get current workflow step
   const hasTrucks = (route?.route_trucks?.length ?? 0) > 0;
-  const activeStep = route ? getActiveStep(route, hasTrucks) : 'select_trucks';
+  const hasAssignments = route?.route_trucks?.some(
+    rt => (rt.assignments?.length ?? 0) > 0
+  ) ?? false;
+  const activeStep = route ? getActiveStep(route, hasTrucks, hasAssignments) : 'select_trucks';
 
   // Handle order reordering from the map
   const handleOrderReorder = async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
@@ -353,7 +356,7 @@ export default function RouteDetails() {
         {/* Workflow Stepper */}
         <Card>
           <CardContent className="py-4">
-            <RouteWorkflowStepper route={route} hasTrucks={hasTrucks} />
+            <RouteWorkflowStepper route={route} hasTrucks={hasTrucks} hasAssignments={hasAssignments} />
           </CardContent>
         </Card>
 

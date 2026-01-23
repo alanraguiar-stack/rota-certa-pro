@@ -68,10 +68,20 @@ interface RouteForStepper {
   loading_confirmed_by?: string | null;
 }
 
-export function getActiveStep(route: RouteForStepper | null, hasTrucks: boolean): RouteWorkflowStep {
+export function getActiveStep(
+  route: RouteForStepper | null, 
+  hasTrucks: boolean,
+  hasAssignments: boolean = false
+): RouteWorkflowStep {
   if (!route) return 'select_trucks';
   
   if (!hasTrucks) return 'select_trucks';
+  
+  // If we have assignments but status is still draft/trucks_assigned, 
+  // distribution happened but status update failed - advance to loading_manifest
+  if (hasAssignments && (route.status === 'draft' || route.status === 'trucks_assigned')) {
+    return 'loading_manifest';
+  }
   
   switch (route.status) {
     case 'draft':
@@ -100,10 +110,11 @@ export function isStepComplete(step: RouteWorkflowStep, activeStep: RouteWorkflo
 interface RouteWorkflowStepperProps {
   route: RouteForStepper | null;
   hasTrucks: boolean;
+  hasAssignments?: boolean;
 }
 
-export function RouteWorkflowStepper({ route, hasTrucks }: RouteWorkflowStepperProps) {
-  const activeStep = getActiveStep(route, hasTrucks);
+export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false }: RouteWorkflowStepperProps) {
+  const activeStep = getActiveStep(route, hasTrucks, hasAssignments);
   
   return (
     <div className="space-y-4">
