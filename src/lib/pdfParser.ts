@@ -4,9 +4,10 @@
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
-// Configure worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+// Configure worker using local bundled file
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
 export interface TextItem {
   text: string;
