@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, ArrowLeft } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Zap } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { WizardStepper } from '@/components/route/WizardStepper';
 import { OrdersInput } from '@/components/route/OrdersInput';
+import { DualFileUpload } from '@/components/route/DualFileUpload';
+import { AutoCompositionView } from '@/components/route/AutoCompositionView';
 import { WeightValidation } from '@/components/route/WeightValidation';
 import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
@@ -14,6 +16,8 @@ import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
 import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
+import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function NewRoute() {
   const navigate = useNavigate();
@@ -28,6 +32,10 @@ export default function NewRoute() {
   const [selectedTruckIds, setSelectedTruckIds] = useState<string[]>([]);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  
+  // Auto-routing state
+  const [autoResult, setAutoResult] = useState<AutoRouterResult | null>(null);
+  const [inputMode, setInputMode] = useState<'auto' | 'manual'>('auto');
 
   const validOrders = orders.filter((o) => o.isValid);
   const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
@@ -49,12 +57,36 @@ export default function NewRoute() {
       case 'validation':
         return validOrders.length > 0 && routeName.trim().length > 0;
       case 'fleet':
-        return selectedTruckIds.length > 0;
+        return inputMode === 'auto' ? autoResult !== null : selectedTruckIds.length > 0;
       case 'strategy':
         return routingStrategy !== null;
       default:
         return true;
     }
+  };
+
+  // Handle data from dual file upload (auto mode)
+  const handleAutoDataReady = (parsedOrders: ParsedOrder[], hasItemDetails: boolean) => {
+    setOrders(parsedOrders);
+    
+    // Auto-compose trucks
+    if (activeTrucks.length > 0) {
+      const result = autoComposeRoute(parsedOrders, activeTrucks, {
+        strategy: 'economy',
+        safetyMarginPercent: 10,
+        maxOccupancyPercent: 95,
+      });
+      setAutoResult(result);
+      
+      // Auto-select trucks used in composition
+      const usedTruckIds = result.compositions
+        .filter(c => c.orders.length > 0)
+        .map(c => c.truck.id);
+      setSelectedTruckIds(usedTruckIds);
+    }
+    
+    completeStep('orders');
+    setCurrentStep('validation');
   };
 
   const handleNext = () => {
@@ -119,21 +151,35 @@ export default function NewRoute() {
             <CardTitle>
               {currentStep === 'orders' && 'Inserir Pedidos'}
               {currentStep === 'validation' && 'Validar Peso Total'}
-              {currentStep === 'fleet' && 'Selecionar Frota'}
+              {currentStep === 'fleet' && 'Composição de Frota'}
               {currentStep === 'strategy' && 'Modo de Roteirização'}
               {currentStep === 'distribution' && 'Distribuição de Cargas'}
             </CardTitle>
             <CardDescription>
-              {currentStep === 'orders' && 'Importe uma planilha ou adicione pedidos manualmente'}
+              {currentStep === 'orders' && 'Carregue as vendas do dia para roteirização automática'}
               {currentStep === 'validation' && 'Confirme o peso total e dê um nome para a rota'}
-              {currentStep === 'fleet' && 'Escolha os caminhões para esta rota'}
+              {currentStep === 'fleet' && 'Revise a composição automática dos caminhões'}
               {currentStep === 'strategy' && 'Selecione a estratégia de roteirização'}
               {currentStep === 'distribution' && 'Revise e ajuste a distribuição das cargas'}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {currentStep === 'orders' && (
-              <OrdersInput orders={orders} onOrdersChange={setOrders} />
+              <Tabs value={inputMode} onValueChange={(v) => setInputMode(v as 'auto' | 'manual')}>
+                <TabsList className="grid w-full grid-cols-2 mb-4">
+                  <TabsTrigger value="auto" className="gap-2">
+                    <Zap className="h-4 w-4" />
+                    Automático
+                  </TabsTrigger>
+                  <TabsTrigger value="manual">Manual</TabsTrigger>
+                </TabsList>
+                <TabsContent value="auto">
+                  <DualFileUpload onDataReady={handleAutoDataReady} />
+                </TabsContent>
+                <TabsContent value="manual">
+                  <OrdersInput orders={orders} onOrdersChange={setOrders} />
+                </TabsContent>
+              </Tabs>
             )}
 
             {currentStep === 'validation' && (
@@ -150,7 +196,15 @@ export default function NewRoute() {
               </div>
             )}
 
-            {currentStep === 'fleet' && (
+            {currentStep === 'fleet' && inputMode === 'auto' && autoResult && (
+              <AutoCompositionView
+                result={autoResult}
+                onConfirm={handleNext}
+                isProcessing={false}
+              />
+            )}
+
+            {currentStep === 'fleet' && inputMode === 'manual' && (
               <FleetRecommendation
                 trucks={activeTrucks}
                 totalWeight={totalWeight}
@@ -171,14 +225,14 @@ export default function NewRoute() {
             {currentStep === 'distribution' && (
               <div className="space-y-4 text-center">
                 <p className="text-muted-foreground">
-                  Tudo pronto! Clique em "Criar Rota" para distribuir as cargas automaticamente.
+                  Tudo pronto! Clique em "Criar Rota" para gerar os romaneios.
                 </p>
                 <Button
                   size="lg"
                   onClick={handleCreateRoute}
                   disabled={isCreating}
                 >
-                  {isCreating ? 'Criando...' : 'Criar Rota e Distribuir'}
+                  {isCreating ? 'Criando...' : 'Criar Rota e Gerar Romaneios'}
                 </Button>
               </div>
             )}
