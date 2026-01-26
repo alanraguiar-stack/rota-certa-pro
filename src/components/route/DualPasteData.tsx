@@ -729,14 +729,14 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
         </AlertDescription>
       </Alert>
       
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         {/* Área 1 */}
         <Card className={cn(
-          'transition-all',
+          'transition-all min-w-0',
           area1.status === 'success' && 'ring-2 ring-success/50'
         )}>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2 text-base flex-wrap">
               {getAreaIcon(area1)}
               {getAreaLabel(area1, '1. Relatório Geral de Vendas')}
               {area1.status === 'success' && (
@@ -801,11 +801,11 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
         
         {/* Área 2 */}
         <Card className={cn(
-          'transition-all',
+          'transition-all min-w-0',
           area2.status === 'success' && 'ring-2 ring-success/50'
         )}>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2 text-base flex-wrap">
               {getAreaIcon(area2)}
               {getAreaLabel(area2, '2. Detalhe das Vendas')}
               {area2.status === 'success' && (
