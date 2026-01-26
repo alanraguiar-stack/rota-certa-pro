@@ -166,6 +166,8 @@ export async function parsePDFFile(file: File): Promise<PDFParseResult> {
       allItems.push(...pageItems);
     }
     
+    console.log('[PDF Parser] Total de itens de texto extraídos:', allItems.length);
+    
     if (allItems.length === 0) {
       return {
         rows: [],
@@ -176,6 +178,8 @@ export async function parsePDFFile(file: File): Promise<PDFParseResult> {
     
     // Group into rows
     const textRows = groupIntoRows(allItems);
+    
+    console.log('[PDF Parser] Total de linhas detectadas:', textRows.length);
     
     if (textRows.length < 2) {
       return {
@@ -188,11 +192,15 @@ export async function parsePDFFile(file: File): Promise<PDFParseResult> {
     // Detect columns
     const columnBoundaries = detectColumns(textRows);
     
+    console.log('[PDF Parser] Limites de colunas detectados:', columnBoundaries.length, columnBoundaries);
+    
     if (columnBoundaries.length < 2) {
       // Fallback: split by large spaces
       const rows = textRows.map(row => 
         row.map(item => item.text.trim()).filter(Boolean)
       );
+      console.log('[PDF Parser] Usando fallback - Headers:', rows[0]);
+      console.log('[PDF Parser] Usando fallback - Linha 1:', rows[1]);
       return { rows, pageCount: pdf.numPages };
     }
     
@@ -200,6 +208,15 @@ export async function parsePDFFile(file: File): Promise<PDFParseResult> {
     const rows: string[][] = textRows.map(row => 
       assignToColumns(row, columnBoundaries)
     );
+    
+    // Log diagnostic info
+    console.log('[PDF Parser] Headers detectados:', rows[0]);
+    if (rows.length > 1) {
+      console.log('[PDF Parser] Primeira linha de dados:', rows[1]);
+    }
+    if (rows.length > 2) {
+      console.log('[PDF Parser] Segunda linha de dados:', rows[2]);
+    }
     
     return { rows, pageCount: pdf.numPages };
     

@@ -1079,18 +1079,28 @@ export async function parseSalesPDF(file: File): Promise<ParseResult> {
   
   // Detect column mapping from first row (header)
   const headers = pdfResult.rows[0];
+  
+  console.log('[Order Parser] PDF Headers para mapeamento:', headers);
+  console.log('[Order Parser] Headers normalizados:', headers.map(h => normalizeText(h?.toString() || '').toLowerCase()));
+  
   let mapping = detectStructuredMapping(headers);
+  console.log('[Order Parser] Mapeamento estruturado:', mapping);
+  
   if (!mapping) {
     mapping = detectColumnMapping(headers);
+    console.log('[Order Parser] Mapeamento legacy:', mapping);
   }
   
   if (!mapping) {
+    console.warn('[Order Parser] Nenhum mapeamento encontrado!');
+    console.warn('[Order Parser] Primeira linha de dados:', pdfResult.rows[1]);
+    
     return {
       orders: [],
       errors: [{
         row: 1,
         field: 'colunas',
-        message: 'Não foi possível detectar as colunas no PDF. Verifique se o documento possui Cliente, Endereço e Peso.',
+        message: `Não foi possível detectar as colunas no PDF. Headers encontrados: ${headers.join(', ')}`,
       }],
       warnings: [`PDF contém ${pdfResult.pageCount} página(s)`],
       totalRows: 0,
