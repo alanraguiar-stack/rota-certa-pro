@@ -1,163 +1,150 @@
 
 
-# Plano: Filtrar Apenas Colunas Essenciais do Excel
+# Plano: Duas Áreas de Colagem Manual (Igual ao Upload de Planilhas)
 
-## Problema Identificado
+## Objetivo
 
-O arquivo `vendas.xlsx` possui mais de 20 colunas, mas para roteirização só precisamos de **6 colunas essenciais**:
+Modificar a aba **Manual** para ter **dois espaços de colagem** lado a lado, espelhando o design da aba **Automático** que possui duas áreas de upload.
 
-| Coluna Essencial | Uso |
-|------------------|-----|
-| `Venda` | ID do pedido |
-| `Cliente` | Nome do cliente |
-| `End. Ent.` | Endereço (rua + número) |
-| `Bairro Ent.` | Bairro de entrega |
-| `Cidade Ent.` | Cidade de entrega |
-| `Cep Ent.` | CEP de entrega |
-| `Peso Bruto` | Peso total em kg |
+## Layout Proposto
 
-**Colunas a ignorar**: Total, Ordem, Endereço (duplicado), Fantasia, Peso Liq., Número, Tipo de Saída, Loja, Bairro, Cidade, UF, Cep, Região, Data, Fechamento, NF, Dt. Prev. Entreg, etc.
+```text
+┌─────────────────────────────────────┐
+│  Instruções de Cruzamento           │
+└─────────────────────────────────────┘
 
-## Solução
+┌─────────────────┐  ┌─────────────────┐
+│ 1. Itinerário   │  │ 2. Relatório    │
+│ (Endereços)     │  │ (Itens/ADV)     │
+│                 │  │                 │
+│ [Colar]         │  │ [Colar]         │
+│ ┌─────────────┐ │  │ ┌─────────────┐ │
+│ │ Textarea    │ │  │ │ Textarea    │ │
+│ │             │ │  │ │             │ │
+│ └─────────────┘ │  │ └─────────────┘ │
+│                 │  │                 │
+│ ✓ 45 endereços  │  │ ✓ 45 pedidos    │
+└─────────────────┘  └─────────────────┘
 
-Modificar o parser para **extrair apenas os dados essenciais** e ignorar colunas desnecessárias durante o processamento.
+┌─────────────────────────────────────┐
+│  Resumo: 43 cruzados, 2 sem match   │
+└─────────────────────────────────────┘
 
-## Arquivos a Modificar
+        [Importar 43 Pedidos]
+```
+
+## Arquivo a Modificar
 
 | Arquivo | Ação |
 |---------|------|
-| `src/lib/orderParser.ts` | Ajustar detecção para priorizar colunas "Ent." e ignorar duplicados |
+| `src/components/route/OrdersInput.tsx` | Refatorar componente `PasteData` para `DualPasteData` |
 
 ## Mudanças Técnicas
 
-### 1. Priorizar Colunas com Sufixo "Ent."
+### 1. Novo Componente: `DualPasteData`
 
-O arquivo tem colunas duplicadas (ex: `Bairro` e `Bairro Ent.`). Precisamos priorizar as versões com "Ent." que são os dados de **entrega**:
-
-```typescript
-// Ordem de prioridade na busca de colunas
-// Primeiro buscar padrões com "Ent." (entrega), depois os genéricos
-
-bairro: [
-  /bairro\.?\s*ent\.?/i,  // PRIORIDADE: Bairro Ent.
-  /bairro/i,              // Fallback: Bairro genérico
-],
-cidade: [
-  /cidade\.?\s*ent\.?/i,  // PRIORIDADE: Cidade Ent.
-  /cidade/i,              // Fallback
-],
-cep: [
-  /cep\.?\s*ent\.?/i,     // PRIORIDADE: Cep Ent.
-  /^cep$/i,               // Fallback
-],
-```
-
-### 2. Detectar Formato Itinerário e Aplicar Mapeamento Correto
-
-Adicionar lógica para detectar quando o arquivo é formato Itinerário (tem colunas "Ent.") e mapear corretamente:
+Substituir o `PasteData` atual por um componente com duas áreas:
 
 ```typescript
-function detectItineraryFormat(headers: string[]): boolean {
-  const headerText = headers.join(' ').toLowerCase();
-  return /end\.?\s*ent|bairro\.?\s*ent|cidade\.?\s*ent|cep\.?\s*ent/.test(headerText);
+interface PasteAreaState {
+  text: string;
+  status: 'idle' | 'parsing' | 'success' | 'error';
+  message: string;
+  data: any;
+  detectedType?: 'itinerario' | 'adv' | 'generic';
 }
 
-// Se for formato itinerário, usar mapeamento específico
-if (detectItineraryFormat(headers)) {
-  // Forçar uso das colunas com sufixo "Ent."
-  // Ignorar colunas duplicadas (Bairro vs Bairro Ent.)
-}
-```
-
-### 3. Ignorar Colunas Não Essenciais
-
-Criar lista de exclusão para colunas que devem ser completamente ignoradas:
-
-```typescript
-const IGNORED_COLUMNS = [
-  /^total$/i,
-  /^ordem$/i,
-  /^fantasia$/i,
-  /tipo\s*de?\s*sa[íi]da/i,
-  /^loja$/i,
-  /^regi[ãa]o$/i,
-  /^n[º°]?$/i,      // Número de NF
-  /^nf$/i,
-  /fechamento/i,
-  /dt\.?\s*prev/i,
-];
-```
-
-### 4. Resolver Conflito Entre Colunas Duplicadas
-
-O arquivo tem `Bairro` e `Bairro Ent.` — precisamos garantir que só usamos `Bairro Ent.`:
-
-```typescript
-// Na função findColumn, se encontrar múltiplas correspondências,
-// priorizar a que tem "Ent." no nome
-
-const findColumn = (patterns: RegExp[]): number => {
-  let bestMatch = -1;
-  let isEntMatch = false;
+function DualPasteData({ onParsed }: { onParsed: (result: ParseResult) => void }) {
+  const [area1, setArea1] = useState<PasteAreaState>({ ... });
+  const [area2, setArea2] = useState<PasteAreaState>({ ... });
+  const [mergeSummary, setMergeSummary] = useState<MergeSummary | null>(null);
   
-  for (let idx = 0; idx < normalizedHeaders.length; idx++) {
-    for (const pattern of patterns) {
-      if (pattern.test(normalizedHeaders[idx])) {
-        const hasEnt = /ent\.?$/i.test(normalizedHeaders[idx]);
-        // Se ainda não tem match, ou se este é "Ent." e o anterior não era
-        if (bestMatch === -1 || (hasEnt && !isEntMatch)) {
-          bestMatch = idx;
-          isEntMatch = hasEnt;
-        }
-      }
-    }
+  // ...
+}
+```
+
+### 2. Detecção Automática de Formato
+
+Ao colar dados em qualquer área, o sistema detectará automaticamente o tipo:
+
+- **Itinerário**: Detectado por colunas "End. Ent.", "Bairro Ent.", "Cep Ent."
+- **ADV/Itens**: Detectado por estrutura hierárquica ou colunas de itens
+- **Genérico**: Formato padrão com Cliente, Endereço, Peso
+
+```typescript
+function detectPastedDataType(text: string): 'itinerario' | 'adv' | 'generic' {
+  const lowerText = text.toLowerCase();
+  if (/end\.?\s*ent|bairro\.?\s*ent|cep\.?\s*ent/i.test(lowerText)) {
+    return 'itinerario';
   }
-  return bestMatch;
+  if (/vendas\s*detalhadas|cliente:|qtd\.?\s*ped/i.test(lowerText)) {
+    return 'adv';
+  }
+  return 'generic';
+}
+```
+
+### 3. Cruzamento de Dados Colados
+
+Quando ambas as áreas tiverem dados válidos, o sistema cruzará pelo número da venda:
+
+```typescript
+const tryMergeData = () => {
+  if (area1.status === 'success' && area2.status === 'success') {
+    // Identificar qual é itinerário e qual é ADV
+    // Cruzar usando mergeItinerarioWithADV()
+    // Atualizar mergeSummary
+  }
 };
 ```
 
-## Mapeamento Final para `vendas.xlsx`
+### 4. Layout Responsivo
 
-| Coluna Original | Mapeamento | Status |
-|-----------------|------------|--------|
-| `Venda` | `pedido_id` | ✅ Usar |
-| `Cliente` | `client_name` | ✅ Usar |
-| `End. Ent.` | `rua` (endereço completo) | ✅ Usar |
-| `Bairro Ent.` | `bairro` | ✅ Usar |
-| `Cidade Ent.` | `cidade` | ✅ Usar |
-| `Cep Ent.` | `cep` | ✅ Usar |
-| `Peso Bruto` | `weight_kg` | ✅ Usar |
-| `UF Ent.` | `estado` | ✅ Usar |
-| `Total` | — | ❌ Ignorar |
-| `Ordem` | — | ❌ Ignorar |
-| `Endereço` | — | ❌ Ignorar (duplicado) |
-| `Bairro` | — | ❌ Ignorar (duplicado) |
-| `Cidade` | — | ❌ Ignorar (duplicado) |
-| `UF` | — | ❌ Ignorar (duplicado) |
-| `Cep` | — | ❌ Ignorar (duplicado) |
-| ... | — | ❌ Ignorar |
+- Em desktop: Duas colunas lado a lado (grid md:grid-cols-2)
+- Em mobile: Uma coluna empilhada
 
-## Endereço Construído
+### 5. Estados Visuais
 
-O sistema montará o endereço assim:
+Cada área mostrará:
+- **Idle**: Ícone de colagem + instrução
+- **Processando**: Spinner
+- **Sucesso**: Check verde + contagem de itens
+- **Erro**: X vermelho + mensagem de erro
 
-```
-R. FILOMENA FONGARO, 36, VILA FANTON, SAO PAULO - SP, 05201-160
-```
+## Fluxo de Uso
+
+1. Usuário cola dados do Itinerário (Excel) na área 1
+2. Sistema detecta como "itinerário" e extrai endereços
+3. Usuário cola dados do ADV na área 2
+4. Sistema detecta como "ADV" e extrai itens
+5. Sistema cruza automaticamente pelo número da venda
+6. Exibe resumo: "43 pedidos completos, 2 sem endereço"
+7. Botão "Importar 43 Pedidos" fica disponível
+
+## Casos de Uso
+
+| Cenário | Comportamento |
+|---------|---------------|
+| Só área 1 preenchida (itinerário) | Permite importar sem itens detalhados |
+| Só área 2 preenchida (ADV) | Alerta que faltam endereços |
+| Ambas preenchidas | Cruza e mostra resumo |
+| Formato genérico em qualquer área | Processa normalmente |
 
 ## Passos de Implementação
 
-1. **Atualizar função `findColumn`**: Priorizar colunas com sufixo "Ent." quando houver duplicatas
-2. **Atualizar padrões de regex**: Garantir que padrões específicos vêm antes dos genéricos
-3. **Adicionar log de debug**: Mostrar quais colunas foram mapeadas para facilitar diagnóstico
-4. **Testar com vendas.xlsx**: Confirmar que apenas dados essenciais são extraídos
+1. **Criar estado para duas áreas** no componente PasteData
+2. **Adicionar função de detecção de tipo** para dados colados
+3. **Implementar grid com duas áreas** de textarea
+4. **Reutilizar lógica de cruzamento** de `DualFileUpload`
+5. **Exibir resumo do cruzamento** abaixo das áreas
+6. **Botão de importar** mostra contagem correta
 
 ## Resultado Esperado
 
-1. Upload do arquivo `vendas.xlsx`
-2. Sistema detecta formato Itinerário
-3. Mapeia **apenas** as 7 colunas essenciais (Venda, Cliente, End. Ent., Bairro Ent., Cidade Ent., Cep Ent., Peso Bruto, UF Ent.)
-4. Ignora todas as outras 15+ colunas
-5. Constrói endereço completo para geocodificação
-6. Importa todos os pedidos com sucesso
+1. Aba Manual mostra duas áreas de colagem lado a lado
+2. Usuário cola dados em qualquer ordem
+3. Sistema detecta automaticamente o tipo de cada área
+4. Dados são cruzados pelo número da venda
+5. Resumo mostra quantos pedidos foram cruzados com sucesso
+6. Importação inclui endereço + itens quando disponíveis
 
