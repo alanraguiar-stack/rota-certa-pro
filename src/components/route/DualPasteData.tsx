@@ -50,8 +50,8 @@ function detectPastedDataType(text: string): 'itinerario' | 'adv' | 'generic' {
     return 'itinerario';
   }
   
-  // ADV: detectado por estrutura hierárquica ou padrões específicos
-  if (/vendas\s*detalhadas|cliente:|qtd\.?\s*ped|#\s*cliente/i.test(text)) {
+  // ADV: detectado por estrutura hierárquica ou padrões específicos (mais flexível)
+  if (/vendas\s*detalhadas|cliente:|qtd\.?\s*ped|#\s*cliente|produto|quantidade|mussarela|mortadela|presunto|salame/i.test(text)) {
     return 'adv';
   }
   
@@ -61,6 +61,92 @@ function detectPastedDataType(text: string): 'itinerario' | 'adv' | 'generic' {
   }
   
   return 'generic';
+}
+
+// Parsear dados da área 2 (Detalhe das Vendas) - SEM exigir endereço
+function parseDetailDataWithoutAddress(text: string): { orders: ParsedOrder[]; vendaIds: Set<string> } {
+  const orders: ParsedOrder[] = [];
+  const vendaIds = new Set<string>();
+  
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return { orders, vendaIds };
+  
+  // Detectar se é formato tabular
+  const hasTabSeparator = lines[0].includes('\t');
+  const separator = hasTabSeparator ? '\t' : /\s{2,}/;
+  
+  const headers = lines[0].split(separator).map(h => h.toLowerCase().trim());
+  
+  // Encontrar colunas (sem exigir endereço)
+  const findCol = (patterns: RegExp[]): number => {
+    for (let i = 0; i < headers.length; i++) {
+      for (const p of patterns) {
+        if (p.test(headers[i])) return i;
+      }
+    }
+    return -1;
+  };
+  
+  const vendaCol = findCol([/^venda$/i, /n[º°]?\s*venda/i, /pedido/i]);
+  const clienteCol = findCol([/^cliente$/i, /nome/i]);
+  const produtoCol = findCol([/produto/i, /descri[çc][ãa]o/i, /item/i]);
+  const qtdCol = findCol([/qtd/i, /quantidade/i]);
+  const pesoCol = findCol([/peso/i, /kg/i]);
+  
+  // Agrupar por venda
+  const vendaMap = new Map<string, { cliente: string; items: ParsedOrderItem[] }>();
+  
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(separator).map(c => c?.trim());
+    if (cols.length < 2) continue;
+    
+    const venda = vendaCol >= 0 ? cols[vendaCol] : `AUTO_${i}`;
+    const cliente = clienteCol >= 0 ? cols[clienteCol] : '';
+    const produto = produtoCol >= 0 ? cols[produtoCol] : cols[0] || 'Produto';
+    
+    let qtd = 1;
+    if (qtdCol >= 0 && cols[qtdCol]) {
+      qtd = parseInt(cols[qtdCol].replace(/\D/g, '')) || 1;
+    }
+    
+    let peso = 0;
+    if (pesoCol >= 0 && cols[pesoCol]) {
+      const pesoStr = cols[pesoCol].replace(/[^\d.,]/g, '').replace(',', '.');
+      peso = parseFloat(pesoStr) || 0;
+    }
+    
+    if (venda) {
+      vendaIds.add(venda);
+      
+      if (!vendaMap.has(venda)) {
+        vendaMap.set(venda, { cliente: cliente || '', items: [] });
+      }
+      
+      const entry = vendaMap.get(venda)!;
+      if (!entry.cliente && cliente) entry.cliente = cliente;
+      
+      entry.items.push({
+        product_name: produto || 'Produto',
+        weight_kg: peso,
+        quantity: qtd,
+      });
+    }
+  }
+  
+  // Converter para ParsedOrder - SEM exigir endereço
+  vendaMap.forEach((data, vendaId) => {
+    const totalWeight = data.items.reduce((sum, item) => sum + item.weight_kg * item.quantity, 0);
+    orders.push({
+      pedido_id: vendaId,
+      client_name: data.cliente,
+      address: '', // Área 2 não tem endereço - virá do cruzamento
+      weight_kg: totalWeight,
+      items: data.items,
+      isValid: true, // SEMPRE válido - endereço virá da área 1
+    });
+  });
+  
+  return { orders, vendaIds };
 }
 
 // Parsear dados de itinerário (formato tabular com colunas)
@@ -375,7 +461,38 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       return { type: 'adv', data: orders };
     }
     
-    // Formato genérico - usar parser existente
+    // Formato genérico
+    // Para área 2, usar parser sem validação de endereço
+    if (areaNum === 2) {
+      const { orders, vendaIds } = parseDetailDataWithoutAddress(text);
+      
+      if (orders.length === 0) {
+        setAreaState({
+          text,
+          status: 'error',
+          message: 'Nenhum dado reconhecido',
+          data: [],
+        });
+        return null;
+      }
+      
+      setAreaState({
+        text,
+        status: 'success',
+        message: `${orders.length} pedidos detectados`,
+        data: orders,
+        detectedType: 'adv', // Tratar como ADV para cruzamento
+      });
+      
+      toast({
+        title: 'Detalhe das Vendas detectado!',
+        description: `${orders.length} pedidos com itens`,
+      });
+      
+      return { type: 'adv', data: orders };
+    }
+    
+    // Para área 1, usar parser que exige endereço
     const result = parsePastedData(text);
     
     if (result.validRows === 0) {
