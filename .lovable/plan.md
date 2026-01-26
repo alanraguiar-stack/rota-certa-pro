@@ -1,150 +1,147 @@
 
+# Plano: Renomear Abas e Corrigir Validação de Endereço
 
-# Plano: Duas Áreas de Colagem Manual (Igual ao Upload de Planilhas)
+## Problema Identificado
 
-## Objetivo
+1. **Nomes das áreas estão incorretos**: Atualmente mostra "1. Itinerário de Vendas" e "2. Relatório ADV"
+2. **Erro de endereço na segunda área**: Ao colar dados de itens na segunda área, o sistema mostra erro "Sem endereço" — mas essa área é justamente para detalhes, não para endereços
 
-Modificar a aba **Manual** para ter **dois espaços de colagem** lado a lado, espelhando o design da aba **Automático** que possui duas áreas de upload.
+## Solução
 
-## Layout Proposto
+Renomear as áreas e remover a obrigatoriedade de endereço na área de detalhes.
 
-```text
-┌─────────────────────────────────────┐
-│  Instruções de Cruzamento           │
-└─────────────────────────────────────┘
-
-┌─────────────────┐  ┌─────────────────┐
-│ 1. Itinerário   │  │ 2. Relatório    │
-│ (Endereços)     │  │ (Itens/ADV)     │
-│                 │  │                 │
-│ [Colar]         │  │ [Colar]         │
-│ ┌─────────────┐ │  │ ┌─────────────┐ │
-│ │ Textarea    │ │  │ │ Textarea    │ │
-│ │             │ │  │ │             │ │
-│ └─────────────┘ │  │ └─────────────┘ │
-│                 │  │                 │
-│ ✓ 45 endereços  │  │ ✓ 45 pedidos    │
-└─────────────────┘  └─────────────────┘
-
-┌─────────────────────────────────────┐
-│  Resumo: 43 cruzados, 2 sem match   │
-└─────────────────────────────────────┘
-
-        [Importar 43 Pedidos]
-```
-
-## Arquivo a Modificar
+## Arquivos a Modificar
 
 | Arquivo | Ação |
 |---------|------|
-| `src/components/route/OrdersInput.tsx` | Refatorar componente `PasteData` para `DualPasteData` |
+| `src/components/route/DualPasteData.tsx` | Renomear labels e remover validação de endereço no ADV |
 
 ## Mudanças Técnicas
 
-### 1. Novo Componente: `DualPasteData`
+### 1. Renomear Labels das Áreas
 
-Substituir o `PasteData` atual por um componente com duas áreas:
+**Antes:**
+- Área 1: "1. Itinerário de Vendas" / "Itinerário (Endereços)"
+- Área 2: "2. Relatório ADV" / "Relatório ADV (Itens)"
+
+**Depois:**
+- Área 1: "1. Relatório Geral de Vendas" (contém endereços)
+- Área 2: "2. Detalhe das Vendas" (contém itens)
+
+### 2. Atualizar Descrições
+
+**Área 1:**
+- Título: "1. Relatório Geral de Vendas"
+- Descrição: "Cole dados com endereços de entrega"
+
+**Área 2:**
+- Título: "2. Detalhe das Vendas"  
+- Descrição: "Cole dados com itens detalhados"
+
+### 3. Remover Validação de Endereço no ADV
+
+No `parseADVData()`, ao criar os pedidos, **não marcar como inválido** só porque não tem endereço:
 
 ```typescript
-interface PasteAreaState {
-  text: string;
-  status: 'idle' | 'parsing' | 'success' | 'error';
-  message: string;
-  data: any;
-  detectedType?: 'itinerario' | 'adv' | 'generic';
-}
-
-function DualPasteData({ onParsed }: { onParsed: (result: ParseResult) => void }) {
-  const [area1, setArea1] = useState<PasteAreaState>({ ... });
-  const [area2, setArea2] = useState<PasteAreaState>({ ... });
-  const [mergeSummary, setMergeSummary] = useState<MergeSummary | null>(null);
-  
+// ANTES (linha 218-220):
+orders.push({
   // ...
-}
+  address: '', // ADV não tem endereço
+  isValid: false, // ❌ Marcava como inválido
+  error: 'Sem endereço - necessita cruzamento com itinerário', // ❌ Mostrava erro
+});
+
+// DEPOIS:
+orders.push({
+  // ...
+  address: '', // ADV não tem endereço
+  isValid: true, // ✅ Válido (é esperado não ter endereço)
+  // Sem mensagem de erro
+});
 ```
 
-### 2. Detecção Automática de Formato
-
-Ao colar dados em qualquer área, o sistema detectará automaticamente o tipo:
-
-- **Itinerário**: Detectado por colunas "End. Ent.", "Bairro Ent.", "Cep Ent."
-- **ADV/Itens**: Detectado por estrutura hierárquica ou colunas de itens
-- **Genérico**: Formato padrão com Cliente, Endereço, Peso
+### 4. Atualizar Função `getAreaLabel`
 
 ```typescript
-function detectPastedDataType(text: string): 'itinerario' | 'adv' | 'generic' {
-  const lowerText = text.toLowerCase();
-  if (/end\.?\s*ent|bairro\.?\s*ent|cep\.?\s*ent/i.test(lowerText)) {
-    return 'itinerario';
-  }
-  if (/vendas\s*detalhadas|cliente:|qtd\.?\s*ped/i.test(lowerText)) {
-    return 'adv';
-  }
-  return 'generic';
-}
-```
+// ANTES:
+const getAreaLabel = (area: PasteAreaState, defaultLabel: string) => {
+  if (area.detectedType === 'itinerario') return 'Itinerário (Endereços)';
+  if (area.detectedType === 'adv') return 'Relatório ADV (Itens)';
+  // ...
+};
 
-### 3. Cruzamento de Dados Colados
-
-Quando ambas as áreas tiverem dados válidos, o sistema cruzará pelo número da venda:
-
-```typescript
-const tryMergeData = () => {
-  if (area1.status === 'success' && area2.status === 'success') {
-    // Identificar qual é itinerário e qual é ADV
-    // Cruzar usando mergeItinerarioWithADV()
-    // Atualizar mergeSummary
-  }
+// DEPOIS:
+const getAreaLabel = (area: PasteAreaState, defaultLabel: string) => {
+  if (area.detectedType === 'itinerario') return 'Relatório Geral de Vendas';
+  if (area.detectedType === 'adv') return 'Detalhe das Vendas';
+  // ...
 };
 ```
 
-### 4. Layout Responsivo
+### 5. Atualizar Labels Padrão nas Cards
 
-- Em desktop: Duas colunas lado a lado (grid md:grid-cols-2)
-- Em mobile: Uma coluna empilhada
+```typescript
+// ANTES (linha 625):
+{getAreaLabel(area1, '1. Itinerário de Vendas')}
 
-### 5. Estados Visuais
+// DEPOIS:
+{getAreaLabel(area1, '1. Relatório Geral de Vendas')}
 
-Cada área mostrará:
-- **Idle**: Ícone de colagem + instrução
-- **Processando**: Spinner
-- **Sucesso**: Check verde + contagem de itens
-- **Erro**: X vermelho + mensagem de erro
+// ANTES (linha 694):
+{getAreaLabel(area2, '2. Relatório ADV')}
 
-## Fluxo de Uso
+// DEPOIS:
+{getAreaLabel(area2, '2. Detalhe das Vendas')}
+```
 
-1. Usuário cola dados do Itinerário (Excel) na área 1
-2. Sistema detecta como "itinerário" e extrai endereços
-3. Usuário cola dados do ADV na área 2
-4. Sistema detecta como "ADV" e extrai itens
+### 6. Atualizar Toast Messages
+
+```typescript
+// ANTES:
+toast({ title: 'Itinerário detectado!' });
+toast({ title: 'Relatório ADV detectado!' });
+
+// DEPOIS:
+toast({ title: 'Relatório Geral detectado!' });
+toast({ title: 'Detalhe das Vendas detectado!' });
+```
+
+## Mudanças Visuais
+
+### Antes
+```text
+┌─────────────────┐  ┌─────────────────┐
+│ 1. Itinerário   │  │ 2. Relatório ADV│
+│ de Vendas       │  │                 │
+│ Cole endereços  │  │ Cole itens      │
+│                 │  │ ❌ Erro: sem    │
+│                 │  │ endereço        │
+└─────────────────┘  └─────────────────┘
+```
+
+### Depois
+```text
+┌─────────────────┐  ┌─────────────────┐
+│ 1. Relatório    │  │ 2. Detalhe das  │
+│ Geral de Vendas │  │ Vendas          │
+│ Cole endereços  │  │ Cole itens      │
+│                 │  │ ✓ 45 pedidos    │
+│                 │  │ detectados      │
+└─────────────────┘  └─────────────────┘
+```
+
+## Fluxo Corrigido
+
+1. Usuário cola dados gerais (com endereços) na área 1
+2. Sistema detecta como "Relatório Geral" e mostra "✓ 45 endereços"
+3. Usuário cola detalhes (itens) na área 2
+4. Sistema detecta como "Detalhe das Vendas" e mostra "✓ 45 pedidos" **sem erro**
 5. Sistema cruza automaticamente pelo número da venda
-6. Exibe resumo: "43 pedidos completos, 2 sem endereço"
-7. Botão "Importar 43 Pedidos" fica disponível
-
-## Casos de Uso
-
-| Cenário | Comportamento |
-|---------|---------------|
-| Só área 1 preenchida (itinerário) | Permite importar sem itens detalhados |
-| Só área 2 preenchida (ADV) | Alerta que faltam endereços |
-| Ambas preenchidas | Cruza e mostra resumo |
-| Formato genérico em qualquer área | Processa normalmente |
-
-## Passos de Implementação
-
-1. **Criar estado para duas áreas** no componente PasteData
-2. **Adicionar função de detecção de tipo** para dados colados
-3. **Implementar grid com duas áreas** de textarea
-4. **Reutilizar lógica de cruzamento** de `DualFileUpload`
-5. **Exibir resumo do cruzamento** abaixo das áreas
-6. **Botão de importar** mostra contagem correta
+6. Botão "Importar X Pedidos" fica disponível
 
 ## Resultado Esperado
 
-1. Aba Manual mostra duas áreas de colagem lado a lado
-2. Usuário cola dados em qualquer ordem
-3. Sistema detecta automaticamente o tipo de cada área
-4. Dados são cruzados pelo número da venda
-5. Resumo mostra quantos pedidos foram cruzados com sucesso
-6. Importação inclui endereço + itens quando disponíveis
-
+- Primeira área mostra "1. Relatório Geral de Vendas"
+- Segunda área mostra "2. Detalhe das Vendas"
+- Colar dados de itens na segunda área **não mostra erro de endereço**
+- Cruzamento funciona normalmente usando endereços da primeira área
