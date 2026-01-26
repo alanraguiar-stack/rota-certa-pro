@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { decodeFileContent, normalizeText } from './encoding';
 import { parsePDFFile, isPDFFile, isExcelFile } from './pdfParser';
+import { parseADVSalesReport } from './advParser';
 
 // Validation constants
 const MIN_WEIGHT_KG = 0.01;
@@ -1051,8 +1052,26 @@ export function parseRowsStructured(
 
 /**
  * Parse PDF file with sales data
+ * Supports both tabular format and ADV hierarchical format
  */
 export async function parseSalesPDF(file: File): Promise<ParseResult> {
+  console.log('[Order Parser] Iniciando processamento de PDF:', file.name);
+  
+  // Primeiro, tentar o parser ADV especializado
+  try {
+    const advResult = await parseADVSalesReport(file);
+    
+    if (advResult && advResult.orders.length > 0) {
+      console.log('[Order Parser] PDF processado como formato ADV:', advResult.orders.length, 'pedidos');
+      return advResult;
+    }
+  } catch (error) {
+    console.log('[Order Parser] Parser ADV não aplicável:', error);
+  }
+  
+  // Fallback: parser genérico tabular
+  console.log('[Order Parser] Tentando parser genérico tabular');
+  
   const pdfResult = await parsePDFFile(file);
   
   if (pdfResult.error) {

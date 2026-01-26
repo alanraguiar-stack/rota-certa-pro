@@ -245,3 +245,45 @@ export function isExcelFile(file: File): boolean {
          file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
          file.type === 'application/vnd.ms-excel';
 }
+
+/**
+ * Extract raw text from PDF as array of lines (preserving reading order)
+ * Used for hierarchical document parsing (like ADV reports)
+ */
+export async function extractRawTextFromPDF(file: File): Promise<string[]> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    
+    const allLines: string[] = [];
+    
+    // Extract text from all pages
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const pageItems = await extractTextFromPage(page);
+      
+      if (pageItems.length === 0) continue;
+      
+      // Group into rows by Y position
+      const textRows = groupIntoRows(pageItems);
+      
+      // Convert each row to a single line of text
+      for (const row of textRows) {
+        // Sort by X position and join with spaces
+        row.sort((a, b) => a.x - b.x);
+        const lineText = row.map(item => item.text).join(' ');
+        if (lineText.trim()) {
+          allLines.push(lineText);
+        }
+      }
+    }
+    
+    console.log('[PDF Parser] Raw text extraction - Total lines:', allLines.length);
+    
+    return allLines;
+    
+  } catch (error) {
+    console.error('[PDF Parser] Raw text extraction error:', error);
+    return [];
+  }
+}
