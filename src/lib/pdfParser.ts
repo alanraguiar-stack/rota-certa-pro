@@ -1,6 +1,7 @@
 /**
  * Parser for PDF files - extracts tabular data from PDFs
  * Uses pdfjs-dist to extract text and reconstruct tables
+ * @version 2 - Using local bundled worker
  */
 
 import * as pdfjsLib from 'pdfjs-dist';
