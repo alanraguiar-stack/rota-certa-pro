@@ -4,6 +4,7 @@ import {
   ClipboardPaste, Download, CheckCircle2, XCircle, Eye, 
   FileText, Table, RefreshCcw, Package
 } from 'lucide-react';
+import { DualPasteData } from './DualPasteData';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -795,7 +796,18 @@ export function OrdersInput({ orders, onOrdersChange }: OrdersInputProps) {
                 <FileUpload onParsed={handleParseResult} />
               </TabsContent>
               <TabsContent value="paste">
-                <PasteData onParsed={handleParseResult} />
+                <DualPasteData onParsed={(parsedOrders) => {
+                  // Adicionar os pedidos diretamente
+                  const validNewOrders = parsedOrders.filter(o => o.isValid);
+                  onOrdersChange([...orders, ...validNewOrders]);
+                  
+                  toast({
+                    title: `${validNewOrders.length} pedidos importados!`,
+                    description: validNewOrders.length > 0 
+                      ? `Peso total: ${formatWeight(validNewOrders.reduce((sum, o) => sum + o.weight_kg, 0))}`
+                      : undefined,
+                  });
+                }} />
               </TabsContent>
               <TabsContent value="manual">
                 <ManualOrderForm onAdd={handleAddOrder} />
