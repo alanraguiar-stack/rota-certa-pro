@@ -21,12 +21,13 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { parseExcelWithValidation, downloadTemplate } from '@/lib/orderParser';
 import { 
-  parseItemDetailExcel, 
+  parseItemDetailFile, 
   generateItemDetailTemplate,
   ParsedItemDetail,
   ItemDetailParseResult
 } from '@/lib/itemDetailParser';
 import { mergeItemsIntoOrders } from '@/lib/autoRouterEngine';
+import { isPDFFile, isExcelFile } from '@/lib/pdfParser';
 
 interface DualFileUploadProps {
   onDataReady: (orders: ParsedOrder[], hasItemDetails: boolean) => void;
@@ -68,17 +69,23 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   
   // Handle sales file upload
   const handleSalesFile = async (file: File) => {
-    if (!file.name.match(/\.xlsx?$/i)) {
+    const isValidFormat = isPDFFile(file) || isExcelFile(file);
+    
+    if (!isValidFormat) {
       setSalesUpload({
         file,
         status: 'error',
-        message: 'Formato inválido. Use arquivo Excel (.xlsx)',
+        message: 'Formato inválido. Use Excel (.xlsx) ou PDF',
         data: null,
       });
       return;
     }
     
-    setSalesUpload({ file, status: 'processing', message: 'Processando...', data: null });
+    const processingMessage = isPDFFile(file) 
+      ? 'Extraindo dados do PDF...' 
+      : 'Processando planilha...';
+    
+    setSalesUpload({ file, status: 'processing', message: processingMessage, data: null });
     
     try {
       const result = await parseExcelWithValidation(file);
@@ -105,10 +112,13 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         description: `${result.validRows} pedidos prontos para roteirização`,
       });
     } catch (error) {
+      console.error('Error parsing sales file:', error);
       setSalesUpload({
         file,
         status: 'error',
-        message: 'Erro ao processar arquivo',
+        message: isPDFFile(file) 
+          ? 'Erro ao processar PDF. Verifique se o arquivo possui texto selecionável.' 
+          : 'Erro ao processar arquivo',
         data: null,
       });
     }
@@ -116,20 +126,26 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   
   // Handle items file upload
   const handleItemsFile = async (file: File) => {
-    if (!file.name.match(/\.xlsx?$/i)) {
+    const isValidFormat = isPDFFile(file) || isExcelFile(file);
+    
+    if (!isValidFormat) {
       setItemsUpload({
         file,
         status: 'error',
-        message: 'Formato inválido. Use arquivo Excel (.xlsx)',
+        message: 'Formato inválido. Use Excel (.xlsx) ou PDF',
         data: null,
       });
       return;
     }
     
-    setItemsUpload({ file, status: 'processing', message: 'Processando...', data: null });
+    const processingMessage = isPDFFile(file) 
+      ? 'Extraindo dados do PDF...' 
+      : 'Processando planilha...';
+    
+    setItemsUpload({ file, status: 'processing', message: processingMessage, data: null });
     
     try {
-      const result = await parseItemDetailExcel(file);
+      const result = await parseItemDetailFile(file);
       
       if (result.validRows === 0) {
         setItemsUpload({
@@ -153,10 +169,13 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         description: `${result.validRows} itens de produtos identificados`,
       });
     } catch (error) {
+      console.error('Error parsing items file:', error);
       setItemsUpload({
         file,
         status: 'error',
-        message: 'Erro ao processar arquivo',
+        message: isPDFFile(file) 
+          ? 'Erro ao processar PDF. Verifique se o arquivo possui texto selecionável.' 
+          : 'Erro ao processar arquivo',
         data: null,
       });
     }
@@ -210,7 +229,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
       <Alert>
         <FileSpreadsheet className="h-4 w-4" />
         <AlertDescription>
-          <strong>Fluxo Automatizado:</strong> Carregue a planilha de vendas do dia e, opcionalmente, 
+          <strong>Fluxo Automatizado:</strong> Carregue a planilha de vendas (Excel ou PDF) e, opcionalmente, 
           o detalhamento dos itens por pedido. O sistema irá compor os caminhões automaticamente.
         </AlertDescription>
       </Alert>
@@ -229,8 +248,8 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
                 <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
               )}
             </CardTitle>
-            <CardDescription>
-              Pedidos com cliente, endereço e peso
+          <CardDescription>
+              Pedidos com cliente, endereço e peso (Excel ou PDF)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -268,7 +287,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             <Input
               ref={salesInputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.pdf"
               onChange={(e) => e.target.files?.[0] && handleSalesFile(e.target.files[0])}
               className="hidden"
               id="sales-upload"
@@ -324,7 +343,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
               )}
             </CardTitle>
             <CardDescription>
-              Lista de produtos por Pedido_ID
+              Lista de produtos por Pedido_ID (Excel ou PDF)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -362,7 +381,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             <Input
               ref={itemsInputRef}
               type="file"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.pdf"
               onChange={(e) => e.target.files?.[0] && handleItemsFile(e.target.files[0])}
               className="hidden"
               id="items-upload"

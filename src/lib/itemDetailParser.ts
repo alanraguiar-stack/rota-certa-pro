@@ -1,10 +1,11 @@
 /**
  * Parser para documento de detalhamento de itens por pedido
- * Suporta CSV, Excel e texto estruturado
+ * Suporta CSV, Excel, PDF e texto estruturado
  */
 
 import * as XLSX from 'xlsx';
 import { normalizeText } from './encoding';
+import { parsePDFFile, isPDFFile } from './pdfParser';
 
 export interface ParsedItemDetail {
   pedido_id: string;
@@ -239,6 +240,93 @@ export function parseItemDetailText(text: string): ItemDetailParseResult {
 }
 
 /**
+ * Parse PDF file with item details
+ */
+export async function parseItemDetailPDF(file: File): Promise<ItemDetailParseResult> {
+  const pdfResult = await parsePDFFile(file);
+  
+  if (pdfResult.error) {
+    return {
+      items: [],
+      errors: [{ row: 0, message: pdfResult.error }],
+      totalRows: 0,
+      validRows: 0,
+    };
+  }
+  
+  if (pdfResult.rows.length < 2) {
+    return {
+      items: [],
+      errors: [{ row: 0, message: 'Nenhum dado tabular encontrado no PDF' }],
+      totalRows: 0,
+      validRows: 0,
+    };
+  }
+  
+  // Detect column mapping
+  const headers = pdfResult.rows[0];
+  const mapping = detectItemColumnMapping(headers);
+  
+  if (mapping.pedido_id === undefined || mapping.product === undefined) {
+    return {
+      items: [],
+      errors: [{ row: 1, message: 'Colunas Pedido_ID e Produto são obrigatórias' }],
+      totalRows: pdfResult.rows.length - 1,
+      validRows: 0,
+    };
+  }
+  
+  const items: ParsedItemDetail[] = [];
+  const errors: Array<{ row: number; message: string }> = [];
+  
+  for (let i = 1; i < pdfResult.rows.length; i++) {
+    const row = pdfResult.rows[i];
+    
+    const pedidoId = row[mapping.pedido_id]?.trim() || '';
+    const product = normalizeText(row[mapping.product]?.trim() || '');
+    
+    let weight = 0;
+    if (mapping.weight !== undefined) {
+      weight = parseFloat(row[mapping.weight]?.replace(',', '.') || '0');
+    }
+    
+    let quantity = 1;
+    if (mapping.quantity !== undefined) {
+      quantity = parseInt(row[mapping.quantity] || '1', 10);
+    }
+    
+    if (!pedidoId || !product || isNaN(weight) || weight <= 0) {
+      errors.push({ row: i + 1, message: 'Dados incompletos ou inválidos' });
+      continue;
+    }
+    
+    items.push({
+      pedido_id: pedidoId,
+      product_name: product,
+      weight_kg: weight,
+      quantity: isNaN(quantity) || quantity < 1 ? 1 : quantity,
+    });
+  }
+  
+  return {
+    items,
+    errors,
+    totalRows: pdfResult.rows.length - 1,
+    validRows: items.length,
+  };
+}
+
+/**
+ * Parse item detail file (Excel or PDF)
+ */
+export async function parseItemDetailFile(file: File): Promise<ItemDetailParseResult> {
+  if (isPDFFile(file)) {
+    return parseItemDetailPDF(file);
+  }
+  return parseItemDetailExcel(file);
+}
+
+/**
  * Generate template for item details
  */
 export function generateItemDetailTemplate(): void {
@@ -284,6 +372,10 @@ export function generateItemDetailTemplate(): void {
     ['- O Pedido_ID deve ser idêntico ao informado na planilha de vendas'],
     ['- Cada linha representa um item do pedido'],
     ['- Um pedido pode ter múltiplas linhas (múltiplos itens)'],
+    [''],
+    ['FORMATOS ACEITOS:'],
+    ['- Excel (.xlsx, .xls)'],
+    ['- PDF (com texto selecionável e estrutura tabular)'],
   ];
   
   const wsInstr = XLSX.utils.aoa_to_sheet(instructions);
