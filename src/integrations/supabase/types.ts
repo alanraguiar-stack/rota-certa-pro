@@ -338,35 +338,47 @@ export type Database = {
       }
       trucks: {
         Row: {
+          ano: number | null
           capacity_kg: number
           created_at: string
           id: string
           is_active: boolean
+          marca: string | null
           max_deliveries: number | null
           model: string
+          observacoes: string | null
           plate: string
+          renavam: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          ano?: number | null
           capacity_kg: number
           created_at?: string
           id?: string
           is_active?: boolean
+          marca?: string | null
           max_deliveries?: number | null
           model: string
+          observacoes?: string | null
           plate: string
+          renavam?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          ano?: number | null
           capacity_kg?: number
           created_at?: string
           id?: string
           is_active?: boolean
+          marca?: string | null
           max_deliveries?: number | null
           model?: string
+          observacoes?: string | null
           plate?: string
+          renavam?: string | null
           updated_at?: string
           user_id?: string
         }

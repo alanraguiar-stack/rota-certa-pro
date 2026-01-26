@@ -101,6 +101,10 @@ export interface Truck {
   capacity_kg: number;
   max_deliveries: number | null;
   is_active: boolean;
+  marca: string | null;
+  ano: number | null;
+  renavam: string | null;
+  observacoes: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -186,6 +190,10 @@ export interface TruckFormData {
   model: string;
   capacity_kg: number;
   max_deliveries?: number;
+  marca?: string;
+  ano?: number;
+  renavam?: string;
+  observacoes?: string;
 }
 
 export interface OrderFormData {

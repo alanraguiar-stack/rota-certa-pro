@@ -36,6 +36,10 @@ export function useTrucks() {
           model: data.model,
           capacity_kg: data.capacity_kg,
           max_deliveries: data.max_deliveries || null,
+          marca: data.marca || null,
+          ano: data.ano || null,
+          renavam: data.renavam || null,
+          observacoes: data.observacoes || null,
         })
         .select()
         .single();
