@@ -66,50 +66,63 @@ export interface TemplateValidation {
 
 /**
  * Common column name patterns for auto-detection
+ * PRIORITY: Patterns with "Ent." (delivery) suffix come FIRST to be matched before generic ones
  */
 const COLUMN_PATTERNS = {
   pedidoId: [
+    /^venda$/i, /n[º°]?\s*venda/i,  // Itinerary format FIRST
     /pedido.?id/i, /pedido/i, /order.?id/i, /id.?pedido/i, /numero.?pedido/i,
-    /^venda$/i, /n[º°]?\s*venda/i  // Itinerary format
   ],
   clientName: [
-    /cliente/i, /nome/i, /customer/i, /name/i, /razao/i, /fantasia/i, 
+    /^cliente$/i,  // Exact match first
+    /cliente/i, /nome/i, /customer/i, /name/i, /razao/i, 
     /destinat[áa]rio/i, /empresa/i, /company/i
+    // NOTE: "fantasia" removed - we want "Cliente" not "Fantasia" for itinerary
   ],
   rua: [
+    /end\.?\s*ent\.?/i, /endereco\s*ent/i,  // Itinerary: End. Ent. FIRST (priority)
     /^rua$/i, /logradouro/i, /street/i,
-    /end\.?\s*ent\.?/i, /endereco\s*ent/i  // Itinerary: End. Ent.
   ],
   numero: [
-    /^n[uú]mero$/i, /^num$/i, /^n[º°]?$/i, /number/i
+    /^n[uú]mero$/i, /^num$/i, /number/i
+    // NOTE: /^n[º°]?$/i removed as it conflicts with NF number
   ],
   bairro: [
-    /bairro/i, /neighborhood/i, /distrito/i,
-    /bairro\.?\s*ent\.?/i  // Itinerary: Bairro Ent.
+    /bairro\.?\s*ent\.?/i,  // Itinerary: Bairro Ent. FIRST (priority)
+    /^bairro$/i, /neighborhood/i, /distrito/i,
   ],
   cidade: [
-    /cidade/i, /city/i, /munic[íi]pio/i,
-    /cidade\.?\s*ent\.?/i  // Itinerary: Cidade Ent.
+    /cidade\.?\s*ent\.?/i,  // Itinerary: Cidade Ent. FIRST (priority)
+    /^cidade$/i, /city/i, /munic[íi]pio/i,
   ],
   estado: [
+    /uf\.?\s*ent\.?/i,  // Itinerary: UF Ent. FIRST (priority)
     /^estado$/i, /^uf$/i, /state/i,
-    /uf\.?\s*ent\.?/i  // Itinerary: UF Ent.
   ],
   cep: [
-    /^cep$/i, /cep\.?\s*ent\.?/i, /codigo\s*postal/i, /postal/i  // Itinerary: Cep Ent.
+    /cep\.?\s*ent\.?/i,  // Itinerary: Cep Ent. FIRST (priority)
+    /^cep$/i, /codigo\s*postal/i, /postal/i,
   ],
   address: [
     /endere[çc]o/i, /address/i, /local/i, /destino/i, /location/i
   ],
   weight: [
+    /peso\s*bruto/i,  // Itinerary: Peso Bruto FIRST (priority)
     /peso/i, /weight/i, /kg/i, /kilos?/i, /massa/i, /carga/i,
-    /peso\s*bruto/i, /peso\s*l[íi]q/i  // Itinerary: Peso Bruto
   ],
   product: [
     /produto/i, /product/i, /item/i, /descri[çc][ãa]o/i, /description/i,
     /mercadoria/i, /material/i, /artigo/i
   ],
 };
+
+/**
+ * Detect if file is in Itinerary format (has "Ent." suffix columns)
+ */
+function detectItineraryFormat(headers: string[]): boolean {
+  const headerText = headers.join(' ').toLowerCase();
+  return /end\.?\s*ent|bairro\.?\s*ent|cidade\.?\s*ent|cep\.?\s*ent/i.test(headerText);
+}
 
 /**
  * Detect column mapping from header row (legacy format - combined address)
@@ -695,28 +708,62 @@ export function validateTemplateStructure(headers: string[]): TemplateValidation
 export function detectStructuredMapping(headers: string[]): ColumnMapping | null {
   const normalizedHeaders = headers.map(h => normalizeText(h?.toString() || '').toLowerCase());
   
-  const findColumn = (patterns: RegExp[]): number => {
+  // Check if this is itinerary format (has "Ent." columns)
+  const isItineraryFormat = detectItineraryFormat(headers);
+  
+  /**
+   * Find column index with priority for "Ent." suffix in itinerary format
+   * This ensures we use "Bairro Ent." instead of "Bairro" when both exist
+   */
+  const findColumnWithPriority = (patterns: RegExp[]): number => {
+    let bestMatch = -1;
+    let isEntMatch = false;
+    
     for (let idx = 0; idx < normalizedHeaders.length; idx++) {
       for (const pattern of patterns) {
         if (pattern.test(normalizedHeaders[idx])) {
-          return idx;
+          const hasEnt = /ent\.?$/i.test(normalizedHeaders[idx]);
+          
+          // If this is an "Ent." match (delivery), or we don't have any match yet
+          if (bestMatch === -1 || (hasEnt && !isEntMatch)) {
+            bestMatch = idx;
+            isEntMatch = hasEnt;
+          }
+          
+          // If we found an "Ent." match, stop looking for this pattern
+          if (hasEnt) break;
         }
       }
     }
-    return -1;
+    return bestMatch;
   };
   
-  const pedidoIdIdx = findColumn(COLUMN_PATTERNS.pedidoId);
-  const clientNameIdx = findColumn(COLUMN_PATTERNS.clientName);
-  const ruaIdx = findColumn(COLUMN_PATTERNS.rua);
-  const numeroIdx = findColumn(COLUMN_PATTERNS.numero);
-  const bairroIdx = findColumn(COLUMN_PATTERNS.bairro);
-  const cidadeIdx = findColumn(COLUMN_PATTERNS.cidade);
-  const estadoIdx = findColumn(COLUMN_PATTERNS.estado);
-  const cepIdx = findColumn(COLUMN_PATTERNS.cep);
-  const addressIdx = findColumn(COLUMN_PATTERNS.address);
-  const weightIdx = findColumn(COLUMN_PATTERNS.weight);
-  const productIdx = findColumn(COLUMN_PATTERNS.product);
+  const pedidoIdIdx = findColumnWithPriority(COLUMN_PATTERNS.pedidoId);
+  const clientNameIdx = findColumnWithPriority(COLUMN_PATTERNS.clientName);
+  const ruaIdx = findColumnWithPriority(COLUMN_PATTERNS.rua);
+  const numeroIdx = findColumnWithPriority(COLUMN_PATTERNS.numero);
+  const bairroIdx = findColumnWithPriority(COLUMN_PATTERNS.bairro);
+  const cidadeIdx = findColumnWithPriority(COLUMN_PATTERNS.cidade);
+  const estadoIdx = findColumnWithPriority(COLUMN_PATTERNS.estado);
+  const cepIdx = findColumnWithPriority(COLUMN_PATTERNS.cep);
+  const addressIdx = findColumnWithPriority(COLUMN_PATTERNS.address);
+  const weightIdx = findColumnWithPriority(COLUMN_PATTERNS.weight);
+  const productIdx = findColumnWithPriority(COLUMN_PATTERNS.product);
+  
+  // Debug log for mapping (helps diagnose issues)
+  if (isItineraryFormat) {
+    console.log('[Itinerary Parser] Formato de itinerário detectado');
+    console.log('[Itinerary Parser] Mapeamento:', {
+      pedidoId: pedidoIdIdx !== -1 ? headers[pedidoIdIdx] : 'N/A',
+      cliente: clientNameIdx !== -1 ? headers[clientNameIdx] : 'N/A',
+      rua: ruaIdx !== -1 ? headers[ruaIdx] : 'N/A',
+      bairro: bairroIdx !== -1 ? headers[bairroIdx] : 'N/A',
+      cidade: cidadeIdx !== -1 ? headers[cidadeIdx] : 'N/A',
+      estado: estadoIdx !== -1 ? headers[estadoIdx] : 'N/A',
+      cep: cepIdx !== -1 ? headers[cepIdx] : 'N/A',
+      peso: weightIdx !== -1 ? headers[weightIdx] : 'N/A',
+    });
+  }
   
   // Must have at least client and weight
   if (clientNameIdx === -1 || weightIdx === -1) {
@@ -726,7 +773,6 @@ export function detectStructuredMapping(headers: string[]): ColumnMapping | null
   // Must have either structured address OR combined address
   // Itinerary format: has rua (End. Ent. which contains street+number), bairro, cidade
   const hasStructured = ruaIdx !== -1 && cidadeIdx !== -1;
-  const hasFullStructured = ruaIdx !== -1 && numeroIdx !== -1 && cidadeIdx !== -1;
   const hasCombined = addressIdx !== -1;
   
   if (!hasStructured && !hasCombined) {
