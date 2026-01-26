@@ -213,11 +213,10 @@ function parseADVData(text: string): { orders: ParsedOrder[]; vendaIds: Set<stri
       orders.push({
         pedido_id: vendaId,
         client_name: data.cliente,
-        address: '', // ADV não tem endereço
+        address: '', // ADV não tem endereço - será preenchido pelo cruzamento
         weight_kg: totalWeight,
         items: data.items,
-        isValid: false, // Precisa de endereço
-        error: 'Sem endereço - necessita cruzamento com itinerário',
+        isValid: true, // Válido - endereço virá do Relatório Geral
       });
     });
   }
@@ -340,7 +339,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       });
       
       toast({
-        title: 'Itinerário detectado!',
+        title: 'Relatório Geral detectado!',
         description: `${records.length} endereços de entrega`,
       });
       
@@ -369,7 +368,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       });
       
       toast({
-        title: 'Relatório ADV detectado!',
+        title: 'Detalhe das Vendas detectado!',
         description: `${orders.length} pedidos com itens`,
       });
       
@@ -553,11 +552,11 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       }
     }
     
-    // Alertar se só ADV
+    // Alertar se só Detalhe das Vendas (sem endereços)
     if ((area1.detectedType === 'adv' || area2.detectedType === 'adv') && !mergedOrders) {
       toast({
         title: 'Dados incompletos',
-        description: 'O relatório ADV não tem endereços. Cole também o itinerário.',
+        description: 'O Detalhe das Vendas não tem endereços. Cole também o Relatório Geral.',
         variant: 'destructive',
       });
       return;
@@ -596,8 +595,8 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
   };
   
   const getAreaLabel = (area: PasteAreaState, defaultLabel: string) => {
-    if (area.detectedType === 'itinerario') return 'Itinerário (Endereços)';
-    if (area.detectedType === 'adv') return 'Relatório ADV (Itens)';
+    if (area.detectedType === 'itinerario') return 'Relatório Geral de Vendas';
+    if (area.detectedType === 'adv') return 'Detalhe das Vendas';
     if (area.detectedType === 'generic') return 'Dados de Pedidos';
     return defaultLabel;
   };
@@ -608,8 +607,8 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       <Alert>
         <ClipboardPaste className="h-4 w-4" />
         <AlertDescription>
-          <strong>Cruzamento Manual:</strong> Cole os dados do <strong>Itinerário de Vendas</strong> (endereços) 
-          e do <strong>Relatório ADV</strong> (itens) nas áreas abaixo. O sistema cruzará automaticamente pelo número da venda.
+          <strong>Cruzamento Manual:</strong> Cole os dados do <strong>Relatório Geral de Vendas</strong> (endereços) 
+          e do <strong>Detalhe das Vendas</strong> (itens) nas áreas abaixo. O sistema cruzará automaticamente pelo número da venda.
         </AlertDescription>
       </Alert>
       
@@ -622,7 +621,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               {getAreaIcon(area1)}
-              {getAreaLabel(area1, '1. Itinerário de Vendas')}
+              {getAreaLabel(area1, '1. Relatório Geral de Vendas')}
               {area1.status === 'success' && (
                 <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
               )}
@@ -691,7 +690,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               {getAreaIcon(area2)}
-              {getAreaLabel(area2, '2. Relatório ADV')}
+              {getAreaLabel(area2, '2. Detalhe das Vendas')}
               {area2.status === 'success' && (
                 <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
               )}
