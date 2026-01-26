@@ -11,7 +11,7 @@
 
 import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { ParseResult, ValidationError } from './orderParser';
-import { extractRawTextFromPDF } from './pdfParser';
+import { extractRawTextFromPDF, parsePDFFile } from './pdfParser';
 import { normalizeText } from './encoding';
 
 export interface ADVSale {
@@ -25,6 +25,20 @@ export interface ADVClient {
   name: string;
   cpf_cnpj?: string;
   sales: ADVSale[];
+}
+
+/**
+ * Registro extraído do PDF de Itinerário de Vendas
+ * Contém endereços de entrega por venda
+ */
+export interface ItinerarioRecord {
+  venda_id: string;
+  client_name: string;
+  address: string;      // End. Ent. (rua + número)
+  neighborhood: string; // Bairro Ent.
+  city: string;         // Cidade Ent.
+  cep: string;          // Cep Ent.
+  weight_kg: number;    // Peso Bruto
 }
 
 /**
@@ -44,8 +58,30 @@ export function isADVFormat(lines: string[]): boolean {
   // Precisa ter pelo menos 2 padrões correspondentes
   const matchCount = patterns.filter(p => p.test(text)).length;
   
-  console.log('[ADV Parser] Detecção de formato - Matches:', matchCount);
+  console.log('[ADV Parser] Detecção de formato ADV - Matches:', matchCount);
   
+  return matchCount >= 2;
+}
+
+/**
+ * Detecta se o PDF é do formato Itinerário de Vendas
+ * Contém colunas: Venda, Cliente, End. Ent., Bairro Ent., Cidade Ent., Cep Ent., Peso Bruto
+ */
+export function isItinerarioFormat(text: string): boolean {
+  const patterns = [
+    /end\.?\s*ent\.?/i,          // End. Ent.
+    /bairro\.?\s*ent\.?/i,       // Bairro Ent.
+    /cidade\.?\s*ent\.?/i,       // Cidade Ent.
+    /vendas?.?itiner[áa]rio/i,   // Vendas_Itinerario
+    /cep\.?\s*ent\.?/i,          // Cep Ent.
+    /peso\s*bruto/i,             // Peso Bruto
+  ];
+  
+  const matchCount = patterns.filter(p => p.test(text)).length;
+  
+  console.log('[Itinerário Parser] Detecção de formato - Matches:', matchCount);
+  
+  // Se encontrar 2+ padrões, é formato itinerário
   return matchCount >= 2;
 }
 
@@ -331,4 +367,252 @@ export async function isADVPDFFile(file: File): Promise<boolean> {
     console.error('[ADV Parser] Erro ao verificar formato:', error);
     return false;
   }
+}
+
+/**
+ * Parser para PDF de Itinerário de Vendas
+ * Formato tabular: Venda | Cliente | End. Ent. | Bairro Ent. | Cidade Ent. | Cep Ent. | Peso Bruto
+ */
+export async function parseItinerarioPDF(file: File): Promise<ItinerarioRecord[]> {
+  console.log('[Itinerário Parser] Iniciando processamento:', file.name);
+  
+  const result = await parsePDFFile(file);
+  
+  if (result.error || result.rows.length < 2) {
+    console.log('[Itinerário Parser] Erro ou sem dados:', result.error);
+    return [];
+  }
+  
+  // Verificar se é formato itinerário pelo header
+  const headerText = result.rows[0].join(' ');
+  if (!isItinerarioFormat(headerText)) {
+    console.log('[Itinerário Parser] Não é formato itinerário');
+    return [];
+  }
+  
+  console.log('[Itinerário Parser] Formato itinerário detectado');
+  console.log('[Itinerário Parser] Headers:', result.rows[0]);
+  
+  // Mapear colunas pelo header
+  const headers = result.rows[0].map(h => normalizeText(h).toLowerCase());
+  
+  const columnMap = {
+    venda: findColumnIndex(headers, [/^venda$/i, /n[º°]?\s*venda/i, /venda\s*n/i]),
+    cliente: findColumnIndex(headers, [/cliente/i, /nome/i, /razao/i]),
+    endEnt: findColumnIndex(headers, [/end\.?\s*ent\.?/i, /endere[çc]o\s*ent/i, /endere[çc]o/i]),
+    bairroEnt: findColumnIndex(headers, [/bairro\.?\s*ent\.?/i, /bairro/i]),
+    cidadeEnt: findColumnIndex(headers, [/cidade\.?\s*ent\.?/i, /cidade/i, /munic[íi]pio/i]),
+    cepEnt: findColumnIndex(headers, [/cep\.?\s*ent\.?/i, /cep/i]),
+    pesoBruto: findColumnIndex(headers, [/peso\s*bruto/i, /peso/i, /kg/i]),
+  };
+  
+  console.log('[Itinerário Parser] Mapeamento de colunas:', columnMap);
+  
+  // Validar colunas mínimas
+  if (columnMap.venda === -1 || columnMap.cliente === -1 || columnMap.endEnt === -1) {
+    console.log('[Itinerário Parser] Colunas obrigatórias não encontradas');
+    return [];
+  }
+  
+  const records: ItinerarioRecord[] = [];
+  
+  // Processar linhas de dados (pular header)
+  for (let i = 1; i < result.rows.length; i++) {
+    const row = result.rows[i];
+    
+    // Pular linhas vazias
+    if (!row || row.every(cell => !cell?.trim())) continue;
+    
+    const vendaId = columnMap.venda !== -1 ? row[columnMap.venda]?.trim() : '';
+    const clientName = columnMap.cliente !== -1 ? row[columnMap.cliente]?.trim() : '';
+    const address = columnMap.endEnt !== -1 ? row[columnMap.endEnt]?.trim() : '';
+    const neighborhood = columnMap.bairroEnt !== -1 ? row[columnMap.bairroEnt]?.trim() : '';
+    const city = columnMap.cidadeEnt !== -1 ? row[columnMap.cidadeEnt]?.trim() : '';
+    const cep = columnMap.cepEnt !== -1 ? row[columnMap.cepEnt]?.trim() : '';
+    const pesoStr = columnMap.pesoBruto !== -1 ? row[columnMap.pesoBruto]?.trim() : '0';
+    
+    // Validar dados mínimos
+    if (!vendaId || !clientName) continue;
+    
+    // Converter peso
+    const weight = parseFloat((pesoStr || '0').replace('.', '').replace(',', '.')) || 0;
+    
+    records.push({
+      venda_id: vendaId,
+      client_name: normalizeText(clientName),
+      address: normalizeText(address),
+      neighborhood: normalizeText(neighborhood),
+      city: normalizeText(city),
+      cep: cep?.replace(/\D/g, '') || '',
+      weight_kg: weight,
+    });
+    
+    console.log('[Itinerário Parser] Registro:', vendaId, clientName.substring(0, 20), address.substring(0, 30));
+  }
+  
+  console.log('[Itinerário Parser] Total de registros:', records.length);
+  
+  return records;
+}
+
+/**
+ * Encontra o índice de uma coluna baseado em padrões
+ */
+function findColumnIndex(headers: string[], patterns: RegExp[]): number {
+  for (let i = 0; i < headers.length; i++) {
+    for (const pattern of patterns) {
+      if (pattern.test(headers[i])) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Formata CEP para exibição (00000-000)
+ */
+function formatCEP(cep: string): string {
+  const digits = cep.replace(/\D/g, '');
+  if (digits.length === 8) {
+    return `${digits.slice(0, 5)}-${digits.slice(5)}`;
+  }
+  return cep;
+}
+
+/**
+ * Cruza dados do Itinerário (endereços) com o Relatório ADV (itens detalhados)
+ * A chave de cruzamento é o número da venda (pedido_id / venda_id)
+ */
+export function mergeItinerarioWithADV(
+  itinerario: ItinerarioRecord[],
+  advOrders: ParsedOrder[]
+): ParsedOrder[] {
+  console.log('[Merge] Iniciando cruzamento de dados');
+  console.log('[Merge] Itinerário:', itinerario.length, 'registros');
+  console.log('[Merge] ADV:', advOrders.length, 'pedidos');
+  
+  // Criar mapa de itinerário por venda_id para busca rápida
+  const itinerarioMap = new Map<string, ItinerarioRecord>();
+  for (const record of itinerario) {
+    itinerarioMap.set(record.venda_id, record);
+  }
+  
+  let matchedCount = 0;
+  let unmatchedCount = 0;
+  
+  const mergedOrders = advOrders.map(order => {
+    // Buscar endereço pelo número da venda
+    const enderecoData = itinerarioMap.get(order.pedido_id || '');
+    
+    if (enderecoData) {
+      matchedCount++;
+      
+      // Construir endereço completo
+      const addressParts = [
+        enderecoData.address,
+        enderecoData.neighborhood,
+        enderecoData.city,
+      ].filter(Boolean);
+      
+      // Adicionar CEP formatado se disponível
+      if (enderecoData.cep) {
+        addressParts.push(formatCEP(enderecoData.cep));
+      }
+      
+      const fullAddress = addressParts.join(', ');
+      
+      console.log('[Merge] Match:', order.pedido_id, '->', fullAddress.substring(0, 50));
+      
+      return {
+        ...order,
+        address: fullAddress,
+        isValid: true,
+        error: undefined,
+      };
+    }
+    
+    unmatchedCount++;
+    console.log('[Merge] Sem match:', order.pedido_id, order.client_name?.substring(0, 20));
+    
+    // Mantém o pedido sem endereço
+    return {
+      ...order,
+      isValid: false,
+      error: 'Endereço não encontrado no itinerário',
+    };
+  });
+  
+  console.log('[Merge] Resultado:', matchedCount, 'cruzados,', unmatchedCount, 'sem endereço');
+  
+  return mergedOrders;
+}
+
+/**
+ * Cria pedidos apenas a partir do itinerário (sem itens detalhados)
+ * Usado quando só o arquivo de itinerário está disponível
+ */
+export function createOrdersFromItinerario(itinerario: ItinerarioRecord[]): ParsedOrder[] {
+  return itinerario.map(record => {
+    // Construir endereço completo
+    const addressParts = [
+      record.address,
+      record.neighborhood,
+      record.city,
+    ].filter(Boolean);
+    
+    if (record.cep) {
+      addressParts.push(formatCEP(record.cep));
+    }
+    
+    return {
+      pedido_id: record.venda_id,
+      client_name: record.client_name,
+      address: addressParts.join(', '),
+      weight_kg: record.weight_kg,
+      product_description: undefined,
+      items: [],
+      isValid: true,
+    };
+  });
+}
+
+/**
+ * Detecta automaticamente o tipo de PDF e retorna os dados apropriados
+ */
+export interface PDFDetectionResult {
+  type: 'adv' | 'itinerario' | 'generic' | 'unknown';
+  advOrders?: ParsedOrder[];
+  itinerarioRecords?: ItinerarioRecord[];
+}
+
+export async function detectAndParsePDF(file: File): Promise<PDFDetectionResult> {
+  console.log('[Auto Detect] Analisando PDF:', file.name);
+  
+  // Extrair texto bruto para detecção
+  const lines = await extractRawTextFromPDF(file);
+  const fullText = lines.join(' ');
+  
+  // Testar formato Itinerário primeiro (mais específico)
+  if (isItinerarioFormat(fullText)) {
+    console.log('[Auto Detect] Detectado: Itinerário de Vendas');
+    const records = await parseItinerarioPDF(file);
+    return {
+      type: 'itinerario',
+      itinerarioRecords: records,
+    };
+  }
+  
+  // Testar formato ADV
+  if (isADVFormat(lines)) {
+    console.log('[Auto Detect] Detectado: Relatório ADV');
+    const result = await parseADVSalesReport(file);
+    return {
+      type: 'adv',
+      advOrders: result?.orders || [],
+    };
+  }
+  
+  console.log('[Auto Detect] Formato não reconhecido');
+  return { type: 'unknown' };
 }
