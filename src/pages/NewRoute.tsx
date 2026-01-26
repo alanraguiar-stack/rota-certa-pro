@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, ArrowLeft, Zap } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
 
 export default function NewRoute() {
   const navigate = useNavigate();
@@ -30,12 +31,15 @@ export default function NewRoute() {
   const [routeName, setRouteName] = useState('');
   const [orders, setOrders] = useState<ParsedOrder[]>([]);
   const [selectedTruckIds, setSelectedTruckIds] = useState<string[]>([]);
-  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy | null>(null);
+  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
   const [isCreating, setIsCreating] = useState(false);
   
   // Auto-routing state
   const [autoResult, setAutoResult] = useState<AutoRouterResult | null>(null);
   const [inputMode, setInputMode] = useState<'auto' | 'manual'>('auto');
+  
+  // Track if fleet was already configured (prevents re-selection)
+  const [fleetConfirmed, setFleetConfirmed] = useState(false);
 
   const validOrders = orders.filter((o) => o.isValid);
   const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
@@ -57,7 +61,7 @@ export default function NewRoute() {
       case 'validation':
         return validOrders.length > 0 && routeName.trim().length > 0;
       case 'fleet':
-        return inputMode === 'auto' ? autoResult !== null : selectedTruckIds.length > 0;
+        return selectedTruckIds.length > 0;
       case 'strategy':
         return routingStrategy !== null;
       default:
@@ -69,8 +73,8 @@ export default function NewRoute() {
   const handleAutoDataReady = (parsedOrders: ParsedOrder[], hasItemDetails: boolean) => {
     setOrders(parsedOrders);
     
-    // Auto-compose trucks
-    if (activeTrucks.length > 0) {
+    // Auto-compose trucks if not already configured
+    if (activeTrucks.length > 0 && !fleetConfirmed) {
       const result = autoComposeRoute(parsedOrders, activeTrucks, {
         strategy: 'economy',
         safetyMarginPercent: 10,
@@ -90,6 +94,11 @@ export default function NewRoute() {
   };
 
   const handleNext = () => {
+    // Special handling for fleet step - mark as confirmed
+    if (currentStep === 'fleet') {
+      setFleetConfirmed(true);
+    }
+    
     completeStep(currentStep);
     const steps: RouteWizardStep[] = ['orders', 'validation', 'fleet', 'strategy', 'distribution'];
     const currentIndex = steps.indexOf(currentStep);
@@ -106,6 +115,25 @@ export default function NewRoute() {
     }
   };
 
+  // Confirm fleet selection and proceed
+  const handleConfirmFleet = () => {
+    if (selectedTruckIds.length === 0) {
+      toast({
+        title: 'Selecione a frota',
+        description: 'Escolha pelo menos um caminhão para continuar',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setFleetConfirmed(true);
+    completeStep('fleet');
+    setCurrentStep('strategy');
+    toast({
+      title: 'Frota confirmada!',
+      description: `${selectedTruckIds.length} caminhão(ões) selecionado(s) para esta rota`,
+    });
+  };
+
   const handleCreateRoute = async () => {
     if (!routeName.trim() || validOrders.length === 0) return;
 
@@ -115,8 +143,9 @@ export default function NewRoute() {
       navigate(`/rota/${route.id}`, {
         state: { 
           pendingOrders: validOrders,
-          selectedTruckIds,
+          selectedTruckIds, // Pass the already-selected trucks
           routingStrategy,
+          fleetAlreadyConfigured: true, // Signal that fleet was configured in wizard
         },
       });
     } catch (error) {
@@ -126,12 +155,45 @@ export default function NewRoute() {
     }
   };
 
+  // Get summary info for each step header
+  const getStepSummary = () => {
+    const summary: string[] = [];
+    if (validOrders.length > 0) {
+      summary.push(`${validOrders.length} pedidos`);
+    }
+    if (fleetConfirmed && selectedTruckIds.length > 0) {
+      summary.push(`${selectedTruckIds.length} caminhões`);
+    }
+    if (routingStrategy) {
+      const strategyLabels: Record<RoutingStrategy, string> = {
+        economy: 'Economia',
+        speed: 'Velocidade',
+        end_near_cd: 'Fim no CD',
+        start_far: 'Longe→Perto',
+        start_near: 'Perto→Longe',
+      };
+      summary.push(strategyLabels[routingStrategy]);
+    }
+    return summary;
+  };
+
   return (
     <AppLayout>
       <div className="mx-auto max-w-5xl space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Nova Rota</h1>
-          <p className="text-muted-foreground">Siga os passos para criar uma rota otimizada</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Nova Rota</h1>
+            <p className="text-muted-foreground">Siga os passos para criar uma rota otimizada</p>
+          </div>
+          {/* Summary badges */}
+          <div className="flex gap-2">
+            {getStepSummary().map((item, i) => (
+              <Badge key={i} variant="secondary" className="gap-1">
+                <Check className="h-3 w-3" />
+                {item}
+              </Badge>
+            ))}
+          </div>
         </div>
 
         {/* Wizard Stepper */}
@@ -148,19 +210,39 @@ export default function NewRoute() {
         {/* Step Content */}
         <Card>
           <CardHeader>
-            <CardTitle>
+            <CardTitle className="flex items-center gap-2">
               {currentStep === 'orders' && 'Inserir Pedidos'}
               {currentStep === 'validation' && 'Validar Peso Total'}
-              {currentStep === 'fleet' && 'Composição de Frota'}
-              {currentStep === 'strategy' && 'Modo de Roteirização'}
-              {currentStep === 'distribution' && 'Distribuição de Cargas'}
+              {currentStep === 'fleet' && (
+                <>
+                  <Truck className="h-5 w-5" />
+                  Definir Frota
+                  {fleetConfirmed && (
+                    <Badge variant="outline" className="ml-2 text-success border-success">
+                      <Check className="h-3 w-3 mr-1" />
+                      Confirmada
+                    </Badge>
+                  )}
+                </>
+              )}
+              {currentStep === 'strategy' && (
+                <>
+                  <RouteIcon className="h-5 w-5" />
+                  Estratégia de Roteirização
+                </>
+              )}
+              {currentStep === 'distribution' && 'Criar Rota'}
             </CardTitle>
             <CardDescription>
               {currentStep === 'orders' && 'Carregue as vendas do dia para roteirização automática'}
               {currentStep === 'validation' && 'Confirme o peso total e dê um nome para a rota'}
-              {currentStep === 'fleet' && 'Revise a composição automática dos caminhões'}
-              {currentStep === 'strategy' && 'Selecione a estratégia de roteirização'}
-              {currentStep === 'distribution' && 'Revise e ajuste a distribuição das cargas'}
+              {currentStep === 'fleet' && (
+                fleetConfirmed 
+                  ? 'A frota já foi definida. Use o botão Voltar se precisar alterar.'
+                  : 'Escolha os caminhões para esta rota. Esta configuração será usada em todo o processo.'
+              )}
+              {currentStep === 'strategy' && 'Selecione como otimizar as rotas de entrega'}
+              {currentStep === 'distribution' && 'Tudo pronto! Crie a rota para prosseguir com os romaneios.'}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -196,23 +278,37 @@ export default function NewRoute() {
               </div>
             )}
 
-            {currentStep === 'fleet' && inputMode === 'auto' && autoResult && (
-              <AutoCompositionView
-                result={autoResult}
-                onConfirm={handleNext}
-                isProcessing={false}
-              />
-            )}
-
-            {currentStep === 'fleet' && inputMode === 'manual' && (
-              <FleetRecommendation
-                trucks={activeTrucks}
-                totalWeight={totalWeight}
-                totalOrders={validOrders.length}
-                selectedTruckIds={selectedTruckIds}
-                onSelectionChange={setSelectedTruckIds}
-                onConfirm={handleNext}
-              />
+            {currentStep === 'fleet' && (
+              <>
+                {inputMode === 'auto' && autoResult && !fleetConfirmed ? (
+                  <AutoCompositionView
+                    result={autoResult}
+                    onConfirm={handleConfirmFleet}
+                    isProcessing={false}
+                  />
+                ) : (
+                  <FleetRecommendation
+                    trucks={activeTrucks}
+                    totalWeight={totalWeight}
+                    totalOrders={validOrders.length}
+                    selectedTruckIds={selectedTruckIds}
+                    onSelectionChange={setSelectedTruckIds}
+                    onConfirm={handleConfirmFleet}
+                    disabled={fleetConfirmed}
+                  />
+                )}
+                
+                {fleetConfirmed && (
+                  <div className="mt-4 p-4 rounded-lg bg-success/10 border border-success/30">
+                    <p className="text-sm text-success font-medium">
+                      ✓ Frota confirmada: {selectedTruckIds.length} caminhão(ões)
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Esta seleção será usada para romaneio e roteirização. Use "Voltar" para alterar.
+                    </p>
+                  </div>
+                )}
+              </>
             )}
 
             {currentStep === 'strategy' && (
@@ -223,17 +319,39 @@ export default function NewRoute() {
             )}
 
             {currentStep === 'distribution' && (
-              <div className="space-y-4 text-center">
-                <p className="text-muted-foreground">
-                  Tudo pronto! Clique em "Criar Rota" para gerar os romaneios.
-                </p>
-                <Button
-                  size="lg"
-                  onClick={handleCreateRoute}
-                  disabled={isCreating}
-                >
-                  {isCreating ? 'Criando...' : 'Criar Rota e Gerar Romaneios'}
-                </Button>
+              <div className="space-y-6">
+                {/* Summary of configuration */}
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-lg border p-4 text-center">
+                    <p className="text-2xl font-bold text-primary">{validOrders.length}</p>
+                    <p className="text-sm text-muted-foreground">Pedidos</p>
+                  </div>
+                  <div className="rounded-lg border p-4 text-center">
+                    <p className="text-2xl font-bold text-primary">{selectedTruckIds.length}</p>
+                    <p className="text-sm text-muted-foreground">Caminhões</p>
+                  </div>
+                  <div className="rounded-lg border p-4 text-center">
+                    <p className="text-2xl font-bold text-primary">
+                      {(totalWeight / 1000).toFixed(1)}t
+                    </p>
+                    <p className="text-sm text-muted-foreground">Peso Total</p>
+                  </div>
+                </div>
+                
+                <div className="text-center space-y-4">
+                  <p className="text-muted-foreground">
+                    Clique em "Criar Rota" para salvar e prosseguir para os romaneios.
+                  </p>
+                  <Button
+                    size="lg"
+                    onClick={handleCreateRoute}
+                    disabled={isCreating}
+                    className="min-w-[200px]"
+                  >
+                    {isCreating ? 'Criando...' : 'Criar Rota e Continuar'}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>
@@ -250,8 +368,17 @@ export default function NewRoute() {
             Voltar
           </Button>
 
+          {/* Show Continue button for steps that don't have internal confirm */}
           {currentStep !== 'distribution' && currentStep !== 'fleet' && (
             <Button onClick={handleNext} disabled={!canProceed()}>
+              Continuar
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          )}
+          
+          {/* For fleet step when already confirmed, show continue button */}
+          {currentStep === 'fleet' && fleetConfirmed && (
+            <Button onClick={handleNext}>
               Continuar
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>

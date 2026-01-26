@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { AlertTriangle, MapPin, RefreshCw, Loader2, Check, Edit2, X, MousePointer2 } from 'lucide-react';
+import { AlertTriangle, MapPin, RefreshCw, Loader2, Check, Edit2, X, MousePointer2, SkipForward } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Order } from '@/types';
 import { cn } from '@/lib/utils';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 interface FailedAddressFixerProps {
   orders: Order[];
@@ -12,8 +13,10 @@ interface FailedAddressFixerProps {
   onUpdateAddress: (orderId: string, newAddress: string) => Promise<boolean>;
   onSetManualCoords: (orderId: string, lat: number, lng: number) => Promise<void>;
   onStartMapSelection?: (orderId: string, clientName: string) => void;
+  onContinueAnyway?: () => void; // New: allow continuing without fixing
   selectingOnMapFor?: string | null;
   isProcessing?: boolean;
+  canContinue?: boolean; // New: show continue option
 }
 
 interface EditingState {
@@ -27,8 +30,10 @@ export function FailedAddressFixer({
   onUpdateAddress,
   onSetManualCoords,
   onStartMapSelection,
+  onContinueAnyway,
   selectingOnMapFor,
   isProcessing = false,
+  canContinue = true,
 }: FailedAddressFixerProps) {
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
@@ -125,10 +130,31 @@ export function FailedAddressFixer({
         </CardTitle>
         <CardDescription className="text-amber-600 dark:text-amber-500">
           {failedOrders.length} endereço{failedOrders.length > 1 ? 's' : ''} não encontrado{failedOrders.length > 1 ? 's' : ''}. 
-          Edite, tente novamente ou marque no mapa.
+          Você pode corrigir, marcar no mapa ou prosseguir sem localização exata.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Non-blocking continue option */}
+        {canContinue && onContinueAnyway && (
+          <Alert className="border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20">
+            <SkipForward className="h-4 w-4 text-blue-600" />
+            <AlertDescription className="flex items-center justify-between">
+              <span className="text-blue-700 dark:text-blue-400">
+                Os endereços serão mantidos conforme informado. A roteirização usará aproximações.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onContinueAnyway}
+                className="ml-4 border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
+              >
+                <SkipForward className="mr-2 h-4 w-4" />
+                Manter e Continuar
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+        
         {/* Retry All Button */}
         {failedOrders.length > 1 && (
           <Button
