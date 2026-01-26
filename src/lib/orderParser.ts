@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { decodeFileContent, normalizeText } from './encoding';
+import { parsePDFFile, isPDFFile, isExcelFile } from './pdfParser';
 
 // Validation constants
 const MIN_WEIGHT_KG = 0.01;
@@ -1049,9 +1050,79 @@ export function parseRowsStructured(
 }
 
 /**
+ * Parse PDF file with sales data
+ */
+export async function parseSalesPDF(file: File): Promise<ParseResult> {
+  const pdfResult = await parsePDFFile(file);
+  
+  if (pdfResult.error) {
+    return {
+      orders: [],
+      errors: [{ row: 0, field: 'arquivo', message: pdfResult.error }],
+      warnings: [],
+      totalRows: 0,
+      validRows: 0,
+      invalidRows: 0,
+    };
+  }
+  
+  if (pdfResult.rows.length < 2) {
+    return {
+      orders: [],
+      errors: [{ row: 0, field: 'arquivo', message: 'Nenhum dado tabular encontrado no PDF' }],
+      warnings: [],
+      totalRows: 0,
+      validRows: 0,
+      invalidRows: 0,
+    };
+  }
+  
+  // Detect column mapping from first row (header)
+  const headers = pdfResult.rows[0];
+  let mapping = detectStructuredMapping(headers);
+  if (!mapping) {
+    mapping = detectColumnMapping(headers);
+  }
+  
+  if (!mapping) {
+    return {
+      orders: [],
+      errors: [{
+        row: 1,
+        field: 'colunas',
+        message: 'Não foi possível detectar as colunas no PDF. Verifique se o documento possui Cliente, Endereço e Peso.',
+      }],
+      warnings: [`PDF contém ${pdfResult.pageCount} página(s)`],
+      totalRows: 0,
+      validRows: 0,
+      invalidRows: 0,
+    };
+  }
+  
+  const result = parseRowsStructured(pdfResult.rows, mapping, true);
+  result.warnings.push(`PDF processado: ${pdfResult.pageCount} página(s)`);
+  
+  return result;
+}
+
+/**
  * Parse Excel file with template validation
  */
 export async function parseExcelWithValidation(file: File): Promise<ParseResult & { templateValidation: TemplateValidation }> {
+  // Handle PDF files
+  if (isPDFFile(file)) {
+    const result = await parseSalesPDF(file);
+    return {
+      ...result,
+      templateValidation: { 
+        isValid: result.validRows > 0, 
+        missingColumns: [], 
+        renamedColumns: [],
+        message: 'PDF processado - validação de template não aplicável',
+      },
+    };
+  }
+  
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
   
