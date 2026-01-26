@@ -35,6 +35,7 @@ export interface ColumnMapping {
   bairro?: number;
   cidade?: number;
   estado?: number;
+  cep?: number;
   address: number;
   weight: number;
   product?: number;
@@ -68,32 +69,41 @@ export interface TemplateValidation {
  */
 const COLUMN_PATTERNS = {
   pedidoId: [
-    /pedido.?id/i, /pedido/i, /order.?id/i, /id.?pedido/i, /numero.?pedido/i
+    /pedido.?id/i, /pedido/i, /order.?id/i, /id.?pedido/i, /numero.?pedido/i,
+    /^venda$/i, /n[º°]?\s*venda/i  // Itinerary format
   ],
   clientName: [
     /cliente/i, /nome/i, /customer/i, /name/i, /razao/i, /fantasia/i, 
     /destinat[áa]rio/i, /empresa/i, /company/i
   ],
   rua: [
-    /^rua$/i, /logradouro/i, /street/i
+    /^rua$/i, /logradouro/i, /street/i,
+    /end\.?\s*ent\.?/i, /endereco\s*ent/i  // Itinerary: End. Ent.
   ],
   numero: [
     /^n[uú]mero$/i, /^num$/i, /^n[º°]?$/i, /number/i
   ],
   bairro: [
-    /bairro/i, /neighborhood/i, /distrito/i
+    /bairro/i, /neighborhood/i, /distrito/i,
+    /bairro\.?\s*ent\.?/i  // Itinerary: Bairro Ent.
   ],
   cidade: [
-    /cidade/i, /city/i, /munic[íi]pio/i
+    /cidade/i, /city/i, /munic[íi]pio/i,
+    /cidade\.?\s*ent\.?/i  // Itinerary: Cidade Ent.
   ],
   estado: [
-    /^estado$/i, /^uf$/i, /state/i
+    /^estado$/i, /^uf$/i, /state/i,
+    /uf\.?\s*ent\.?/i  // Itinerary: UF Ent.
+  ],
+  cep: [
+    /^cep$/i, /cep\.?\s*ent\.?/i, /codigo\s*postal/i, /postal/i  // Itinerary: Cep Ent.
   ],
   address: [
     /endere[çc]o/i, /address/i, /local/i, /destino/i, /location/i
   ],
   weight: [
-    /peso/i, /weight/i, /kg/i, /kilos?/i, /massa/i, /carga/i
+    /peso/i, /weight/i, /kg/i, /kilos?/i, /massa/i, /carga/i,
+    /peso\s*bruto/i, /peso\s*l[íi]q/i  // Itinerary: Peso Bruto
   ],
   product: [
     /produto/i, /product/i, /item/i, /descri[çc][ãa]o/i, /description/i,
@@ -703,6 +713,7 @@ export function detectStructuredMapping(headers: string[]): ColumnMapping | null
   const bairroIdx = findColumn(COLUMN_PATTERNS.bairro);
   const cidadeIdx = findColumn(COLUMN_PATTERNS.cidade);
   const estadoIdx = findColumn(COLUMN_PATTERNS.estado);
+  const cepIdx = findColumn(COLUMN_PATTERNS.cep);
   const addressIdx = findColumn(COLUMN_PATTERNS.address);
   const weightIdx = findColumn(COLUMN_PATTERNS.weight);
   const productIdx = findColumn(COLUMN_PATTERNS.product);
@@ -713,7 +724,9 @@ export function detectStructuredMapping(headers: string[]): ColumnMapping | null
   }
   
   // Must have either structured address OR combined address
-  const hasStructured = ruaIdx !== -1 && numeroIdx !== -1 && cidadeIdx !== -1;
+  // Itinerary format: has rua (End. Ent. which contains street+number), bairro, cidade
+  const hasStructured = ruaIdx !== -1 && cidadeIdx !== -1;
+  const hasFullStructured = ruaIdx !== -1 && numeroIdx !== -1 && cidadeIdx !== -1;
   const hasCombined = addressIdx !== -1;
   
   if (!hasStructured && !hasCombined) {
@@ -728,6 +741,7 @@ export function detectStructuredMapping(headers: string[]): ColumnMapping | null
     bairro: bairroIdx !== -1 ? bairroIdx : undefined,
     cidade: cidadeIdx !== -1 ? cidadeIdx : undefined,
     estado: estadoIdx !== -1 ? estadoIdx : undefined,
+    cep: cepIdx !== -1 ? cepIdx : undefined,
     address: hasCombined ? addressIdx : -1, // Will be built from structured
     weight: weightIdx,
     product: productIdx !== -1 ? productIdx : undefined,
@@ -745,6 +759,7 @@ function buildAddressFromStructured(
   
   if (mapping.rua !== undefined) {
     const rua = String(row[mapping.rua] ?? '').trim();
+    // If numero column exists, combine them; otherwise rua may already contain street+number (itinerary format)
     const numero = mapping.numero !== undefined ? String(row[mapping.numero] ?? '').trim() : '';
     if (rua) {
       parts.push(numero ? `${rua}, ${numero}` : rua);
@@ -756,17 +771,25 @@ function buildAddressFromStructured(
     if (bairro) parts.push(bairro);
   }
   
-  if (mapping.cidade !== undefined) {
-    const cidade = String(row[mapping.cidade] ?? '').trim();
-    if (cidade) parts.push(cidade);
+  // Build city-state part
+  const cidade = mapping.cidade !== undefined ? String(row[mapping.cidade] ?? '').trim() : '';
+  const estado = mapping.estado !== undefined ? String(row[mapping.estado] ?? '').trim() : '';
+  
+  if (cidade && estado) {
+    parts.push(`${cidade} - ${estado}`);
+  } else if (cidade) {
+    parts.push(cidade);
+  } else if (estado) {
+    parts.push(estado);
   }
   
-  if (mapping.estado !== undefined) {
-    const estado = String(row[mapping.estado] ?? '').trim();
-    if (estado) parts.push(estado);
+  // Add CEP if available
+  if (mapping.cep !== undefined) {
+    const cep = String(row[mapping.cep] ?? '').trim();
+    if (cep) parts.push(cep);
   }
   
-  return parts.join(' - ');
+  return parts.join(', ');
 }
 
 /**
