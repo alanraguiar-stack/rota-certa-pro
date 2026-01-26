@@ -421,14 +421,14 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         </AlertDescription>
       </Alert>
       
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-2">
         {/* Arquivo 1 */}
         <Card className={cn(
-          'transition-all',
+          'transition-all min-w-0',
           file1Upload.status === 'success' && 'ring-2 ring-success/50'
         )}>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2 text-base flex-wrap">
               {getFileIcon(file1Upload)}
               {getFileLabel(file1Upload, '1. Relatório Geral de Vendas')}
               {file1Upload.status === 'success' && (
@@ -510,11 +510,11 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         
         {/* Arquivo 2 */}
         <Card className={cn(
-          'transition-all',
+          'transition-all min-w-0',
           file2Upload.status === 'success' && 'ring-2 ring-success/50'
         )}>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex items-center gap-2 text-base flex-wrap">
               {getFileIcon(file2Upload)}
               {getFileLabel(file2Upload, '2. Detalhe das Vendas')}
               <Badge variant="outline" className="ml-1 text-xs">Opcional</Badge>
