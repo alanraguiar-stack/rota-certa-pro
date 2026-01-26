@@ -1,12 +1,17 @@
 /**
  * Componente de Upload Duplo para o fluxo automatizado
- * Recebe: 1) Planilha de vendas 2) Detalhamento de itens
+ * Recebe dois PDFs complementares:
+ * 1) Itinerário de Vendas (endereços)
+ * 2) Relatório ADV (itens detalhados)
+ * 
+ * Os arquivos podem ser carregados em qualquer ordem.
+ * O sistema detecta automaticamente o tipo e cruza pelo número da venda.
  */
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   Upload, FileSpreadsheet, CheckCircle2, XCircle, 
-  Download, AlertCircle, Package, RefreshCcw, FileText
+  Download, AlertCircle, Package, RefreshCcw, FileText, Link2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,7 +19,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { ParsedOrder } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -24,10 +28,16 @@ import {
   parseItemDetailFile, 
   generateItemDetailTemplate,
   ParsedItemDetail,
-  ItemDetailParseResult
 } from '@/lib/itemDetailParser';
 import { mergeItemsIntoOrders } from '@/lib/autoRouterEngine';
 import { isPDFFile, isExcelFile } from '@/lib/pdfParser';
+import {
+  detectAndParsePDF,
+  mergeItinerarioWithADV,
+  createOrdersFromItinerario,
+  ItinerarioRecord,
+  PDFDetectionResult,
+} from '@/lib/advParser';
 
 interface DualFileUploadProps {
   onDataReady: (orders: ParsedOrder[], hasItemDetails: boolean) => void;
@@ -38,6 +48,13 @@ interface UploadState {
   status: 'idle' | 'processing' | 'success' | 'error';
   message: string;
   data: any;
+  detectedType?: 'adv' | 'itinerario' | 'excel' | 'generic';
+}
+
+interface MergeSummary {
+  total: number;
+  matched: number;
+  unmatched: number;
 }
 
 function formatWeight(weight: number): string {
@@ -50,229 +67,403 @@ function formatWeight(weight: number): string {
 export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   const { toast } = useToast();
   
-  const [salesUpload, setSalesUpload] = useState<UploadState>({
+  // Estado para arquivo 1 (Itinerário/Vendas)
+  const [file1Upload, setFile1Upload] = useState<UploadState>({
     file: null,
     status: 'idle',
     message: '',
     data: null,
   });
   
-  const [itemsUpload, setItemsUpload] = useState<UploadState>({
+  // Estado para arquivo 2 (ADV/Itens)
+  const [file2Upload, setFile2Upload] = useState<UploadState>({
     file: null,
     status: 'idle',
     message: '',
     data: null,
   });
   
-  const salesInputRef = useRef<HTMLInputElement>(null);
-  const itemsInputRef = useRef<HTMLInputElement>(null);
+  // Estado do cruzamento
+  const [mergeSummary, setMergeSummary] = useState<MergeSummary | null>(null);
+  const [mergedOrders, setMergedOrders] = useState<ParsedOrder[] | null>(null);
   
-  // Handle sales file upload
-  const handleSalesFile = async (file: File) => {
-    const isValidFormat = isPDFFile(file) || isExcelFile(file);
-    
-    if (!isValidFormat) {
-      setSalesUpload({
+  const file1InputRef = useRef<HTMLInputElement>(null);
+  const file2InputRef = useRef<HTMLInputElement>(null);
+  
+  // Processar arquivo com detecção automática de tipo
+  const processFile = async (
+    file: File,
+    setUploadState: React.Dispatch<React.SetStateAction<UploadState>>
+  ): Promise<{ type: string; data: any } | null> => {
+    // Verificar se é PDF ou Excel
+    if (isPDFFile(file)) {
+      setUploadState({
         file,
-        status: 'error',
-        message: 'Formato inválido. Use Excel (.xlsx) ou PDF',
+        status: 'processing',
+        message: 'Analisando PDF...',
         data: null,
       });
-      return;
-    }
-    
-    const processingMessage = isPDFFile(file) 
-      ? 'Extraindo dados do PDF...' 
-      : 'Processando planilha...';
-    
-    setSalesUpload({ file, status: 'processing', message: processingMessage, data: null });
-    
-    try {
-      const result = await parseExcelWithValidation(file);
       
-      if (result.validRows === 0) {
-        setSalesUpload({
+      try {
+        const result = await detectAndParsePDF(file);
+        
+        if (result.type === 'itinerario' && result.itinerarioRecords && result.itinerarioRecords.length > 0) {
+          setUploadState({
+            file,
+            status: 'success',
+            message: `${result.itinerarioRecords.length} vendas com endereço`,
+            data: result.itinerarioRecords,
+            detectedType: 'itinerario',
+          });
+          
+          toast({
+            title: 'Itinerário detectado!',
+            description: `${result.itinerarioRecords.length} endereços de entrega carregados`,
+          });
+          
+          return { type: 'itinerario', data: result.itinerarioRecords };
+        }
+        
+        if (result.type === 'adv' && result.advOrders && result.advOrders.length > 0) {
+          setUploadState({
+            file,
+            status: 'success',
+            message: `${result.advOrders.length} pedidos com itens`,
+            data: result.advOrders,
+            detectedType: 'adv',
+          });
+          
+          toast({
+            title: 'Relatório ADV detectado!',
+            description: `${result.advOrders.length} pedidos com itens detalhados`,
+          });
+          
+          return { type: 'adv', data: result.advOrders };
+        }
+        
+        // Tentar parser genérico de PDF
+        const genericResult = await parseExcelWithValidation(file);
+        if (genericResult.validRows > 0) {
+          setUploadState({
+            file,
+            status: 'success',
+            message: `${genericResult.validRows} pedidos carregados`,
+            data: genericResult,
+            detectedType: 'generic',
+          });
+          return { type: 'generic', data: genericResult };
+        }
+        
+        setUploadState({
           file,
           status: 'error',
-          message: result.errors[0]?.message || 'Nenhum pedido válido encontrado',
+          message: 'Formato de PDF não reconhecido',
           data: null,
         });
-        return;
+        return null;
+        
+      } catch (error) {
+        console.error('Erro ao processar PDF:', error);
+        setUploadState({
+          file,
+          status: 'error',
+          message: 'Erro ao processar PDF',
+          data: null,
+        });
+        return null;
       }
-      
-      setSalesUpload({
+    }
+    
+    // Processar Excel
+    if (isExcelFile(file)) {
+      setUploadState({
         file,
-        status: 'success',
-        message: `${result.validRows} pedidos carregados`,
-        data: result,
+        status: 'processing',
+        message: 'Processando planilha...',
+        data: null,
+      });
+      
+      try {
+        const result = await parseExcelWithValidation(file);
+        
+        if (result.validRows === 0) {
+          setUploadState({
+            file,
+            status: 'error',
+            message: result.errors[0]?.message || 'Nenhum pedido válido',
+            data: null,
+          });
+          return null;
+        }
+        
+        setUploadState({
+          file,
+          status: 'success',
+          message: `${result.validRows} pedidos carregados`,
+          data: result,
+          detectedType: 'excel',
+        });
+        
+        toast({
+          title: 'Planilha carregada!',
+          description: `${result.validRows} pedidos prontos`,
+        });
+        
+        return { type: 'excel', data: result };
+        
+      } catch (error) {
+        console.error('Erro ao processar Excel:', error);
+        setUploadState({
+          file,
+          status: 'error',
+          message: 'Erro ao processar planilha',
+          data: null,
+        });
+        return null;
+      }
+    }
+    
+    setUploadState({
+      file,
+      status: 'error',
+      message: 'Formato inválido. Use PDF ou Excel',
+      data: null,
+    });
+    return null;
+  };
+  
+  // Handler para arquivo 1
+  const handleFile1 = async (file: File) => {
+    const result = await processFile(file, setFile1Upload);
+    if (result) {
+      tryMergeData(result, file2Upload);
+    }
+  };
+  
+  // Handler para arquivo 2
+  const handleFile2 = async (file: File) => {
+    const result = await processFile(file, setFile2Upload);
+    if (result) {
+      tryMergeData(file1Upload, result);
+    }
+  };
+  
+  // Tentar cruzar dados quando ambos arquivos estão prontos
+  const tryMergeData = (
+    data1: { type: string; data: any } | UploadState,
+    data2: { type: string; data: any } | UploadState
+  ) => {
+    // Normalizar para mesmo formato
+    const normalize = (d: any): { type: string; data: any } | null => {
+      if (!d) return null;
+      if ('type' in d && 'data' in d && typeof d.type === 'string') {
+        return d as { type: string; data: any };
+      }
+      if ('status' in d && d.status === 'success' && d.data && d.detectedType) {
+        return { type: d.detectedType, data: d.data };
+      }
+      return null;
+    };
+    
+    const file1Data = normalize(data1);
+    const file2Data = normalize(data2);
+    
+    if (!file1Data || !file2Data) return;
+    
+    console.log('[DualFileUpload] Tentando cruzar:', file1Data.type, '+', file2Data.type);
+    
+    // Identificar qual é itinerário e qual é ADV
+    let itinerarioRecords: ItinerarioRecord[] | null = null;
+    let advOrders: ParsedOrder[] | null = null;
+    
+    if (file1Data.type === 'itinerario') {
+      itinerarioRecords = file1Data.data;
+    } else if (file1Data.type === 'adv') {
+      advOrders = file1Data.data;
+    }
+    
+    if (file2Data.type === 'itinerario') {
+      itinerarioRecords = file2Data.data;
+    } else if (file2Data.type === 'adv') {
+      advOrders = file2Data.data;
+    }
+    
+    // Se temos ambos, fazer o cruzamento
+    if (itinerarioRecords && advOrders) {
+      console.log('[DualFileUpload] Cruzando dados...');
+      const merged = mergeItinerarioWithADV(itinerarioRecords, advOrders);
+      
+      const matchedCount = merged.filter(o => o.isValid).length;
+      const unmatchedCount = merged.filter(o => !o.isValid).length;
+      
+      setMergedOrders(merged);
+      setMergeSummary({
+        total: merged.length,
+        matched: matchedCount,
+        unmatched: unmatchedCount,
       });
       
       toast({
-        title: 'Vendas carregadas!',
-        description: `${result.validRows} pedidos prontos para roteirização`,
-      });
-    } catch (error) {
-      console.error('Error parsing sales file:', error);
-      setSalesUpload({
-        file,
-        status: 'error',
-        message: isPDFFile(file) 
-          ? 'Erro ao processar PDF. Verifique se o arquivo possui texto selecionável.' 
-          : 'Erro ao processar arquivo',
-        data: null,
+        title: 'Dados cruzados!',
+        description: `${matchedCount} pedidos completos, ${unmatchedCount} sem endereço`,
       });
     }
   };
   
-  // Handle items file upload
-  const handleItemsFile = async (file: File) => {
-    const isValidFormat = isPDFFile(file) || isExcelFile(file);
-    
-    if (!isValidFormat) {
-      setItemsUpload({
-        file,
-        status: 'error',
-        message: 'Formato inválido. Use Excel (.xlsx) ou PDF',
-        data: null,
-      });
-      return;
+  // Efeito para tentar cruzar quando ambos arquivos estiverem prontos
+  useEffect(() => {
+    if (file1Upload.status === 'success' && file2Upload.status === 'success') {
+      tryMergeData(file1Upload, file2Upload);
     }
-    
-    const processingMessage = isPDFFile(file) 
-      ? 'Extraindo dados do PDF...' 
-      : 'Processando planilha...';
-    
-    setItemsUpload({ file, status: 'processing', message: processingMessage, data: null });
-    
-    try {
-      const result = await parseItemDetailFile(file);
-      
-      if (result.validRows === 0) {
-        setItemsUpload({
-          file,
-          status: 'error',
-          message: result.errors[0]?.message || 'Nenhum item válido encontrado',
-          data: null,
-        });
-        return;
-      }
-      
-      setItemsUpload({
-        file,
-        status: 'success',
-        message: `${result.validRows} itens carregados`,
-        data: result,
-      });
-      
-      toast({
-        title: 'Detalhamento carregado!',
-        description: `${result.validRows} itens de produtos identificados`,
-      });
-    } catch (error) {
-      console.error('Error parsing items file:', error);
-      setItemsUpload({
-        file,
-        status: 'error',
-        message: isPDFFile(file) 
-          ? 'Erro ao processar PDF. Verifique se o arquivo possui texto selecionável.' 
-          : 'Erro ao processar arquivo',
-        data: null,
-      });
-    }
-  };
+  }, [file1Upload.status, file2Upload.status]);
   
-  // Process and merge data
+  // Processar e continuar
   const handleProcessData = () => {
-    if (salesUpload.status !== 'success' || !salesUpload.data) {
+    // Se temos dados cruzados, usar eles
+    if (mergedOrders && mergedOrders.length > 0) {
+      onDataReady(mergedOrders, true);
+      return;
+    }
+    
+    // Se só temos itinerário, criar pedidos a partir dele
+    if (file1Upload.detectedType === 'itinerario' && file1Upload.data) {
+      const orders = createOrdersFromItinerario(file1Upload.data);
+      onDataReady(orders, false);
+      return;
+    }
+    
+    if (file2Upload.detectedType === 'itinerario' && file2Upload.data) {
+      const orders = createOrdersFromItinerario(file2Upload.data);
+      onDataReady(orders, false);
+      return;
+    }
+    
+    // Se temos ADV sem itinerário, alertar
+    if (file1Upload.detectedType === 'adv' || file2Upload.detectedType === 'adv') {
       toast({
         title: 'Dados incompletos',
-        description: 'Faça o upload da planilha de vendas primeiro',
+        description: 'O relatório ADV não contém endereços. Carregue também o arquivo de itinerário.',
         variant: 'destructive',
       });
       return;
     }
     
-    let orders: ParsedOrder[] = salesUpload.data.orders;
-    let hasItemDetails = false;
-    
-    // Merge item details if available
-    if (itemsUpload.status === 'success' && itemsUpload.data) {
-      const itemDetails: ParsedItemDetail[] = itemsUpload.data.items;
-      orders = mergeItemsIntoOrders(orders, itemDetails);
-      hasItemDetails = true;
-      
-      toast({
-        title: 'Dados mesclados!',
-        description: 'Itens detalhados associados aos pedidos',
-      });
+    // Se temos Excel/genérico
+    if (file1Upload.detectedType === 'excel' || file1Upload.detectedType === 'generic') {
+      const result = file1Upload.data;
+      if (result && result.orders) {
+        onDataReady(result.orders, false);
+        return;
+      }
     }
     
-    onDataReady(orders, hasItemDetails);
+    if (file2Upload.detectedType === 'excel' || file2Upload.detectedType === 'generic') {
+      const result = file2Upload.data;
+      if (result && result.orders) {
+        onDataReady(result.orders, false);
+        return;
+      }
+    }
+    
+    toast({
+      title: 'Nenhum dado para processar',
+      description: 'Faça upload de pelo menos um arquivo',
+      variant: 'destructive',
+    });
   };
   
-  const canProcess = salesUpload.status === 'success';
+  const canProcess = 
+    file1Upload.status === 'success' || 
+    file2Upload.status === 'success' ||
+    mergedOrders !== null;
   
-  // Calculate summary
-  const salesSummary = salesUpload.data ? {
-    orders: salesUpload.data.validRows,
-    weight: salesUpload.data.orders?.reduce((sum: number, o: ParsedOrder) => sum + o.weight_kg, 0) || 0,
-  } : null;
+  // Estatísticas
+  const getFileSummary = (upload: UploadState): { count: number; label: string } | null => {
+    if (upload.status !== 'success' || !upload.data) return null;
+    
+    if (upload.detectedType === 'itinerario') {
+      return { count: upload.data.length, label: 'endereços' };
+    }
+    if (upload.detectedType === 'adv') {
+      return { count: upload.data.length, label: 'pedidos' };
+    }
+    if (upload.detectedType === 'excel' || upload.detectedType === 'generic') {
+      return { count: upload.data.validRows || upload.data.orders?.length || 0, label: 'pedidos' };
+    }
+    return null;
+  };
   
-  const itemsSummary = itemsUpload.data ? {
-    items: itemsUpload.data.validRows,
-    uniqueProducts: new Set(itemsUpload.data.items?.map((i: ParsedItemDetail) => i.product_name)).size,
-  } : null;
+  const file1Summary = getFileSummary(file1Upload);
+  const file2Summary = getFileSummary(file2Upload);
   
+  // Determinar labels dinâmicos
+  const getFileLabel = (upload: UploadState, defaultLabel: string): string => {
+    if (upload.detectedType === 'itinerario') return 'Itinerário de Vendas';
+    if (upload.detectedType === 'adv') return 'Relatório ADV';
+    if (upload.detectedType === 'excel') return 'Planilha Excel';
+    return defaultLabel;
+  };
+  
+  const getFileIcon = (upload: UploadState) => {
+    if (upload.detectedType === 'itinerario') return <FileSpreadsheet className="h-5 w-5 text-primary" />;
+    if (upload.detectedType === 'adv') return <FileText className="h-5 w-5 text-primary" />;
+    return <FileSpreadsheet className="h-5 w-5 text-primary" />;
+  };
+
   return (
     <div className="space-y-6">
       {/* Instructions */}
       <Alert>
         <FileSpreadsheet className="h-4 w-4" />
         <AlertDescription>
-          <strong>Fluxo Automatizado:</strong> Carregue a planilha de vendas (Excel ou PDF) e, opcionalmente, 
-          o detalhamento dos itens por pedido. O sistema irá compor os caminhões automaticamente.
+          <strong>Cruzamento Automático:</strong> Carregue dois arquivos PDF - o <strong>Itinerário de Vendas</strong> (com endereços) 
+          e o <strong>Relatório ADV</strong> (com itens detalhados). O sistema irá cruzar os dados automaticamente pelo número da venda.
         </AlertDescription>
       </Alert>
       
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Sales File Upload */}
+        {/* Arquivo 1 */}
         <Card className={cn(
           'transition-all',
-          salesUpload.status === 'success' && 'ring-2 ring-success/50'
+          file1Upload.status === 'success' && 'ring-2 ring-success/50'
         )}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <FileSpreadsheet className="h-5 w-5 text-primary" />
-              1. Planilha de Vendas
-              {salesUpload.status === 'success' && (
+              {getFileIcon(file1Upload)}
+              {getFileLabel(file1Upload, '1. Primeiro Arquivo')}
+              {file1Upload.status === 'success' && (
                 <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
               )}
             </CardTitle>
-          <CardDescription>
-              Pedidos com cliente, endereço e peso (Excel ou PDF)
+            <CardDescription>
+              {file1Upload.detectedType === 'itinerario' 
+                ? 'Contém endereços de entrega por venda'
+                : file1Upload.detectedType === 'adv'
+                ? 'Contém itens detalhados por venda'
+                : 'PDF ou Excel com dados de vendas'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div
               className={cn(
                 'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all',
-                salesUpload.status === 'processing' && 'opacity-50',
-                salesUpload.status === 'success' && 'border-success/50 bg-success/5',
-                salesUpload.status === 'error' && 'border-destructive/50 bg-destructive/5'
+                file1Upload.status === 'processing' && 'opacity-50',
+                file1Upload.status === 'success' && 'border-success/50 bg-success/5',
+                file1Upload.status === 'error' && 'border-destructive/50 bg-destructive/5'
               )}
             >
-              {salesUpload.status === 'processing' ? (
+              {file1Upload.status === 'processing' ? (
                 <RefreshCcw className="h-8 w-8 animate-spin text-primary" />
-              ) : salesUpload.status === 'success' ? (
+              ) : file1Upload.status === 'success' ? (
                 <>
                   <CheckCircle2 className="h-8 w-8 text-success mb-2" />
-                  <p className="font-medium text-success">{salesUpload.message}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{salesUpload.file?.name}</p>
+                  <p className="font-medium text-success">{file1Upload.message}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{file1Upload.file?.name}</p>
                 </>
-              ) : salesUpload.status === 'error' ? (
+              ) : file1Upload.status === 'error' ? (
                 <>
                   <XCircle className="h-8 w-8 text-destructive mb-2" />
-                  <p className="text-sm text-destructive text-center">{salesUpload.message}</p>
+                  <p className="text-sm text-destructive text-center">{file1Upload.message}</p>
                 </>
               ) : (
                 <>
@@ -285,143 +476,141 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             </div>
             
             <Input
-              ref={salesInputRef}
+              ref={file1InputRef}
               type="file"
               accept=".xlsx,.xls,.pdf"
-              onChange={(e) => e.target.files?.[0] && handleSalesFile(e.target.files[0])}
+              onChange={(e) => e.target.files?.[0] && handleFile1(e.target.files[0])}
               className="hidden"
-              id="sales-upload"
+              id="file1-upload"
             />
             
             <div className="flex gap-2">
-              <Label htmlFor="sales-upload" className="flex-1">
+              <Label htmlFor="file1-upload" className="flex-1">
                 <Button variant="outline" className="w-full" asChild>
                   <span>
                     <FileSpreadsheet className="mr-2 h-4 w-4" />
-                    {salesUpload.file ? 'Trocar Arquivo' : 'Selecionar Arquivo'}
+                    {file1Upload.file ? 'Trocar Arquivo' : 'Selecionar Arquivo'}
                   </span>
                 </Button>
               </Label>
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => {
-                  downloadTemplate();
-                  toast({ title: 'Template de vendas baixado!' });
-                }}
-                title="Baixar template"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
             </div>
             
-            {/* Sales Summary */}
-            {salesSummary && (
+            {/* File 1 Summary */}
+            {file1Summary && (
               <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-muted-foreground" />
-                  <span>{salesSummary.orders} pedidos</span>
+                  <span>{file1Summary.count} {file1Summary.label}</span>
                 </div>
-                <Badge variant="secondary">{formatWeight(salesSummary.weight)}</Badge>
+                <Badge variant="secondary">{file1Upload.detectedType}</Badge>
               </div>
             )}
           </CardContent>
         </Card>
         
-        {/* Items File Upload */}
+        {/* Arquivo 2 */}
         <Card className={cn(
           'transition-all',
-          itemsUpload.status === 'success' && 'ring-2 ring-success/50'
+          file2Upload.status === 'success' && 'ring-2 ring-success/50'
         )}>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <FileText className="h-5 w-5 text-primary" />
-              2. Detalhamento de Itens
+              {getFileIcon(file2Upload)}
+              {getFileLabel(file2Upload, '2. Segundo Arquivo')}
               <Badge variant="outline" className="ml-1 text-xs">Opcional</Badge>
-              {itemsUpload.status === 'success' && (
+              {file2Upload.status === 'success' && (
                 <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
               )}
             </CardTitle>
             <CardDescription>
-              Lista de produtos por Pedido_ID (Excel ou PDF)
+              {file2Upload.detectedType === 'itinerario' 
+                ? 'Contém endereços de entrega por venda'
+                : file2Upload.detectedType === 'adv'
+                ? 'Contém itens detalhados por venda'
+                : 'Para cruzamento automático de dados'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div
               className={cn(
                 'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all',
-                itemsUpload.status === 'processing' && 'opacity-50',
-                itemsUpload.status === 'success' && 'border-success/50 bg-success/5',
-                itemsUpload.status === 'error' && 'border-destructive/50 bg-destructive/5'
+                file2Upload.status === 'processing' && 'opacity-50',
+                file2Upload.status === 'success' && 'border-success/50 bg-success/5',
+                file2Upload.status === 'error' && 'border-destructive/50 bg-destructive/5'
               )}
             >
-              {itemsUpload.status === 'processing' ? (
+              {file2Upload.status === 'processing' ? (
                 <RefreshCcw className="h-8 w-8 animate-spin text-primary" />
-              ) : itemsUpload.status === 'success' ? (
+              ) : file2Upload.status === 'success' ? (
                 <>
                   <CheckCircle2 className="h-8 w-8 text-success mb-2" />
-                  <p className="font-medium text-success">{itemsUpload.message}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{itemsUpload.file?.name}</p>
+                  <p className="font-medium text-success">{file2Upload.message}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{file2Upload.file?.name}</p>
                 </>
-              ) : itemsUpload.status === 'error' ? (
+              ) : file2Upload.status === 'error' ? (
                 <>
                   <XCircle className="h-8 w-8 text-destructive mb-2" />
-                  <p className="text-sm text-destructive text-center">{itemsUpload.message}</p>
+                  <p className="text-sm text-destructive text-center">{file2Upload.message}</p>
                 </>
               ) : (
                 <>
                   <Upload className="h-8 w-8 text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground text-center">
-                    Opcional: detalhamento dos itens
+                    Opcional: segundo arquivo para cruzamento
                   </p>
                 </>
               )}
             </div>
             
             <Input
-              ref={itemsInputRef}
+              ref={file2InputRef}
               type="file"
               accept=".xlsx,.xls,.pdf"
-              onChange={(e) => e.target.files?.[0] && handleItemsFile(e.target.files[0])}
+              onChange={(e) => e.target.files?.[0] && handleFile2(e.target.files[0])}
               className="hidden"
-              id="items-upload"
+              id="file2-upload"
             />
             
             <div className="flex gap-2">
-              <Label htmlFor="items-upload" className="flex-1">
+              <Label htmlFor="file2-upload" className="flex-1">
                 <Button variant="outline" className="w-full" asChild>
                   <span>
                     <FileText className="mr-2 h-4 w-4" />
-                    {itemsUpload.file ? 'Trocar Arquivo' : 'Selecionar Arquivo'}
+                    {file2Upload.file ? 'Trocar Arquivo' : 'Selecionar Arquivo'}
                   </span>
                 </Button>
               </Label>
-              <Button 
-                variant="ghost" 
-                size="icon"
-                onClick={() => {
-                  generateItemDetailTemplate();
-                  toast({ title: 'Template de itens baixado!' });
-                }}
-                title="Baixar template"
-              >
-                <Download className="h-4 w-4" />
-              </Button>
             </div>
             
-            {/* Items Summary */}
-            {itemsSummary && (
+            {/* File 2 Summary */}
+            {file2Summary && (
               <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <Package className="h-4 w-4 text-muted-foreground" />
-                  <span>{itemsSummary.items} itens</span>
+                  <span>{file2Summary.count} {file2Summary.label}</span>
                 </div>
-                <Badge variant="secondary">{itemsSummary.uniqueProducts} produtos</Badge>
+                <Badge variant="secondary">{file2Upload.detectedType}</Badge>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
+      
+      {/* Merge Summary */}
+      {mergeSummary && (
+        <Alert className={cn(
+          mergeSummary.unmatched > 0 ? 'border-warning' : 'border-success'
+        )}>
+          <Link2 className="h-4 w-4" />
+          <AlertDescription>
+            <strong>Cruzamento concluído:</strong>{' '}
+            <span className="text-success font-medium">{mergeSummary.matched} pedidos</span> cruzados com sucesso
+            {mergeSummary.unmatched > 0 && (
+              <>, <span className="text-warning font-medium">{mergeSummary.unmatched} pedidos</span> sem endereço correspondente</>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
       
       <Separator />
       
@@ -436,20 +625,23 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           {canProcess ? (
             <>
               <CheckCircle2 className="mr-2 h-5 w-5" />
-              Processar Dados e Continuar
+              {mergedOrders ? `Continuar com ${mergedOrders.filter(o => o.isValid).length} Pedidos` : 'Processar e Continuar'}
             </>
           ) : (
             <>
               <Upload className="mr-2 h-5 w-5" />
-              Aguardando upload da planilha de vendas
+              Aguardando upload de arquivo
             </>
           )}
         </Button>
         
-        {!itemsUpload.file && salesUpload.status === 'success' && (
+        {file1Upload.status === 'success' && file2Upload.status !== 'success' && (
           <p className="text-sm text-muted-foreground text-center">
-            Você pode prosseguir sem o detalhamento de itens. 
-            Os pesos dos pedidos serão usados diretamente.
+            {file1Upload.detectedType === 'adv' 
+              ? 'Carregue o arquivo de itinerário para obter os endereços de entrega.'
+              : file1Upload.detectedType === 'itinerario'
+              ? 'Você pode prosseguir ou carregar o relatório ADV para itens detalhados.'
+              : 'Você pode prosseguir ou carregar um segundo arquivo para cruzamento.'}
           </p>
         )}
       </div>
