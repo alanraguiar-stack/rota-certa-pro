@@ -1,205 +1,132 @@
 
 
-# Plano: Cruzar Dados dos Dois PDFs pelo Número da Venda
+# Plano: Suportar Formato de Itinerário de Vendas em Excel
 
-## Entendimento do Problema
+## Problema Identificado
 
-Você tem **dois PDFs complementares** que precisam ser cruzados:
+O arquivo `vendas.xlsx` está no formato de **Itinerário de Vendas** com as seguintes colunas:
 
-| Arquivo | Contém | Campos Principais |
-|---------|--------|-------------------|
-| `venda.23.01.26.pdf` | Itinerário de Vendas | Venda, Cliente, **End. Ent.**, Bairro Ent., Cidade Ent., Cep Ent., Peso Bruto |
-| `RELATÓRIO_DE_VENDAS_-_23.01.26.pdf` | Relatório ADV | Venda Nº, Cliente, **Itens detalhados** (Produto + Qtde) |
+| Coluna no Excel | Significado |
+|----------------|-------------|
+| `Venda` | ID do pedido |
+| `Cliente` | Nome do cliente |
+| `End. Ent.` | Endereço de entrega (rua + número) |
+| `Bairro Ent.` | Bairro de entrega |
+| `Cidade Ent.` | Cidade de entrega |
+| `Cep Ent.` | CEP de entrega |
+| `Peso Bruto` | Peso em kg |
 
-**Chave de cruzamento**: Número da Venda (ex: `276017`, `275949`)
+O parser atual não reconhece estas colunas porque:
+1. `COLUMN_PATTERNS.address` procura por `/endere[çc]o/i` mas não `/end\.?\s*ent/i`
+2. `COLUMN_PATTERNS.bairro` procura por `/bairro/i` mas não reconhece `Bairro Ent.`
+3. Similar para cidade, CEP e outros campos
 
-## Fluxo de Processamento
+## Solução
 
-```text
-Upload: venda.23.01.26.pdf (Itinerário)
-  -> Extrai: Venda, Cliente, End. Ent., Bairro, Cidade, CEP, Peso
-            |
-            v
-Upload: RELATÓRIO_DE_VENDAS.pdf (Detalhamento ADV)
-  -> Extrai: Venda Nº, Cliente, Itens (Produto + Peso)
-            |
-            v
-CRUZAMENTO pelo Número da Venda
-  -> Pedido completo: Cliente + Endereço + Itens + Peso
-```
+Atualizar o `COLUMN_PATTERNS` no arquivo `orderParser.ts` para reconhecer as colunas do formato de Itinerário de Vendas, permitindo que arquivos Excel neste formato sejam importados corretamente.
 
 ## Arquivos a Modificar
 
 | Arquivo | Ação |
 |---------|------|
-| `src/lib/advParser.ts` | Adicionar parser para formato Itinerário + função de cruzamento |
-| `src/lib/orderParser.ts` | Atualizar mapeamento de colunas para reconhecer "End. Ent.", "Bairro Ent.", etc. |
-| `src/components/route/DualFileUpload.tsx` | Integrar detecção automática e cruzamento no fluxo |
+| `src/lib/orderParser.ts` | Atualizar COLUMN_PATTERNS para reconhecer formato Itinerário |
 
-## Detalhes Técnicos
+## Mudanças Técnicas
 
-### 1. Novo Tipo: Registro de Itinerário
+### 1. Atualizar `COLUMN_PATTERNS` (linhas 69-102)
 
-```typescript
-interface ItinerarioRecord {
-  venda_id: string;
-  client_name: string;
-  address: string;      // End. Ent.
-  neighborhood: string; // Bairro Ent.
-  city: string;         // Cidade Ent.
-  cep: string;          // Cep Ent.
-  weight_kg: number;    // Peso Bruto
-}
-```
-
-### 2. Parser para Itinerário (`src/lib/advParser.ts`)
-
-Detectar formato Itinerário pelo header "Vendas_Itinerario" ou colunas "End. Ent.", "Bairro Ent.":
-
-```typescript
-export function isItinerarioFormat(headers: string[]): boolean {
-  const text = headers.join(' ').toLowerCase();
-  return /end\.\s*ent|bairro\s*ent|vendas.?itinerario/i.test(text);
-}
-
-export async function parseItinerarioPDF(file: File): Promise<ItinerarioRecord[]> {
-  // 1. Extrair texto tabular do PDF
-  // 2. Mapear colunas: Venda, Cliente, End. Ent., Bairro Ent., Cidade Ent., Cep, Peso Bruto
-  // 3. Construir endereço completo: "R. BARUARE, 261, JARDIM ADELFIORE, SAO PAULO, 05223-090"
-}
-```
-
-### 3. Mapeamento de Colunas do Itinerário
-
-| Coluna no PDF | Campo no Sistema |
-|---------------|------------------|
-| `Venda` | `venda_id` |
-| `Cliente` | `client_name` |
-| `End. Ent.` | `address` (rua + número) |
-| `Bairro Ent.` | `neighborhood` |
-| `Cidade Ent.` | `city` |
-| `Cep Ent.` ou `Cep` | `cep` |
-| `Peso Bruto` | `weight_kg` |
-
-### 4. Função de Cruzamento
-
-```typescript
-export function mergeItinerarioWithADV(
-  itinerario: ItinerarioRecord[],
-  advOrders: ParsedOrder[]
-): ParsedOrder[] {
-  return advOrders.map(order => {
-    // Buscar endereço pelo número da venda
-    const enderecoData = itinerario.find(
-      it => it.venda_id === order.pedido_id
-    );
-    
-    if (enderecoData) {
-      // Construir endereço completo
-      const fullAddress = [
-        enderecoData.address,
-        enderecoData.neighborhood,
-        enderecoData.city,
-        enderecoData.cep
-      ].filter(Boolean).join(', ');
-      
-      return {
-        ...order,
-        address: fullAddress,
-        isValid: true,
-      };
-    }
-    
-    return order; // Mantém sem endereço se não encontrar
-  });
-}
-```
-
-### 5. Atualização do Fluxo de Upload (`DualFileUpload.tsx`)
-
-O componente será atualizado para:
-
-1. **Detectar automaticamente o tipo de cada PDF**:
-   - Se contém "Vendas_Itinerario" ou "End. Ent." -> Arquivo de Itinerário (endereços)
-   - Se contém "Vendas detalhadas" ou "Cliente:" hierárquico -> Relatório ADV (itens)
-
-2. **Aceitar os arquivos em qualquer ordem** (não importa qual é carregado primeiro)
-
-3. **Cruzar automaticamente os dados quando ambos estiverem prontos**
-
-4. **Mostrar resumo do cruzamento**:
-   - Quantas vendas cruzaram com sucesso
-   - Quantas vendas ficaram sem endereço
-   - Quantas vendas ficaram sem itens detalhados
-
-### 6. Atualização do orderParser.ts
-
-Adicionar padrões para reconhecer as colunas do formato Itinerário:
+Adicionar padrões para reconhecer as colunas do formato de Itinerário:
 
 ```typescript
 const COLUMN_PATTERNS = {
-  // ... padrões existentes ...
-  endEnt: [/end\.?\s*ent\.?/i, /endereco\s*ent/i],
-  bairroEnt: [/bairro\.?\s*ent\.?/i],
-  cidadeEnt: [/cidade\.?\s*ent\.?/i],
-  cepEnt: [/cep\.?\s*ent\.?/i, /^cep$/i],
-  pesoBruto: [/peso\s*bruto/i, /peso/i],
-  venda: [/^venda$/i, /n[º°]?\s*venda/i],
+  pedidoId: [
+    /pedido.?id/i, /pedido/i, /order.?id/i, /id.?pedido/i, /numero.?pedido/i,
+    /^venda$/i, /n[º°]?\s*venda/i  // NOVO: formato itinerário
+  ],
+  clientName: [
+    /cliente/i, /nome/i, /customer/i, /name/i, /razao/i, /fantasia/i, 
+    /destinat[áa]rio/i, /empresa/i, /company/i
+  ],
+  rua: [
+    /^rua$/i, /logradouro/i, /street/i,
+    /end\.?\s*ent\.?/i, /endereco\s*ent/i  // NOVO: End. Ent.
+  ],
+  numero: [
+    /^n[uú]mero$/i, /^num$/i, /^n[º°]?$/i, /number/i
+    // O número já vem junto no End. Ent., então não precisa de coluna separada
+  ],
+  bairro: [
+    /bairro/i, /neighborhood/i, /distrito/i,
+    /bairro\.?\s*ent\.?/i  // NOVO: Bairro Ent.
+  ],
+  cidade: [
+    /cidade/i, /city/i, /munic[íi]pio/i,
+    /cidade\.?\s*ent\.?/i  // NOVO: Cidade Ent.
+  ],
+  estado: [
+    /^estado$/i, /^uf$/i, /state/i,
+    /uf\.?\s*ent\.?/i  // NOVO: UF Ent.
+  ],
+  address: [
+    /endere[çc]o/i, /address/i, /local/i, /destino/i, /location/i,
+    /end\.?\s*ent\.?/i  // NOVO: formato itinerário
+  ],
+  weight: [
+    /peso/i, /weight/i, /kg/i, /kilos?/i, /massa/i, /carga/i,
+    /peso\s*bruto/i, /peso\s*l[íi]q/i  // NOVO: Peso Bruto / Peso Liq.
+  ],
+  cep: [
+    /^cep$/i, /cep\.?\s*ent\.?/i  // NOVO: CEP Ent.
+  ],
+  product: [
+    /produto/i, /product/i, /item/i, /descri[çc][ãa]o/i, /description/i,
+    /mercadoria/i, /material/i, /artigo/i
+  ],
 };
 ```
 
-## Exemplo de Resultado Final
+### 2. Atualizar lógica de construção de endereço
 
-Após o cruzamento:
+Modificar a função `buildAddressFromStructured` para incluir o CEP quando disponível, e tratar o caso onde `End. Ent.` já contém rua + número combinados.
 
-```typescript
-{
-  pedido_id: "276016",
-  client_name: "MARIA JANE ALBINO PEREIRA BARBOSA",
-  address: "R. BARUARE, 261, JARDIM ADELFIORE, SAO PAULO, 05223-090",
-  weight_kg: 12.81,
-  items: [
-    { product_name: "MUSSARELA - ESPLANADA - 4 KG", weight_kg: 12.81, quantity: 1 }
-  ],
-  isValid: true
-}
+### 3. Atualizar detecção de formato itinerário
+
+Adicionar uma verificação para o formato de Itinerário quando detectando colunas, permitindo que o sistema reconheça automaticamente este formato e construa o endereço corretamente.
+
+## Mapeamento de Colunas
+
+| Coluna no Excel | Campo no Sistema |
+|----------------|------------------|
+| `Venda` | `pedido_id` |
+| `Cliente` | `client_name` |
+| `End. Ent.` | `rua` (contém rua + número) |
+| `Bairro Ent.` | `bairro` |
+| `Cidade Ent.` | `cidade` |
+| `Cep Ent.` | `cep` (novo campo) |
+| `UF Ent.` | `estado` |
+| `Peso Bruto` | `weight_kg` |
+
+## Endereço Final Construído
+
+O endereço final será montado assim:
 ```
-
-## Tratamento de Casos Especiais
-
-| Situação | Ação |
-|----------|------|
-| Venda no ADV sem endereço no Itinerário | Marcar como inválido, solicitar correção manual |
-| Venda no Itinerário sem detalhes no ADV | Usar apenas dados do itinerário (peso bruto, sem itens) |
-| Apenas 1 arquivo carregado | Processar normalmente, informar que dados podem estar incompletos |
-| Cliente com nomes diferentes | Priorizar match pelo número da venda (mais confiável) |
+R. FILOMENA FONGARO, 36, VILA FANTON, SAO PAULO - SP, 05201-160
+```
 
 ## Passos de Implementação
 
-1. **Adicionar parser de Itinerário** em `advParser.ts`
-   - Detectar formato pelo header
-   - Mapear colunas específicas (End. Ent., Bairro Ent., etc.)
-   - Construir endereço completo
-
-2. **Implementar função de cruzamento** em `advParser.ts`
-   - Unir dados pelo número da venda
-   - Preservar itens do ADV + endereço do Itinerário
-
-3. **Atualizar DualFileUpload.tsx**
-   - Detectar automaticamente o tipo de arquivo
-   - Aceitar arquivos em qualquer ordem
-   - Cruzar quando ambos estiverem disponíveis
-
-4. **Atualizar orderParser.ts**
-   - Adicionar padrões de colunas do Itinerário
-   - Integrar detecção automática de formato
+1. **Atualizar COLUMN_PATTERNS**: Adicionar padrões para formato Itinerário
+2. **Adicionar campo CEP ao ColumnMapping**: Interface atualizada
+3. **Atualizar buildAddressFromStructured**: Incluir CEP na construção do endereço
+4. **Atualizar detectStructuredMapping**: Reconhecer colunas do itinerário
+5. **Testar com arquivo vendas.xlsx**: Verificar importação correta
 
 ## Resultado Esperado
 
-1. Fazer upload de qualquer um dos dois PDFs
-2. Sistema detecta automaticamente o formato
-3. Fazer upload do segundo PDF
-4. Sistema cruza os dados pelo número da venda
-5. Resultado: pedidos completos com endereço + itens detalhados
-6. Continuar fluxo de roteirização normalmente
+Após a implementação:
+1. Upload do arquivo `vendas.xlsx`
+2. Sistema detecta automaticamente o formato de Itinerário
+3. Mapeia colunas: Venda → pedido_id, Cliente → client_name, End. Ent. → address, etc.
+4. Constrói endereço completo: `rua, número, bairro, cidade - estado, cep`
+5. Importa todos os pedidos com sucesso
 
