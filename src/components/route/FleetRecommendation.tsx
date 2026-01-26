@@ -16,6 +16,7 @@ interface FleetRecommendationProps {
   onSelectionChange: (truckIds: string[]) => void;
   onConfirm: () => void;
   isConfirming?: boolean;
+  disabled?: boolean; // Disables selection when fleet is already confirmed
 }
 
 // Algorithm to recommend optimal fleet combination
@@ -170,6 +171,7 @@ export function FleetRecommendation({
   onSelectionChange,
   onConfirm,
   isConfirming,
+  disabled = false,
 }: FleetRecommendationProps) {
   const [showAllTrucks, setShowAllTrucks] = useState(false);
 
@@ -190,6 +192,7 @@ export function FleetRecommendation({
   const hasSelection = selectedTruckIds.length > 0;
 
   const handleTruckToggle = (truckId: string) => {
+    if (disabled) return;
     const newSelection = selectedTruckIds.includes(truckId)
       ? selectedTruckIds.filter((id) => id !== truckId)
       : [...selectedTruckIds, truckId];
@@ -197,11 +200,12 @@ export function FleetRecommendation({
   };
 
   const handleApplyRecommendation = (recommendation: FleetRecommendationType) => {
+    if (disabled) return;
     onSelectionChange(recommendation.trucks.map((t) => t.id));
   };
 
   return (
-    <div className="space-y-6">
+    <div className={cn("space-y-6", disabled && "opacity-70 pointer-events-none")}>
       {/* Recommendations */}
       {recommendations.length > 0 && (
         <div className="space-y-3">
@@ -337,7 +341,7 @@ export function FleetRecommendation({
       </div>
 
       {/* Confirm Button */}
-      {hasSelection && (
+      {hasSelection && !disabled && (
         <Button
           className="w-full"
           size="lg"

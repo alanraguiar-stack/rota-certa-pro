@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,13 +15,23 @@ import { cn } from '@/lib/utils';
 import { ManifestViewer } from '@/components/route/ManifestViewer';
 import { LoadingManifest } from '@/components/route/LoadingManifest';
 import { LoadingConfirmation } from '@/components/route/LoadingConfirmation';
-import { RouteWorkflowStepper, getActiveStep } from '@/components/route/RouteWorkflowStepper';
+import { RouteWorkflowStepper, getActiveStep, RouteWorkflowStep } from '@/components/route/RouteWorkflowStepper';
 import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
 import { GeocodingProgress } from '@/components/route/GeocodingProgress';
 import { FailedAddressFixer } from '@/components/route/FailedAddressFixer';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
+
+// Workflow step order for navigation
+const WORKFLOW_ORDER: RouteWorkflowStep[] = [
+  'select_trucks',
+  'distribute_load',
+  'loading_manifest',
+  'confirm_loading',
+  'optimize_routes',
+  'delivery_manifest',
+];
 
 export default function RouteDetails() {
   const { id } = useParams<{ id: string }>();
@@ -53,6 +63,9 @@ export default function RouteDetails() {
   const [showSchedule, setShowSchedule] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
   
+  // Track if fleet was pre-configured in wizard
+  const [fleetFromWizard, setFleetFromWizard] = useState(false);
+  
   // State for manual map location selection
   const [selectingLocationFor, setSelectingLocationFor] = useState<{
     orderId: string;
@@ -71,13 +84,23 @@ export default function RouteDetails() {
     await reorderDeliveries.mutateAsync(reorders);
   };
 
-  // Add pending orders and routing strategy from navigation state
+  // Add pending orders, trucks, and routing strategy from navigation state (from wizard)
   useEffect(() => {
     const pendingOrders = location.state?.pendingOrders as ParsedOrder[] | undefined;
     const stateStrategy = location.state?.routingStrategy as RoutingStrategy | undefined;
+    const selectedTruckIdsFromWizard = location.state?.selectedTruckIds as string[] | undefined;
+    const fleetAlreadyConfigured = location.state?.fleetAlreadyConfigured as boolean | undefined;
     
     if (stateStrategy) {
       setRoutingStrategy(stateStrategy);
+    }
+    
+    // Pre-select trucks from wizard if provided
+    if (selectedTruckIdsFromWizard && selectedTruckIdsFromWizard.length > 0) {
+      setSelectedTrucks(selectedTruckIdsFromWizard);
+      if (fleetAlreadyConfigured) {
+        setFleetFromWizard(true);
+      }
     }
     
     if (pendingOrders && pendingOrders.length > 0 && !hasAddedPendingOrders && route) {
@@ -95,6 +118,22 @@ export default function RouteDetails() {
             setTimeout(() => {
               startGeocoding();
             }, 500);
+            
+            // Auto-assign trucks if fleet was configured in wizard
+            if (selectedTruckIdsFromWizard && selectedTruckIdsFromWizard.length > 0 && fleetAlreadyConfigured) {
+              setTimeout(async () => {
+                try {
+                  await assignTrucks.mutateAsync(selectedTruckIdsFromWizard);
+                  await refetch();
+                  toast({
+                    title: 'Frota atribuída automaticamente',
+                    description: `${selectedTruckIdsFromWizard.length} caminhão(ões) configurado(s)`,
+                  });
+                } catch (error) {
+                  console.error('Auto-assign trucks error:', error);
+                }
+              }, 1000);
+            }
           }
         }
       );
@@ -231,6 +270,22 @@ export default function RouteDetails() {
     await refetch();
   };
 
+  // Navigate back one step in workflow
+  const handleGoBack = () => {
+    const currentIndex = WORKFLOW_ORDER.indexOf(activeStep);
+    if (currentIndex <= 0) {
+      // Go back to route list
+      navigate('/');
+      return;
+    }
+    
+    // Determine what needs to be reset to go back
+    toast({
+      title: 'Voltar para etapa anterior',
+      description: 'Use o fluxo do wizard para refazer etapas anteriores.',
+    });
+  };
+
   // Handlers for failed address fixer
   const handleRetryGeocode = async (orderId: string): Promise<boolean> => {
     const success = await retryGeocode(orderId);
@@ -250,6 +305,15 @@ export default function RouteDetails() {
   const handleSetManualCoords = async (orderId: string, lat: number, lng: number): Promise<void> => {
     await setManualCoords.mutateAsync({ orderId, lat, lng });
     await refetch();
+  };
+
+  // Handle "continue anyway" for failed geocoding - non-blocking
+  const handleContinueWithFailedAddresses = () => {
+    toast({
+      title: 'Continuando com endereços informados',
+      description: 'Os endereços não localizados serão usados como informado. A roteirização usará aproximações.',
+    });
+    // Just dismiss the warning - the flow continues naturally
   };
 
   // Handlers for manual map selection
@@ -312,10 +376,15 @@ export default function RouteDetails() {
     occupancyPercent: rt.occupancy_percent,
   }));
 
+  // Check if there are failed geocoding addresses
+  const hasFailedAddresses = route.orders.some(
+    o => o.geocoding_status === 'not_found' || o.geocoding_status === 'error'
+  );
+
   return (
     <AppLayout>
       <div className="space-y-6">
-        {/* Header */}
+        {/* Header with Back Button */}
         <div className="flex items-center gap-4">
           <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-5 w-5" />
@@ -401,21 +470,24 @@ export default function RouteDetails() {
           />
         )}
 
-        {/* Failed Address Fixer */}
-        {route.orders.some(o => o.geocoding_status === 'not_found' || o.geocoding_status === 'error') && (
+        {/* Failed Address Fixer - NON-BLOCKING */}
+        {hasFailedAddresses && (
           <FailedAddressFixer
             orders={route.orders}
             onRetryGeocode={handleRetryGeocode}
             onUpdateAddress={handleUpdateAddress}
             onSetManualCoords={handleSetManualCoords}
             onStartMapSelection={handleStartMapSelection}
+            onContinueAnyway={handleContinueWithFailedAddresses}
             selectingOnMapFor={selectingLocationFor?.orderId}
             isProcessing={geocodingProgress.status === 'processing'}
+            canContinue={true}
           />
         )}
 
         {/* ============================================ */}
         {/* ETAPA 1: SELECIONAR CAMINHÕES               */}
+        {/* (Only shown if fleet wasn't configured in wizard) */}
         {/* ============================================ */}
         {activeStep === 'select_trucks' && (
           <Card>
@@ -425,7 +497,10 @@ export default function RouteDetails() {
                 Etapa 1: Selecionar Caminhões
               </CardTitle>
               <CardDescription>
-                Escolha os caminhões para esta rota ou use a recomendação automática
+                {fleetFromWizard 
+                  ? 'A frota foi configurada no wizard. Aguarde a atribuição automática ou ajuste manualmente.'
+                  : 'Escolha os caminhões para esta rota ou use a recomendação automática'
+                }
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -499,13 +574,17 @@ export default function RouteDetails() {
         {activeStep === 'distribute_load' && (
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="h-5 w-5" />
-                Etapa 2: Distribuir Carga
-              </CardTitle>
-              <CardDescription>
-                {route.route_trucks.length} caminhões selecionados. Distribua as cargas entre os veículos.
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Package className="h-5 w-5" />
+                    Etapa 2: Distribuir Carga
+                  </CardTitle>
+                  <CardDescription>
+                    {route.route_trucks.length} caminhões selecionados. Distribua as cargas entre os veículos.
+                  </CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
