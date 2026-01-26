@@ -122,62 +122,30 @@ function generateLoadingManifestPDF(
   doc.setFont('helvetica', 'normal');
   doc.text(String(orders.length), 180, 52);
   
-  // CD info
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'italic');
-  doc.text(`Origem: ${DISTRIBUTION_CENTER.name} - ${DISTRIBUTION_CENTER.address}`, 20, 68);
-  
-  // Consolidated Products Table
+  // Consolidated Products Table (main content - no client details in PDF)
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  doc.text('PRODUTOS CONSOLIDADOS', 20, 80);
+  doc.text('PRODUTOS PARA SEPARACAO', 20, 80);
   
   const consolidatedProducts = consolidateProducts(orders);
   
   autoTable(doc, {
     startY: 85,
-    head: [['Produto', 'Peso Total', 'Qtd Pedidos']],
-    body: consolidatedProducts.map(p => [
+    head: [['#', 'Produto', 'Peso Total']],
+    body: consolidatedProducts.map((p, idx) => [
+      String(idx + 1),
       p.product,
       formatWeight(p.totalWeight),
-      String(p.orderCount),
     ]),
-    foot: [['TOTAL', formatWeight(totalWeight), String(orders.length)]],
+    foot: [['', 'TOTAL', formatWeight(totalWeight)]],
     theme: 'striped',
-    headStyles: { fillColor: [80, 80, 80], fontSize: 10 },
-    footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold' },
-    styles: { fontSize: 9 },
+    headStyles: { fillColor: [80, 80, 80], fontSize: 11 },
+    footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
+    styles: { fontSize: 10 },
     columnStyles: {
-      0: { cellWidth: 'auto' },
-      1: { cellWidth: 35, halign: 'right' },
-      2: { cellWidth: 30, halign: 'center' },
-    },
-  });
-  
-  // Detailed orders list
-  const lastTableY = (doc as any).lastAutoTable?.finalY || 120;
-  
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.text('DETALHAMENTO POR CLIENTE', 20, lastTableY + 15);
-  
-  autoTable(doc, {
-    startY: lastTableY + 20,
-    head: [['#', 'Cliente', 'Produto', 'Peso']],
-    body: orders.map((order, idx) => [
-      String(idx + 1),
-      order.client_name,
-      order.product_description || '-',
-      formatWeight(Number(order.weight_kg)),
-    ]),
-    theme: 'grid',
-    headStyles: { fillColor: [100, 100, 100], fontSize: 9 },
-    styles: { fontSize: 8 },
-    columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 60 },
-      2: { cellWidth: 'auto' },
-      3: { cellWidth: 25, halign: 'right' },
+      0: { cellWidth: 15, halign: 'center' },
+      1: { cellWidth: 'auto' },
+      2: { cellWidth: 40, halign: 'right' },
     },
   });
   
@@ -413,31 +381,7 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
               </div>
             </div>
             
-            {/* Detailed orders list */}
-            <div className="p-4">
-              <h3 className="font-semibold mb-3">Detalhamento por Cliente ({selectedTruck.orders.length})</h3>
-              <div className="max-h-60 overflow-y-auto space-y-2">
-                {selectedTruck.orders.map((order, idx) => (
-                  <div 
-                    key={order.id}
-                    className="flex items-center gap-3 rounded-lg border p-2 text-sm"
-                  >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-xs font-bold">
-                      {idx + 1}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{order.client_name}</p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {order.product_description || 'Produto não especificado'}
-                      </p>
-                    </div>
-                    <span className="font-semibold shrink-0">
-                      {formatWeight(Number(order.weight_kg))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+            {/* Removed: Detailed orders list - Romaneio de Carga should only show consolidated products */}
             
             {/* Signature fields */}
             <div className="border-t bg-muted/20 p-4">

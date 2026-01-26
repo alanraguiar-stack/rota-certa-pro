@@ -20,8 +20,10 @@ import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
 import { GeocodingProgress } from '@/components/route/GeocodingProgress';
-import { FailedAddressFixer } from '@/components/route/FailedAddressFixer';
+import { CollapsibleAddressFixer } from '@/components/route/CollapsibleAddressFixer';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
+import { LoadConsolidationView } from '@/components/route/LoadConsolidationView';
+import { SideBySideManifests } from '@/components/route/SideBySideManifests';
 
 // Workflow step order for navigation
 const WORKFLOW_ORDER: RouteWorkflowStep[] = [
@@ -470,9 +472,9 @@ export default function RouteDetails() {
           />
         )}
 
-        {/* Failed Address Fixer - NON-BLOCKING */}
+        {/* Failed Address Fixer - COLLAPSIBLE (takes less space) */}
         {hasFailedAddresses && (
-          <FailedAddressFixer
+          <CollapsibleAddressFixer
             orders={route.orders}
             onRetryGeocode={handleRetryGeocode}
             onUpdateAddress={handleUpdateAddress}
@@ -481,7 +483,6 @@ export default function RouteDetails() {
             onContinueAnyway={handleContinueWithFailedAddresses}
             selectingOnMapFor={selectingLocationFor?.orderId}
             isProcessing={geocodingProgress.status === 'processing'}
-            canContinue={true}
           />
         )}
 
@@ -616,25 +617,34 @@ export default function RouteDetails() {
         {/* ETAPA 3: ROMANEIO DE CARGA                 */}
         {/* ============================================ */}
         {activeStep === 'loading_manifest' && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileDown className="h-5 w-5" />
-                Etapa 3: Romaneio de Carga
-              </CardTitle>
-              <CardDescription>
-                Gere o romaneio para separação e conferência no Centro de Distribuição.
-                Após a separação física, confirme o carregamento.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <LoadingManifest
-                routeName={route.name}
-                date={new Date(route.created_at).toLocaleDateString('pt-BR')}
-                trucks={truckDataForComponents}
-              />
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            {/* Sub-etapa 1: Consolidação de Carga */}
+            <LoadConsolidationView
+              orders={route.orders}
+              trucks={truckDataForComponents}
+            />
+            
+            {/* Sub-etapa 2: Romaneio de Carga por Caminhão (para impressão) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileDown className="h-5 w-5" />
+                  Romaneios de Carga para Impressão
+                </CardTitle>
+                <CardDescription>
+                  Gere o romaneio para separação e conferência no Centro de Distribuição.
+                  Após a separação física, confirme o carregamento.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <LoadingManifest
+                  routeName={route.name}
+                  date={new Date(route.created_at).toLocaleDateString('pt-BR')}
+                  trucks={truckDataForComponents}
+                />
+              </CardContent>
+            </Card>
+          </div>
         )}
 
         {/* ============================================ */}
@@ -690,23 +700,17 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {activeStep === 'delivery_manifest' && (
           <>
-            {/* Map Visualization */}
+            {/* Map Visualization - Compact */}
             {(showMap || selectingLocationFor) && (
               <Card className={selectingLocationFor ? "ring-2 ring-primary" : ""}>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-lg">
                     <Map className="h-5 w-5" />
                     {selectingLocationFor 
-                      ? `Selecione a localização: ${selectingLocationFor.clientName}`
-                      : 'Visualização das Rotas'
+                      ? `Selecione: ${selectingLocationFor.clientName}`
+                      : 'Mapa das Rotas'
                     }
                   </CardTitle>
-                  <CardDescription>
-                    {selectingLocationFor 
-                      ? 'Clique no mapa para definir a localização manualmente'
-                      : 'Mapa interativo com as rotas de cada caminhão'
-                    }
-                  </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <RouteMap
@@ -754,117 +758,19 @@ export default function RouteDetails() {
               />
             )}
 
-            {/* Distribution Results */}
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold">Distribuição de Cargas (Roteirizada)</h2>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {route.route_trucks.map((rt) => (
-                  <Card key={rt.id}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="flex items-center gap-2 text-lg">
-                          <Truck className="h-5 w-5 text-primary" />
-                          {rt.truck?.plate}
-                        </CardTitle>
-                        <span
-                          className={cn(
-                            'rounded-full px-2 py-1 text-xs font-medium',
-                            rt.occupancy_percent > 90
-                              ? 'bg-destructive/10 text-destructive'
-                              : rt.occupancy_percent > 70
-                              ? 'bg-warning/10 text-warning'
-                              : 'bg-success/10 text-success'
-                          )}
-                        >
-                          {rt.occupancy_percent}%
-                        </span>
-                      </div>
-                      <CardDescription>{rt.truck?.model}</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="mb-3 space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Carga:</span>
-                          <span className="font-medium">
-                            {formatWeight(Number(rt.total_weight_kg))} /{' '}
-                            {formatWeight(Number(rt.truck?.capacity_kg ?? 0))}
-                          </span>
-                        </div>
-                        <Progress value={rt.occupancy_percent} className="h-2" />
-                      </div>
-
-                      {/* Distance and time estimates */}
-                      {rt.estimated_distance_km && (
-                        <div className="mb-3 text-sm space-y-1">
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Distância:</span>
-                            <span className="font-medium">{rt.estimated_distance_km.toFixed(1)} km</span>
-                          </div>
-                          {rt.estimated_time_minutes && (
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">Tempo estimado:</span>
-                              <span className="font-medium">{formatTime(rt.estimated_time_minutes)}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Timeline if schedule is set */}
-                      {(rt as any).departure_time && (
-                        <div className="mb-3">
-                          <TruckTimelineSummary
-                            truckPlate={rt.truck?.plate || ''}
-                            departureTime={(rt as any).departure_time}
-                            lastDeliveryTime={(rt as any).estimated_last_delivery_time || '--:--'}
-                            returnTime={(rt as any).estimated_return_time || '--:--'}
-                            totalOrders={rt.total_orders}
-                            totalDuration={formatTime(rt.estimated_time_minutes || 0)}
-                          />
-                        </div>
-                      )}
-
-                      <p className="mb-2 text-sm font-medium">
-                        {rt.total_orders} entregas (ordem otimizada):
-                      </p>
-                      <div className="max-h-40 space-y-1 overflow-y-auto">
-                        {rt.assignments?.map((assignment, index) => (
-                          <div
-                            key={assignment.id}
-                            className="flex items-center gap-2 rounded border px-2 py-1 text-sm"
-                          >
-                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-medium">
-                              {index + 1}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate font-medium">
-                                {assignment.order?.client_name}
-                              </p>
-                              <p className="truncate text-xs text-muted-foreground">
-                                {formatWeight(Number(assignment.order?.weight_kg ?? 0))}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-
-            {/* Delivery Manifest */}
+            {/* DOCUMENTOS LADO A LADO */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <FileDown className="h-5 w-5" />
-                  Romaneios de Entrega
+                  Documentos Finais
                 </CardTitle>
                 <CardDescription>
-                  Visualize, baixe ou imprima os romaneios de cada caminhão para os motoristas
+                  Romaneio de Carga (separação) e Romaneio de Entrega (motorista) lado a lado
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ManifestViewer
+                <SideBySideManifests
                   routeName={route.name}
                   date={new Date(route.created_at).toLocaleDateString('pt-BR')}
                   trucks={route.route_trucks.map(rt => ({
@@ -873,10 +779,8 @@ export default function RouteDetails() {
                     totalWeight: Number(rt.total_weight_kg),
                     occupancyPercent: rt.occupancy_percent,
                     departureTime: (rt as any).departure_time || undefined,
-                    departureDate: (rt as any).departure_date || undefined,
                     estimatedReturnTime: (rt as any).estimated_return_time || undefined,
                   }))}
-                  strategy={routingStrategy}
                 />
               </CardContent>
             </Card>
