@@ -1,102 +1,110 @@
 
-# Plano: Correção do Design Responsivo - Áreas de Colagem de Dados
+# Plano: Corrigir Romaneio de Carga Vazio
 
 ## Problema Identificado
 
-Na página `/nova-rota`, quando a tela tem uma largura intermediária (entre 768px e ~1100px), as duas colunas de entrada de dados ficam "espremidas":
-- Títulos como "1. Relatório Geral de Vendas" quebram em múltiplas linhas
-- Textareas ficam muito estreitas
-- Botões e ícones ficam comprimidos
-- Layout visual fica desorganizado
+O Romaneio de Carga está mostrando apenas "Produto não especificado" porque os **itens dos pedidos não estão sendo salvos** na tabela `order_items` do banco de dados.
 
 ## Causa Raiz
 
-O breakpoint `md:grid-cols-2` (768px) é muito agressivo para este layout que precisa de mais espaço horizontal por card. As duas colunas só ficam boas em telas maiores (>1024px).
+O código em `RouteDetails.tsx` (linha 110-116) **não inclui o campo `items`** ao passar os pedidos para a função `addOrders`:
+
+```typescript
+// CÓDIGO ATUAL (linha 110-116)
+addOrders.mutate(
+  pendingOrders.map((o) => ({
+    client_name: o.client_name,
+    address: o.address,
+    weight_kg: o.weight_kg,
+    product_description: o.product_description,
+    // ❌ FALTA: items: o.items
+  })),
+```
+
+## Fluxo do Bug
+
+```text
+┌────────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  Parser (ADV)      │ --> │  NewRoute.tsx    │ --> │ RouteDetails.tsx│
+│  items: [...]  ✓   │     │  items: [...]  ✓ │     │  items: ???  ✗  │
+└────────────────────┘     └──────────────────┘     └─────────────────┘
+                                                            │
+                                                            v
+                                                    ┌───────────────┐
+                                                    │ useRoutes.ts  │
+                                                    │ addOrders()   │
+                                                    │ items: []  ✗  │
+                                                    └───────────────┘
+                                                            │
+                                                            v
+                                                    ┌───────────────┐
+                                                    │ order_items   │
+                                                    │ (vazio)  ✗    │
+                                                    └───────────────┘
+```
 
 ## Solução
 
-Ajustar os breakpoints responsivos para:
-1. Usar `lg:grid-cols-2` em vez de `md:grid-cols-2` (trocar 768px por 1024px)
-2. Adicionar largura mínima nos cards para evitar compressão excessiva
-3. Melhorar a responsividade dos títulos e descrições
+Adicionar o campo `items` no mapeamento dos pedidos em `RouteDetails.tsx`.
 
 ## Arquivos a Modificar
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `src/components/route/DualPasteData.tsx` | Editar | Ajustar breakpoint do grid |
-| `src/components/route/DualFileUpload.tsx` | Editar | Ajustar breakpoint do grid |
+| `src/pages/RouteDetails.tsx` | Editar | Incluir `items: o.items` no objeto passado para `addOrders` |
 
-## Mudanças Técnicas
+## Mudança Técnica
 
-### 1. DualPasteData.tsx
-
-**Linha 732** - Alterar breakpoint do grid:
+**Arquivo:** `src/pages/RouteDetails.tsx`
+**Linhas:** 110-116
 
 ```typescript
 // ANTES
-<div className="grid gap-6 md:grid-cols-2">
+addOrders.mutate(
+  pendingOrders.map((o) => ({
+    client_name: o.client_name,
+    address: o.address,
+    weight_kg: o.weight_kg,
+    product_description: o.product_description,
+  })),
 
 // DEPOIS
-<div className="grid gap-6 lg:grid-cols-2">
+addOrders.mutate(
+  pendingOrders.map((o) => ({
+    client_name: o.client_name,
+    address: o.address,
+    weight_kg: o.weight_kg,
+    product_description: o.product_description,
+    items: o.items, // ← ADICIONAR ESTA LINHA
+  })),
 ```
 
-**Linhas 739-741 e 808-810** - Melhorar responsividade dos títulos:
+## Verificação Pós-Correção
 
-```typescript
-// ANTES
-<CardTitle className="flex items-center gap-2 text-base">
+Após aplicar a correção:
 
-// DEPOIS
-<CardTitle className="flex items-center gap-2 text-base flex-wrap">
-```
+1. Os dados importados via arquivo terão os itens salvos na tabela `order_items`
+2. O Romaneio de Carga mostrará a lista consolidada de produtos (ex: Mussarela 50kg, Presunto 30kg)
+3. Cada caminhão terá seu próprio romaneio com os produtos específicos atribuídos a ele
 
-### 2. DualFileUpload.tsx
+## Nota sobre Dados Existentes
 
-**Linha 424** - Alterar breakpoint do grid:
-
-```typescript
-// ANTES
-<div className="grid gap-6 md:grid-cols-2">
-
-// DEPOIS
-<div className="grid gap-6 lg:grid-cols-2">
-```
-
-**Linhas 431-433 e 517-519** - Melhorar responsividade dos títulos:
-
-```typescript
-// ANTES
-<CardTitle className="flex items-center gap-2 text-base">
-
-// DEPOIS
-<CardTitle className="flex items-center gap-2 text-base flex-wrap">
-```
-
-### 3. Adicionar Largura Mínima nos Cards (Opcional - Segurança Extra)
-
-Adicionar classe `min-w-0` nos cards para evitar overflow:
-
-```typescript
-<Card className={cn(
-  'transition-all min-w-0',  // min-w-0 evita overflow de conteúdo
-  ...
-)}>
-```
-
-## Comparação de Breakpoints Tailwind
-
-| Breakpoint | Tamanho | Comportamento Atual | Comportamento Novo |
-|------------|---------|--------------------|--------------------|
-| `sm` | 640px | 1 coluna | 1 coluna |
-| `md` | 768px | 2 colunas (espremido) | 1 coluna |
-| `lg` | 1024px | 2 colunas | 2 colunas |
-| `xl` | 1280px | 2 colunas | 2 colunas |
+A rota atual (`9754c302-f823-44b0-b945-cf29a0341692`) **não será corrigida automaticamente** porque os pedidos já foram criados sem os itens. Para testar a correção, será necessário criar uma nova rota com novos dados importados.
 
 ## Resultado Esperado
 
-1. Em telas menores que 1024px: layout em coluna única (sem espremer)
-2. Em telas 1024px ou maiores: layout em duas colunas (espaço adequado)
-3. Títulos não quebram de forma estranha
-4. Textareas mantêm altura e largura legíveis
-5. Experiência visual limpa e profissional
+Após a correção, o Romaneio de Carga exibirá:
+
+| # | Produto | Peso Total |
+|---|---------|------------|
+| 1 | Mussarela | 120kg |
+| 2 | Presunto | 80kg |
+| 3 | Mortadela | 45kg |
+| **TOTAL** | | **245kg** |
+
+Em vez de:
+
+| # | Produto | Peso Total |
+|---|---------|------------|
+| 1 | Produto não especificado | 245kg |
+| **TOTAL** | | **245kg** |
