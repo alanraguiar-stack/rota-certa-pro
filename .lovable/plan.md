@@ -1,181 +1,145 @@
 
-# Plano: Romaneio de Carga com Dados e Fluxo Simplificado
+# Plano: Corrigir Seletor de Estratégia e Romaneio de Carga
 
 ## Problemas Identificados
 
-### Problema 1: Romaneio Vazio
-Os itens (`order_items`) estão vazios na rota atual porque ela foi criada **antes** da correção que fizemos. A correção de adicionar `items: o.items` no `RouteDetails.tsx` já foi aplicada, mas só funciona para **novas rotas criadas após a correção**.
+### Problema 1: Seletor de Estratégia Aparecendo na Etapa Errada
+O componente `RoutingStrategySelector` (com todas as opções de escolha) está sendo exibido na etapa de Romaneio de Carga, mesmo que o usuário já tenha selecionado a estratégia na fase anterior do wizard.
 
-A rota atual (`33645b0b-...`) mostra:
-- `item_id: <nil>` 
-- `product_name: <nil>` 
-- Todos os 26 pedidos sem itens detalhados
+**Causa:** No arquivo `RouteDetails.tsx` (linhas 658-661), o seletor completo está sempre sendo renderizado na etapa `loading_manifest`.
 
-### Problema 2: Fluxo Obrigatório de Confirmação
-O sistema atual **exige** que o carregamento seja confirmado antes de mostrar o Romaneio de Entrega. O usuário quer que **ambos documentos** (Romaneio de Carga e Romaneio de Entrega) fiquem disponíveis ao mesmo tempo.
+### Problema 2: Romaneio de Carga Vazio
+Os dados de `order_items` estão todos vazios (`nil`) no banco de dados para esta rota.
 
-O fluxo atual é:
-```text
-loading_manifest → confirm_loading → optimize_routes → delivery_manifest
-```
-
-O usuário quer:
-```text
-loading_manifest → [optimize_routes + delivery_manifest simultaneamente]
-```
+**Causa:** A rota foi criada ANTES das correções de persistência de itens. O código atual que salva os itens (useRoutes.ts linhas 266-280) só funciona para NOVAS rotas criadas após a correção.
 
 ## Solução
 
-### Parte 1: Simplificar o Fluxo de Workflow
+### Parte 1: Remover Seletor de Estratégia da Etapa de Romaneio
 
-Remover a etapa obrigatória de confirmação de carregamento e permitir que a roteirização e ambos os romaneios sejam acessíveis após a distribuição de carga.
+Substituir o `RoutingStrategySelector` completo por um resumo simples da estratégia já selecionada. A estratégia já vem definida do wizard (`location.state.routingStrategy`).
 
-### Parte 2: Mostrar Ambos Romaneios Lado a Lado
+### Parte 2: Usar Peso Total do Pedido como Fallback
 
-Na etapa de `loading_manifest`, já mostrar o botão para roteirizar e após a roteirização, exibir ambos os documentos simultaneamente.
+Quando não houver `order_items` detalhados, o romaneio de carga deve consolidar os pesos usando o peso total de cada pedido (`weight_kg`), agrupando por caminhão. Não ficará vazio.
 
 ## Arquivos a Modificar
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `src/components/route/RouteWorkflowStepper.tsx` | Editar | Remover etapa obrigatória de confirmação, simplificar fluxo |
-| `src/pages/RouteDetails.tsx` | Editar | Permitir roteirização direta após loading_manifest, remover bloqueio |
+| `src/pages/RouteDetails.tsx` | Editar | Remover seletor de estratégia, mostrar apenas resumo |
+| `src/components/route/LoadingManifest.tsx` | Editar | Melhorar fallback para exibir peso total quando não houver itens detalhados |
 
 ## Mudanças Técnicas
 
-### 1. RouteWorkflowStepper.tsx
+### 1. RouteDetails.tsx (linhas 647-674)
 
-**Simplificar as etapas do workflow:**
-
-```typescript
-// ANTES - 6 etapas com confirmação obrigatória
-const WORKFLOW_STEPS: WorkflowStepConfig[] = [
-  { id: 'select_trucks', ... },
-  { id: 'distribute_load', ... },
-  { id: 'loading_manifest', ... },
-  { id: 'confirm_loading', ... },  // ← REMOVER
-  { id: 'optimize_routes', ... },
-  { id: 'delivery_manifest', ... },
-];
-
-// DEPOIS - 5 etapas sem confirmação obrigatória
-const WORKFLOW_STEPS: WorkflowStepConfig[] = [
-  { id: 'select_trucks', ... },
-  { id: 'distribute_load', ... },
-  { id: 'loading_manifest', ... },  // Já permite roteirizar daqui
-  { id: 'optimize_routes', ... },
-  { id: 'delivery_manifest', ... },
-];
-```
-
-**Ajustar a função `getActiveStep`:**
+Substituir o bloco de seleção de estratégia por um resumo:
 
 ```typescript
-// ANTES
-case 'loading_confirmed':
-  return 'optimize_routes';
+// ANTES (linha 647-674)
+<Card className="border-primary/50 bg-primary/5">
+  <CardContent className="py-6">
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div>
+        <p className="font-medium text-lg">Pronto para roteirizar?</p>
+        <p className="text-sm text-muted-foreground">
+          Defina a estratégia e gere o Romaneio de Entrega com a ordem otimizada.
+        </p>
+      </div>
+      <div className="flex flex-col gap-3 w-full sm:w-auto">
+        <RoutingStrategySelector
+          selectedStrategy={routingStrategy}
+          onStrategyChange={setRoutingStrategy}
+        />
+        <Button ...>Roteirizar Agora</Button>
+      </div>
+    </div>
+  </CardContent>
+</Card>
 
 // DEPOIS
-case 'loading':
-  return 'loading_manifest'; // Ou 'optimize_routes' direto
-case 'loading_confirmed':
-  return 'optimize_routes'; // Manter compatibilidade
-```
-
-### 2. RouteDetails.tsx
-
-**Na etapa de `loading_manifest`, adicionar botão para roteirizar diretamente:**
-
-```typescript
-// Na etapa loading_manifest, após mostrar o romaneio de carga
-{activeStep === 'loading_manifest' && (
-  <div className="space-y-6">
-    {/* Romaneio de Carga */}
-    <LoadConsolidationView ... />
-    <LoadingManifest ... />
-    
-    {/* Botão para roteirizar diretamente (sem confirmar) */}
-    <Card>
-      <CardContent className="py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="font-medium">Pronto para roteirizar?</p>
-            <p className="text-sm text-muted-foreground">
-              Defina a ordem de entrega e gere o Romaneio de Entrega
-            </p>
-          </div>
-          <Button onClick={handleOptimizeRoutes}>
-            Roteirizar Agora
-          </Button>
+<Card className="border-primary/50 bg-primary/5">
+  <CardContent className="py-6">
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <RouteIcon className="h-5 w-5" />
         </div>
-      </CardContent>
-    </Card>
-    
-    {/* Confirmação de carregamento - OPCIONAL */}
-    <LoadingConfirmation ... />
-  </div>
-)}
+        <div>
+          <p className="font-medium text-lg">Pronto para roteirizar</p>
+          <p className="text-sm text-muted-foreground">
+            Estratégia: <strong>{getStrategyLabel(routingStrategy)}</strong>
+          </p>
+        </div>
+      </div>
+      <Button 
+        size="lg"
+        onClick={handleOptimizeRoutes}
+        disabled={optimizeRoutes.isPending}
+      >
+        <RouteIcon className="mr-2 h-4 w-4" />
+        {optimizeRoutes.isPending ? 'Otimizando rotas...' : 'Roteirizar Agora'}
+      </Button>
+    </div>
+  </CardContent>
+</Card>
 ```
 
-**Ajustar `handleOptimizeRoutes` para funcionar sem confirmação:**
+Adicionar função helper:
 
 ```typescript
-// Não exigir mais status 'loading_confirmed' para roteirizar
-const handleOptimizeRoutes = async () => {
-  await optimizeRoutes.mutateAsync(routingStrategy);
-  await refetch();
-};
+function getStrategyLabel(strategy: RoutingStrategy): string {
+  const labels: Record<RoutingStrategy, string> = {
+    economy: 'Economia (menor distância)',
+    speed: 'Velocidade (menor tempo)',
+    end_near_cd: 'Finalizar no CD',
+    start_far: 'Longe → Perto',
+    start_near: 'Perto → Longe',
+  };
+  return labels[strategy] || strategy;
+}
 ```
 
-### 3. Atualizar Workflow Order
+### 2. LoadingManifest.tsx - Melhorar Fallback
+
+Quando não houver `order_items`, mostrar lista de clientes com peso total em vez de "Produto não especificado":
 
 ```typescript
-// ANTES
-const WORKFLOW_ORDER: RouteWorkflowStep[] = [
-  'select_trucks',
-  'distribute_load',
-  'loading_manifest',
-  'confirm_loading',  // ← REMOVER
-  'optimize_routes',
-  'delivery_manifest',
-];
-
-// DEPOIS
-const WORKFLOW_ORDER: RouteWorkflowStep[] = [
-  'select_trucks',
-  'distribute_load',
-  'loading_manifest',
-  'optimize_routes',
-  'delivery_manifest',
-];
+// Em consolidateProducts(), melhorar fallback (linhas 46-54)
+} else {
+  // Fallback: usar client_name + peso total do pedido
+  const label = order.product_description || `Pedido ${order.client_name}`;
+  const existing = productMap.get(label) || { weight: 0, count: 0 };
+  productMap.set(label, {
+    weight: existing.weight + Number(order.weight_kg),
+    count: existing.count + 1,
+  });
+}
 ```
 
-## Novo Fluxo Visual
+## Fluxo Visual Corrigido
+
+Antes:
 
 ```text
-┌─────────────────┐   ┌──────────────────┐   ┌───────────────────┐
-│ Selecionar      │ → │ Distribuir       │ → │ Romaneio de Carga │
-│ Caminhões       │   │ Carga            │   │ + Roteirizar      │
-└─────────────────┘   └──────────────────┘   └───────────────────┘
-                                                      │
-                                                      v
-                                             ┌───────────────────┐
-                                             │ Romaneio de       │
-                                             │ Entrega (Final)   │
-                                             └───────────────────┘
+[Romaneio de Carga] 
+    └── Seletor de Estratégia (COMPLETO) ← Usuário já escolheu antes
+    └── Botão Roteirizar
 ```
 
-## Sobre Rotas Existentes
+Depois:
 
-A rota atual (`33645b0b-...`) **não terá os itens preenchidos** porque foi criada antes da correção. Para ver o Romaneio de Carga com itens detalhados:
-
-1. **Criar uma nova rota** com dados importados, ou
-2. **Inserir manualmente** os itens na tabela `order_items` para os pedidos existentes
+```text
+[Romaneio de Carga]
+    └── Resumo: "Estratégia: Economia" ← Apenas informativo
+    └── Botão Roteirizar
+```
 
 ## Resultado Esperado
 
-1. Após distribuir a carga, o usuário vê o Romaneio de Carga
-2. Pode imediatamente clicar em "Roteirizar" sem precisar confirmar carregamento
-3. Após roteirização, ambos os romaneios ficam visíveis
-4. Confirmação de carregamento continua disponível como **opcional** para governança interna
-
+1. O seletor de estratégia NÃO aparece mais na etapa de romaneio
+2. Apenas um resumo da estratégia selecionada é exibido
+3. O romaneio de carga mostra lista de pedidos por caminhão com pesos totais
+4. Para novas rotas com itens detalhados, o romaneio consolidará por produto
+5. Para rotas antigas sem itens, o romaneio mostrará lista de clientes/pedidos com pesos
