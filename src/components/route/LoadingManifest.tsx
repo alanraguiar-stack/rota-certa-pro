@@ -44,10 +44,10 @@ function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
         });
       });
     } else {
-      // Fallback to legacy single product per order
-      const productName = order.product_description || 'Produto não especificado';
-      const existing = productMap.get(productName) || { weight: 0, count: 0 };
-      productMap.set(productName, {
+      // Fallback: usar client_name + peso total do pedido quando não há itens detalhados
+      const label = order.product_description || `Pedido ${order.client_name}`;
+      const existing = productMap.get(label) || { weight: 0, count: 0 };
+      productMap.set(label, {
         weight: existing.weight + Number(order.weight_kg),
         count: existing.count + 1,
       });
