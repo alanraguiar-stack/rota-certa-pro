@@ -25,6 +25,18 @@ import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelec
 import { LoadConsolidationView } from '@/components/route/LoadConsolidationView';
 import { SideBySideManifests } from '@/components/route/SideBySideManifests';
 
+// Helper function to get strategy label
+function getStrategyLabel(strategy: RoutingStrategy): string {
+  const labels: Record<RoutingStrategy, string> = {
+    economy: 'Economia (menor distância)',
+    speed: 'Velocidade (menor tempo)',
+    end_near_cd: 'Finalizar no CD',
+    start_far: 'Longe → Perto',
+    start_near: 'Perto → Longe',
+  };
+  return labels[strategy] || strategy;
+}
+
 // Workflow step order for navigation
 const WORKFLOW_ORDER: RouteWorkflowStep[] = [
   'select_trucks',
@@ -644,31 +656,29 @@ export default function RouteDetails() {
               </CardContent>
             </Card>
 
-            {/* Botão para Roteirizar Diretamente */}
+            {/* Botão para Roteirizar Diretamente - SEM seletor de estratégia (já escolhida no wizard) */}
             <Card className="border-primary/50 bg-primary/5">
               <CardContent className="py-6">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div>
-                    <p className="font-medium text-lg">Pronto para roteirizar?</p>
-                    <p className="text-sm text-muted-foreground">
-                      Defina a estratégia e gere o Romaneio de Entrega com a ordem otimizada.
-                    </p>
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                      <RouteIcon className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-lg">Pronto para roteirizar</p>
+                      <p className="text-sm text-muted-foreground">
+                        Estratégia: <strong>{getStrategyLabel(routingStrategy)}</strong>
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-3 w-full sm:w-auto">
-                    <RoutingStrategySelector
-                      selectedStrategy={routingStrategy}
-                      onStrategyChange={setRoutingStrategy}
-                    />
-                    <Button 
-                      size="lg"
-                      onClick={handleOptimizeRoutes}
-                      disabled={optimizeRoutes.isPending}
-                      className="w-full"
-                    >
-                      <RouteIcon className="mr-2 h-4 w-4" />
-                      {optimizeRoutes.isPending ? 'Otimizando rotas...' : 'Roteirizar Agora'}
-                    </Button>
-                  </div>
+                  <Button 
+                    size="lg"
+                    onClick={handleOptimizeRoutes}
+                    disabled={optimizeRoutes.isPending}
+                  >
+                    <RouteIcon className="mr-2 h-4 w-4" />
+                    {optimizeRoutes.isPending ? 'Otimizando rotas...' : 'Roteirizar Agora'}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
