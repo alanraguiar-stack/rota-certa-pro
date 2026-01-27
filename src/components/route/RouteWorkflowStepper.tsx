@@ -5,7 +5,6 @@ export type RouteWorkflowStep =
   | 'select_trucks'
   | 'distribute_load'
   | 'loading_manifest'
-  | 'confirm_loading'
   | 'optimize_routes'
   | 'delivery_manifest';
 
@@ -37,13 +36,6 @@ const WORKFLOW_STEPS: WorkflowStepConfig[] = [
     title: 'Romaneio de Carga', 
     description: 'Lista de separação do CD',
     icon: ClipboardCheck,
-    phase: 'romaneio',
-  },
-  { 
-    id: 'confirm_loading', 
-    title: 'Confirmar Carregamento', 
-    description: 'Assinatura do conferente',
-    icon: Check,
     phase: 'romaneio',
   },
   { 
@@ -89,9 +81,10 @@ export function getActiveStep(
     case 'trucks_assigned':
       return 'distribute_load';
     case 'loading':
-      return 'loading_manifest';
     case 'loading_confirmed':
-      return 'optimize_routes';
+      // Both loading and loading_confirmed show the loading_manifest step
+      // User can optimize routes directly from there
+      return 'loading_manifest';
     case 'distributed':
     case 'completed':
       return 'delivery_manifest';
@@ -141,7 +134,7 @@ export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false 
           const StepIcon = step.icon;
           
           // Phase separator
-          const showPhaseSeparator = index === 4; // Before "Roteirizar"
+          const showPhaseSeparator = index === 3; // Before "Roteirizar" (now at index 3)
           
           return (
             <div key={step.id} className="flex items-center flex-1">

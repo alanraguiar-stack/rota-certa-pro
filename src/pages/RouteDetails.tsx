@@ -30,7 +30,6 @@ const WORKFLOW_ORDER: RouteWorkflowStep[] = [
   'select_trucks',
   'distribute_load',
   'loading_manifest',
-  'confirm_loading',
   'optimize_routes',
   'delivery_manifest',
 ];
@@ -615,7 +614,7 @@ export default function RouteDetails() {
         )}
 
         {/* ============================================ */}
-        {/* ETAPA 3: ROMANEIO DE CARGA                 */}
+        {/* ETAPA 3: ROMANEIO DE CARGA + ROTEIRIZAÇÃO   */}
         {/* ============================================ */}
         {activeStep === 'loading_manifest' && (
           <div className="space-y-6">
@@ -634,7 +633,6 @@ export default function RouteDetails() {
                 </CardTitle>
                 <CardDescription>
                   Gere o romaneio para separação e conferência no Centro de Distribuição.
-                  Após a separação física, confirme o carregamento.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -645,56 +643,52 @@ export default function RouteDetails() {
                 />
               </CardContent>
             </Card>
+
+            {/* Botão para Roteirizar Diretamente */}
+            <Card className="border-primary/50 bg-primary/5">
+              <CardContent className="py-6">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <p className="font-medium text-lg">Pronto para roteirizar?</p>
+                    <p className="text-sm text-muted-foreground">
+                      Defina a estratégia e gere o Romaneio de Entrega com a ordem otimizada.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-3 w-full sm:w-auto">
+                    <RoutingStrategySelector
+                      selectedStrategy={routingStrategy}
+                      onStrategyChange={setRoutingStrategy}
+                    />
+                    <Button 
+                      size="lg"
+                      onClick={handleOptimizeRoutes}
+                      disabled={optimizeRoutes.isPending}
+                      className="w-full"
+                    >
+                      <RouteIcon className="mr-2 h-4 w-4" />
+                      {optimizeRoutes.isPending ? 'Otimizando rotas...' : 'Roteirizar Agora'}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Confirmação de Carregamento - Agora OPCIONAL */}
+            <div className="opacity-80">
+              <p className="text-sm text-muted-foreground text-center mb-2">
+                Opcional: Registrar conferência física antes de roteirizar
+              </p>
+              <LoadingConfirmation
+                routeName={route.name}
+                trucks={truckDataForComponents}
+                onConfirm={handleConfirmLoading}
+                isLoading={confirmLoading.isPending}
+              />
+            </div>
           </div>
         )}
 
-        {/* ============================================ */}
-        {/* ETAPA 4: CONFIRMAR CARREGAMENTO            */}
-        {/* ============================================ */}
-        {activeStep === 'loading_manifest' && (
-          <LoadingConfirmation
-            routeName={route.name}
-            trucks={truckDataForComponents}
-            onConfirm={handleConfirmLoading}
-            isLoading={confirmLoading.isPending}
-          />
-        )}
-
-        {/* ============================================ */}
-        {/* ETAPA 5: ROTEIRIZAÇÃO                      */}
-        {/* ============================================ */}
-        {activeStep === 'optimize_routes' && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <RouteIcon className="h-5 w-5" />
-                Etapa 4: Roteirização
-              </CardTitle>
-              <CardDescription>
-                Carregamento confirmado por <strong>{route.loading_confirmed_by}</strong>.
-                Agora defina a estratégia e otimize a ordem de entrega.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <h3 className="font-medium mb-3">Escolha a estratégia de roteirização:</h3>
-                <RoutingStrategySelector
-                  selectedStrategy={routingStrategy}
-                  onStrategyChange={setRoutingStrategy}
-                />
-              </div>
-              
-              <Button
-                className="w-full"
-                size="lg"
-                onClick={handleOptimizeRoutes}
-                disabled={optimizeRoutes.isPending}
-              >
-                {optimizeRoutes.isPending ? 'Otimizando rotas...' : 'Roteirizar e Gerar Ordem de Entrega'}
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+        {/* Etapa optimize_routes foi removida - agora a roteirização acontece diretamente na loading_manifest */}
 
         {/* ============================================ */}
         {/* ETAPA 6: ROMANEIO DE ENTREGA (FINAL)       */}
