@@ -616,3 +616,324 @@ export async function detectAndParsePDF(file: File): Promise<PDFDetectionResult>
   console.log('[Auto Detect] Formato não reconhecido');
   return { type: 'unknown' };
 }
+
+// ============================================================================
+// EXCEL PARSING FUNCTIONS FOR MB FORMAT
+// ============================================================================
+
+/**
+ * Detecta se Excel é formato de Relatório de Vendas MB (Itinerário)
+ * Colunas esperadas: Venda, Cliente, Peso Bruto, End. Ent., Bairro Ent., Cidade Ent., Cep Ent.
+ */
+export function isItinerarioExcelFormat(headers: string[]): boolean {
+  const headerText = headers.join(' ').toLowerCase();
+  
+  const patterns = [
+    /end\.?\s*ent\.?/i,          // End. Ent.
+    /bairro\.?\s*ent\.?/i,       // Bairro Ent.
+    /cidade\.?\s*ent\.?/i,       // Cidade Ent.
+    /peso\s*bruto/i,             // Peso Bruto
+  ];
+  
+  const matchCount = patterns.filter(p => p.test(headerText)).length;
+  console.log('[Itinerary Excel] Matches:', matchCount, 'headers:', headers.slice(0, 10).join(', '));
+  
+  // Precisa ter pelo menos 2 padrões (End Ent + outro)
+  return matchCount >= 2;
+}
+
+/**
+ * Detecta se Excel é formato de Detalhe das Vendas MB (ADV hierárquico)
+ * Padrões: linhas com "Cliente:", "Venda Nº:", e colunas Qtde./Descrição
+ */
+export function isADVExcelFormat(rows: unknown[][]): boolean {
+  const text = rows.map(r => r.map(c => String(c ?? '')).join(' ')).join('\n');
+  
+  const hasCliente = /cliente\s*:/i.test(text);
+  const hasVenda = /venda\s*n[º°]?\s*:/i.test(text);
+  const hasQtde = /qtde\.?/i.test(text) || /quantidade/i.test(text);
+  const hasDescricao = /descri[çc][ãa]o/i.test(text);
+  
+  console.log('[ADV Excel] Detecção:', { hasCliente, hasVenda, hasQtde, hasDescricao });
+  
+  // Precisa ter Cliente + Venda + (Qtde ou Descrição)
+  return hasCliente && hasVenda && (hasQtde || hasDescricao);
+}
+
+/**
+ * Parse Excel do Relatório de Vendas MB (Itinerário)
+ * Formato tabular com colunas: Venda, Cliente, Peso Bruto, End. Ent., etc
+ */
+export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
+  if (rows.length < 2) return [];
+  
+  // Encontrar header row (pode haver linhas vazias no início)
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(5, rows.length); i++) {
+    const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
+    if (/cliente/i.test(rowText) && /end\.?\s*ent\.?|peso/i.test(rowText)) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+  
+  const headerRow = rows[headerRowIdx].map(c => normalizeText(String(c ?? '')).toLowerCase());
+  console.log('[Itinerary Excel] Header row:', headerRowIdx, headerRow);
+  
+  // Mapear colunas
+  const columnMap = {
+    venda: findExcelColumnIndex(headerRow, [/^venda$/i, /n[º°]?\s*venda/i]),
+    cliente: findExcelColumnIndex(headerRow, [/^cliente$/i, /nome/i, /razao/i]),
+    endEnt: findExcelColumnIndex(headerRow, [/end\.?\s*ent\.?/i, /endere[çc]o\s*ent/i]),
+    bairroEnt: findExcelColumnIndex(headerRow, [/bairro\.?\s*ent\.?/i, /bairro/i]),
+    cidadeEnt: findExcelColumnIndex(headerRow, [/cidade\.?\s*ent\.?/i, /cidade/i]),
+    cepEnt: findExcelColumnIndex(headerRow, [/cep\.?\s*ent\.?/i, /cep/i]),
+    pesoBruto: findExcelColumnIndex(headerRow, [/peso\s*bruto/i, /peso/i]),
+  };
+  
+  console.log('[Itinerary Excel] Column mapping:', columnMap);
+  
+  // Validar colunas mínimas
+  if (columnMap.cliente === -1 || (columnMap.endEnt === -1 && columnMap.pesoBruto === -1)) {
+    console.log('[Itinerary Excel] Missing required columns');
+    return [];
+  }
+  
+  const records: ItinerarioRecord[] = [];
+  
+  // Processar linhas de dados (após header)
+  for (let i = headerRowIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    
+    // Pular linhas vazias
+    if (!row || row.every(cell => !cell || String(cell).trim() === '')) {
+      continue;
+    }
+    
+    const vendaId = columnMap.venda !== -1 ? String(row[columnMap.venda] ?? '').trim() : '';
+    const clientName = columnMap.cliente !== -1 ? String(row[columnMap.cliente] ?? '').trim() : '';
+    
+    // Validar dados mínimos
+    if (!clientName) continue;
+    
+    const address = columnMap.endEnt !== -1 ? String(row[columnMap.endEnt] ?? '').trim() : '';
+    const neighborhood = columnMap.bairroEnt !== -1 ? String(row[columnMap.bairroEnt] ?? '').trim() : '';
+    const city = columnMap.cidadeEnt !== -1 ? String(row[columnMap.cidadeEnt] ?? '').trim() : '';
+    const cep = columnMap.cepEnt !== -1 ? String(row[columnMap.cepEnt] ?? '').trim() : '';
+    const pesoStr = columnMap.pesoBruto !== -1 ? String(row[columnMap.pesoBruto] ?? '0') : '0';
+    
+    // Converter peso (suporta formato BR e US)
+    const weight = parseExcelWeight(pesoStr);
+    
+    if (weight <= 0) continue;
+    
+    records.push({
+      venda_id: vendaId,
+      client_name: normalizeText(clientName),
+      address: normalizeText(address),
+      neighborhood: normalizeText(neighborhood),
+      city: normalizeText(city),
+      cep: cep.replace(/\D/g, ''),
+      weight_kg: weight,
+    });
+  }
+  
+  console.log('[Itinerary Excel] Total records:', records.length);
+  return records;
+}
+
+/**
+ * Parse Excel do Detalhe das Vendas MB (ADV hierárquico)
+ * Formato: linhas com "Cliente:", "Venda Nº:", seguidas de itens
+ */
+export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
+  console.log('[ADV Excel] Parsing', rows.length, 'rows');
+  
+  const orders: ParsedOrder[] = [];
+  
+  let currentClient = '';
+  let currentVendaId = '';
+  let currentItems: { product_name: string; weight_kg: number; quantity: number }[] = [];
+  let inItemTable = false;
+  let itemColumnMap: { descricao: number; qtde: number } | null = null;
+  
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    
+    const rowText = row.map(c => String(c ?? '')).join(' ').trim();
+    if (!rowText) continue;
+    
+    // Detectar linha de Cliente
+    const clientMatch = rowText.match(/cliente\s*:\s*([A-ZÁÉÍÓÚÀÃÕÇÂÊÎÔÛÄËÏÖÜ\s\-\.]+?)(?:\s+\d{11,14})?$/i);
+    if (clientMatch) {
+      // Salvar pedido anterior se existir
+      if (currentVendaId && currentItems.length > 0) {
+        const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+        orders.push({
+          pedido_id: currentVendaId,
+          client_name: currentClient,
+          address: '', // Será preenchido pelo cruzamento
+          weight_kg: totalWeight,
+          product_description: currentItems.map(i => i.product_name).join(', '),
+          items: [...currentItems],
+          isValid: false, // Sem endereço até cruzar
+          error: 'Aguardando cruzamento com Relatório de Vendas',
+        });
+      }
+      
+      currentClient = normalizeText(clientMatch[1].trim());
+      currentVendaId = '';
+      currentItems = [];
+      inItemTable = false;
+      itemColumnMap = null;
+      console.log('[ADV Excel] Cliente:', currentClient);
+      continue;
+    }
+    
+    // Detectar linha de Venda
+    const vendaMatch = rowText.match(/venda\s*n[º°]?\s*:\s*(\d+)/i);
+    if (vendaMatch) {
+      // Salvar venda anterior do mesmo cliente
+      if (currentVendaId && currentItems.length > 0) {
+        const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+        orders.push({
+          pedido_id: currentVendaId,
+          client_name: currentClient,
+          address: '',
+          weight_kg: totalWeight,
+          product_description: currentItems.map(i => i.product_name).join(', '),
+          items: [...currentItems],
+          isValid: false,
+          error: 'Aguardando cruzamento com Relatório de Vendas',
+        });
+      }
+      
+      currentVendaId = vendaMatch[1];
+      currentItems = [];
+      inItemTable = false;
+      itemColumnMap = null;
+      console.log('[ADV Excel] Venda:', currentVendaId);
+      continue;
+    }
+    
+    // Detectar header de tabela de itens
+    if (/descri[çc][ãa]o/i.test(rowText) && /qtde\.?|quantidade/i.test(rowText)) {
+      inItemTable = true;
+      // Mapear colunas de item
+      const cells = row.map(c => String(c ?? '').toLowerCase());
+      itemColumnMap = {
+        descricao: cells.findIndex(c => /descri[çc][ãa]o/i.test(c)),
+        qtde: cells.findIndex(c => /qtde\.?|quantidade/i.test(c)),
+      };
+      console.log('[ADV Excel] Item columns:', itemColumnMap);
+      continue;
+    }
+    
+    // Extrair item se estamos em uma tabela
+    if (currentVendaId && inItemTable && itemColumnMap) {
+      const descricao = itemColumnMap.descricao !== -1 ? String(row[itemColumnMap.descricao] ?? '').trim() : '';
+      const qtdeStr = itemColumnMap.qtde !== -1 ? String(row[itemColumnMap.qtde] ?? '0') : '0';
+      
+      if (descricao && descricao.length > 2) {
+        const weight = parseExcelWeight(qtdeStr);
+        if (weight > 0) {
+          currentItems.push({
+            product_name: normalizeText(descricao),
+            weight_kg: weight,
+            quantity: 1,
+          });
+          console.log('[ADV Excel] Item:', descricao.substring(0, 30), weight, 'kg');
+        }
+      }
+    }
+    
+    // Fallback: tentar extrair item por padrão de código + descrição + número
+    if (currentVendaId && !itemColumnMap) {
+      const itemMatch = rowText.match(/^\s*(\d+)\s+(.+?)\s+([\d.,]+)\s+([\d.,]+)/);
+      if (itemMatch) {
+        const [, , descricao, qtde] = itemMatch;
+        const weight = parseExcelWeight(qtde);
+        if (weight > 0) {
+          currentItems.push({
+            product_name: normalizeText(descricao.trim()),
+            weight_kg: weight,
+            quantity: 1,
+          });
+        }
+      }
+    }
+  }
+  
+  // Processar último pedido
+  if (currentVendaId && currentItems.length > 0) {
+    const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+    orders.push({
+      pedido_id: currentVendaId,
+      client_name: currentClient,
+      address: '',
+      weight_kg: totalWeight,
+      product_description: currentItems.map(i => i.product_name).join(', '),
+      items: [...currentItems],
+      isValid: false,
+      error: 'Aguardando cruzamento com Relatório de Vendas',
+    });
+  }
+  
+  console.log('[ADV Excel] Total orders:', orders.length);
+  return orders;
+}
+
+/**
+ * Encontra o índice de uma coluna baseado em padrões (para Excel)
+ */
+function findExcelColumnIndex(headers: string[], patterns: RegExp[]): number {
+  for (let i = 0; i < headers.length; i++) {
+    for (const pattern of patterns) {
+      if (pattern.test(headers[i])) {
+        return i;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Parse peso de célula Excel (suporta formatos BR e US)
+ */
+function parseExcelWeight(value: string | number): number {
+  if (typeof value === 'number') return value;
+  
+  let str = String(value).trim();
+  if (!str) return 0;
+  
+  // Remove sufixos de unidade
+  str = str.replace(/\s*(kg|kilos?|quilos?)\s*$/i, '');
+  
+  // Detectar formato
+  const hasComma = str.includes(',');
+  const hasDot = str.includes('.');
+  
+  if (hasComma && hasDot) {
+    const commaPos = str.lastIndexOf(',');
+    const dotPos = str.lastIndexOf('.');
+    if (commaPos > dotPos) {
+      // 1.234,56 (BR)
+      str = str.replace(/\./g, '').replace(',', '.');
+    } else {
+      // 1,234.56 (US)
+      str = str.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    // Vírgula como decimal ou milhares
+    const match = str.match(/,(\d+)$/);
+    if (match && match[1].length === 3) {
+      str = str.replace(/,/g, '');
+    } else {
+      str = str.replace(',', '.');
+    }
+  }
+  
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
+}
