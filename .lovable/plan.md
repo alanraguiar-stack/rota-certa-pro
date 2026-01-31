@@ -1,185 +1,255 @@
 
-# Plano: Adaptar Parsers para Arquivos Excel MB
+# Plano: Corrigir Parser Excel MB Definitivo
 
-## Problema Identificado
+## Problema Raiz Identificado
 
-O sistema está gerando erros ao processar os arquivos Excel do usuário porque:
+O arquivo `Relatório_de_Vendas_-_MB-2.xlsx` possui a estrutura correta com headers na primeira linha:
 
-1. **Relatório de Vendas**: O parser não está reconhecendo corretamente todas as colunas do formato específico (ex: linhas vazias entre os dados, formato do "Peso Bruto" com ponto como separador de milhares)
-2. **Detalhe das Vendas**: O parser de Excel não está tratando o formato hierárquico (Cliente → Venda → Itens) que está presente no arquivo Excel
-
-## Análise dos Arquivos do Usuário
-
-### Relatório de Vendas MB (Excel)
-| Coluna | Exemplo | Uso |
-|--------|---------|-----|
-| `Venda` | 276584 | ID do pedido (para cruzamento) |
-| `Cliente` | RANIERY JOSE DA SILVA | Nome do cliente |
-| `Peso Bruto` | 224.55 | Peso total da entrega em kg |
-| `End. Ent.` | HERBERT LAAS, 73 | Endereço + número |
-| `Bairro Ent.` | PARQUE TAIPAS | Bairro |
-| `Cidade Ent.` | SAO PAULO | Cidade |
-| `Cep Ent.` | 02988-100 | CEP |
-
-**Observações:**
-- Linhas vazias entre os registros
-- Peso usa ponto como decimal (224.55)
-- Coluna `End. Ent.` já inclui o número
-
-### Detalhe das Vendas MB (Excel)
-Formato hierárquico com seções:
 ```
-Cliente: A P SOARES DA SILVA MERCADO E PADARIA
-Venda Nº: 276598  NFe Nº: 51088
-  Código | Descrição | Qtde. | Unitário | Total
-  5677   | REFRIGERANTE TUBAINA - 2 LT | 20 | 26.85 | 537.00
+Venda | Cliente | (vazio) | Total | Ordem | Peso Bruto | Cep Ent. | End. Ent. | Endereço | Bairro Ent. | Cidade Ent. | ...
 ```
 
-**Observações:**
-- `Qtde.` representa o peso em kg (não quantidade de unidades)
-- Estrutura hierárquica em Excel, não tabular puro
+**Mapeamento do Usuário (de-para):**
+| Campo | Coluna Excel | Índice | Nome Header |
+|-------|--------------|--------|-------------|
+| Cliente | C | 1 | `Cliente` |
+| Peso | G | 5 | `Peso Bruto` |
+| Endereço | I | 7 | `End. Ent.` |
+| Bairro | K | 9 | `Bairro Ent.` |
+| Cidade | - | 10 | `Cidade Ent.` |
+| CEP | - | 6 | `Cep Ent.` |
 
-## Solução
+**Problema:** A função `isItinerarioExcelFormat()` em `src/lib/advParser.ts` está testando os headers mas está falhando porque:
+1. Pode haver uma coluna vazia entre os headers
+2. O fallback cai no parser genérico que exige template "Cliente, Peso_kg, Endereço" no formato padronizado
 
-### Parte 1: Melhorar Parser do Relatório de Vendas (orderParser.ts)
+**Mensagem de Erro:** "Colunas faltando: Cliente, Peso_kg, Endereço (Rua, Número, Bairro, Cidade, Estado). Baixe o template modelo para ver o formato correto."
 
-1. Adicionar suporte a linhas vazias entre registros
-2. Melhorar detecção da coluna `Peso Bruto`
-3. Garantir que colunas com sufixo `Ent.` sejam priorizadas
+## Solução: Parser Dedicado para Formato MB
 
-### Parte 2: Criar Parser de Detalhe de Vendas em Excel (advParser.ts)
-
-1. Adicionar função `parseADVExcel()` para processar o formato hierárquico em Excel
-2. Detectar linhas de `Cliente:`, `Venda Nº:` e itens
-3. Extrair `Qtde.` como peso em kg
-
-### Parte 3: Atualizar DualFileUpload para Excel
-
-1. Detectar automaticamente se Excel é "Relatório Geral" ou "Detalhe"
-2. Aplicar o parser correto baseado no conteúdo
+Criar lógica específica para o formato MB que **não exige template**, mapeando colunas fixas pelo nome do header exato.
 
 ## Arquivos a Modificar
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `src/lib/orderParser.ts` | Editar | Melhorar tolerância a linhas vazias e formatação de peso |
-| `src/lib/advParser.ts` | Editar | Adicionar `parseADVDetailExcel()` para Excel hierárquico |
-| `src/components/route/DualFileUpload.tsx` | Editar | Integrar detecção automática de tipo para Excel |
+| `src/lib/advParser.ts` | Editar | Melhorar `isItinerarioExcelFormat` e `parseItinerarioExcel` para aceitar formato MB |
+| `src/components/route/DualFileUpload.tsx` | Editar | Remover fallback para parser genérico quando for formato MB |
 
 ## Mudanças Técnicas Detalhadas
 
-### 1. orderParser.ts - Melhorar Detecção de Colunas
-
-```typescript
-// Atualizar COLUMN_PATTERNS.weight para priorizar "Peso Bruto"
-weight: [
-  /^peso\s*bruto$/i,  // Exata: "Peso Bruto" (máxima prioridade)
-  /peso\s*bruto/i,    // Contém: "Peso Bruto"
-  /peso/i, /weight/i, /kg/i,
-],
-
-// Melhorar parseWeight para lidar com formato brasileiro
-function parseWeight(value: unknown): number | null {
-  // Detectar formato: 1.234,56 (BR) vs 1,234.56 (US)
-  // Se tem ponto antes de vírgula, é formato BR
-  // Se tem vírgula seguida de 3 dígitos, vírgula é separador de milhares
-}
-```
-
-### 2. advParser.ts - Novo Parser para Excel ADV
+### 1. advParser.ts - Melhorar Detecção de Formato
 
 ```typescript
 /**
- * Detecta se Excel é formato de Detalhe das Vendas ADV
+ * Detecta se Excel é formato de Relatório de Vendas MB
+ * Headers esperados: Cliente, Peso Bruto, End. Ent., Bairro Ent., Cidade Ent.
  */
-export function isADVExcelFormat(rows: unknown[][]): boolean {
-  const text = rows.map(r => r.join(' ')).join('\n');
+export function isItinerarioExcelFormat(headers: string[]): boolean {
+  const headerText = headers.map(h => String(h ?? '').toLowerCase()).join(' ');
   
-  return (
-    /cliente\s*:/i.test(text) &&
-    /venda\s*n[º°]?\s*:/i.test(text) &&
-    /qtde\.?/i.test(text)
-  );
-}
-
-/**
- * Parser para Detalhe das Vendas em Excel
- */
-export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
-  // Processar linha por linha
-  // Detectar "Cliente:" para novo cliente
-  // Detectar "Venda Nº:" para nova venda
-  // Coletar itens até próximo cliente/venda
+  // Padrões do formato MB específico
+  const requiredPatterns = [
+    /cliente/i,           // Obrigatório: Cliente
+    /peso\s*bruto/i,      // Obrigatório: Peso Bruto
+  ];
+  
+  const addressPatterns = [
+    /end\.?\s*ent\.?/i,   // End. Ent.
+    /bairro\.?\s*ent\.?/i,// Bairro Ent.
+    /cidade\.?\s*ent\.?/i,// Cidade Ent.
+  ];
+  
+  // Precisa ter Cliente + Peso Bruto + pelo menos 1 endereço
+  const hasRequired = requiredPatterns.every(p => p.test(headerText));
+  const addressCount = addressPatterns.filter(p => p.test(headerText)).length;
+  
+  console.log('[Itinerary Excel] Detection:', { 
+    hasRequired, 
+    addressCount,
+    headers: headers.slice(0, 12).join(', ')
+  });
+  
+  return hasRequired && addressCount >= 1;
 }
 ```
 
-### 3. DualFileUpload.tsx - Integrar Detecção
+### 2. advParser.ts - Melhorar Mapeamento de Colunas
 
 ```typescript
-// Em processFile(), adicionar detecção para Excel
+export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
+  if (rows.length < 2) return [];
+  
+  // Encontrar header row - procurar em até 10 primeiras linhas
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
+    if (/cliente/i.test(rowText) && (/peso\s*bruto/i.test(rowText) || /end\.?\s*ent\.?/i.test(rowText))) {
+      headerRowIdx = i;
+      break;
+    }
+  }
+  
+  if (headerRowIdx === -1) {
+    console.log('[Itinerary Excel] Header row not found');
+    return [];
+  }
+  
+  const headerRow = rows[headerRowIdx].map(c => String(c ?? '').toLowerCase().trim());
+  
+  // Mapear colunas usando correspondência EXATA primeiro, depois regex
+  const columnMap = {
+    venda: findExactOrPattern(headerRow, ['venda'], [/^venda$/i]),
+    cliente: findExactOrPattern(headerRow, ['cliente'], [/^cliente$/i]),
+    pesoBruto: findExactOrPattern(headerRow, ['peso bruto'], [/peso\s*bruto/i]),
+    endEnt: findExactOrPattern(headerRow, ['end. ent.', 'end ent'], [/end\.?\s*ent\.?/i]),
+    bairroEnt: findExactOrPattern(headerRow, ['bairro ent.', 'bairro ent'], [/bairro\.?\s*ent\.?/i]),
+    cidadeEnt: findExactOrPattern(headerRow, ['cidade ent.', 'cidade ent'], [/cidade\.?\s*ent\.?/i]),
+    cepEnt: findExactOrPattern(headerRow, ['cep ent.', 'cep ent'], [/cep\.?\s*ent\.?/i]),
+  };
+  
+  // Aceitar se tiver Cliente + Peso OU Cliente + Endereço
+  if (columnMap.cliente === -1) {
+    console.log('[Itinerary Excel] Missing Cliente column');
+    return [];
+  }
+  
+  if (columnMap.pesoBruto === -1 && columnMap.endEnt === -1) {
+    console.log('[Itinerary Excel] Missing both Peso Bruto and End. Ent.');
+    return [];
+  }
+  
+  // ... resto da lógica de parsing
+}
+
+function findExactOrPattern(headers: string[], exactMatches: string[], patterns: RegExp[]): number {
+  // Primeiro: correspondência exata
+  for (const exact of exactMatches) {
+    const idx = headers.indexOf(exact);
+    if (idx !== -1) return idx;
+  }
+  
+  // Segundo: correspondência por padrão
+  for (let i = 0; i < headers.length; i++) {
+    for (const pattern of patterns) {
+      if (pattern.test(headers[i])) return i;
+    }
+  }
+  
+  return -1;
+}
+```
+
+### 3. DualFileUpload.tsx - Melhorar Fluxo de Detecção
+
+```typescript
+// Modificar processFile() para não cair no parser genérico quando detectar formato MB
+
 if (isExcelFile(file)) {
+  // Ler Excel
   const arrayBuffer = await file.arrayBuffer();
   const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
   
-  // Verificar se é formato ADV (Detalhe das Vendas)
-  if (isADVExcelFormat(rows)) {
-    const advOrders = parseADVDetailExcel(rows);
-    // Retornar como tipo 'adv' para cruzamento
+  // Encontrar header row (pode não ser a primeira linha)
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
+    const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
+    if (/cliente/i.test(rowText) && /peso/i.test(rowText)) {
+      headerRowIdx = i;
+      break;
+    }
   }
   
-  // Verificar se é formato Itinerário (Relatório Geral)
-  if (detectItineraryFormat(headers)) {
-    // Processar como itinerário
+  const headers = rows[headerRowIdx].map(c => String(c ?? ''));
+  
+  // Verificar se é formato MB (Itinerário)
+  if (isItinerarioExcelFormat(headers)) {
+    const records = parseItinerarioExcel(rows);
+    if (records.length > 0) {
+      // Sucesso - retornar como itinerário
+      return { type: 'itinerario', data: records };
+    }
+    
+    // Se parseItinerarioExcel retornou vazio, mostrar erro específico
+    setUploadState({
+      file,
+      status: 'error',
+      message: 'Formato reconhecido mas sem dados válidos. Verifique se as linhas têm Cliente e Peso.',
+      data: null,
+    });
+    return null;
   }
+  
+  // NÃO cair no parser genérico - mostrar erro claro
+  setUploadState({
+    file,
+    status: 'error',
+    message: 'Formato não reconhecido. A planilha deve ter colunas: Cliente, Peso Bruto, End. Ent., Bairro Ent.',
+    data: null,
+  });
+  return null;
 }
 ```
 
-## Fluxo de Cruzamento
+### 4. Remover Dependência de Template
 
-```text
-┌─────────────────────────┐    ┌─────────────────────────┐
-│ Relatório_de_Vendas.xlsx│    │ Detalhe_das_Vendas.xlsx │
-│ ────────────────────────│    │ ────────────────────────│
-│ Venda: 276584           │    │ Venda Nº: 276584        │
-│ Cliente: RANIERY        │    │ Item: Mortadela 10kg    │
-│ End. Ent.: HERBERT...   │    │ Item: Mussarela 20kg    │
-│ Peso Bruto: 224.55      │    │                         │
-└────────────┬────────────┘    └────────────┬────────────┘
-             │                              │
-             │ Detectado como               │ Detectado como
-             │ "itinerário"                 │ "adv"
-             │                              │
-             └──────────┬───────────────────┘
-                        │
-                        ▼
-              ┌─────────────────────┐
-              │ Cruzamento por Venda│
-              │ ────────────────────│
-              │ Venda: 276584       │
-              │ Cliente: RANIERY    │
-              │ Endereço: HERBERT...│
-              │ Peso: 224.55kg      │
-              │ Itens:              │
-              │  - Mortadela 10kg   │
-              │  - Mussarela 20kg   │
-              └─────────────────────┘
+O sistema não deve mais exigir template padrão. Aceitar qualquer planilha que tenha:
+- Coluna `Cliente` (obrigatória)
+- Coluna `Peso Bruto` ou similar (obrigatória)  
+- Coluna `End. Ent.` ou similar (obrigatória para geocodificação)
+- Colunas `Bairro Ent.`, `Cidade Ent.`, `Cep Ent.` (opcionais, melhoram geocodificação)
+
+## Diagrama do Fluxo Corrigido
+
+```
+Upload Excel
+     │
+     ▼
+┌─────────────────────────┐
+│ Encontrar Header Row    │
+│ (procurar "Cliente" +   │
+│  "Peso" nas primeiras   │
+│  10 linhas)             │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ isItinerarioExcelFormat │
+│ Headers: Cliente +      │
+│ Peso Bruto + End.Ent.?  │
+└────────────┬────────────┘
+             │
+        ┌────┴────┐
+        │         │
+       SIM       NÃO
+        │         │
+        ▼         ▼
+┌───────────┐  ┌─────────────────┐
+│ Parse MB  │  │ Erro: "Formato  │
+│ Format    │  │ não reconhecido"│
+└─────┬─────┘  └─────────────────┘
+      │
+      ▼
+┌───────────────────────────┐
+│ Extrair registros:        │
+│ - Venda (ID)              │
+│ - Cliente                 │
+│ - Peso Bruto              │
+│ - End. Ent. + Bairro +    │
+│   Cidade + CEP            │
+└───────────────────────────┘
 ```
 
 ## Resultado Esperado
 
-1. Upload do "Relatório_de_Vendas_MB.xlsx" → Detectado automaticamente como fonte de endereços
-2. Upload do "Detalhe_das_Vendas_MB.xlsx" → Detectado automaticamente como fonte de itens
-3. Cruzamento automático pelo número da Venda
-4. Romaneio de Carga com itens consolidados (ex: Mortadela 50kg, Mussarela 120kg)
-5. Romaneio de Entrega com ordem de paradas e peso por cliente
-
-## Tratamento de Casos Especiais
-
-| Caso | Comportamento |
-|------|---------------|
-| Linhas vazias no Excel | Ignorar linhas completamente vazias |
-| Cliente com múltiplas vendas | Agrupar por endereço (mesmo cliente, mesmo local = 1 entrega) |
-| Venda sem match no cruzamento | Marcar como inválida com aviso |
-| Peso com formato BR (1.234,56) | Converter automaticamente |
-| Peso como decimal simples (224.55) | Aceitar diretamente |
+1. Upload do arquivo `Relatório_de_Vendas_-_MB.xlsx` funciona sem erros
+2. Sistema reconhece automaticamente o formato MB pelos headers
+3. Dados extraídos corretamente:
+   - Cliente da coluna C
+   - Peso da coluna G (Peso Bruto)
+   - Endereço da coluna I (End. Ent.)
+   - Bairro da coluna K (Bairro Ent.)
+   - Cidade e CEP das respectivas colunas
+4. Não aparece mais mensagem de "template modelo"
+5. Funciona para qualquer planilha do sistema MB sem adaptação
