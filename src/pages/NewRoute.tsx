@@ -43,8 +43,12 @@ export default function NewRoute() {
   // Track if fleet was already configured (prevents re-selection)
   const [fleetConfirmed, setFleetConfirmed] = useState(false);
 
+  // Pedidos válidos são os que têm endereço (podem ser roterizados)
   const validOrders = orders.filter((o) => o.isValid);
-  const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
+  
+  // CRÍTICO: Usar peso de TODOS os pedidos para validação de frota
+  // Isso garante que o peso total do arquivo seja considerado
+  const totalWeight = orders.reduce((sum, o) => sum + o.weight_kg, 0);
 
   const completeStep = (step: RouteWizardStep) => {
     if (!completedSteps.includes(step)) {

@@ -17,22 +17,38 @@ function formatWeight(weight: number): string {
 }
 
 export function WeightValidation({ orders, trucks }: WeightValidationProps) {
+  // CRÍTICO: Calcular peso de TODOS os pedidos, não apenas os válidos
+  // Isso garante que o peso total do arquivo seja exibido corretamente
+  const allOrdersWeight = orders.reduce((sum, o) => sum + o.weight_kg, 0);
+  
+  // Pedidos válidos são os que têm endereço (para roteirização)
   const validOrders = orders.filter((o) => o.isValid);
-  const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
+  const validOrdersWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
+  
+  // USAR PESO TOTAL DE TODOS OS PEDIDOS para cálculos de frota
+  const totalWeight = allOrdersWeight;
+  
   const totalCapacity = trucks.reduce((sum, t) => sum + Number(t.capacity_kg), 0);
   const utilizationPercent = totalCapacity > 0 ? (totalWeight / totalCapacity) * 100 : 0;
   
-  const avgOrderWeight = validOrders.length > 0 ? totalWeight / validOrders.length : 0;
+  // Calcular médias baseado em TODOS os pedidos
+  const avgOrderWeight = orders.length > 0 ? totalWeight / orders.length : 0;
   const minTrucksNeeded = Math.ceil(totalWeight / (trucks.length > 0 ? Math.max(...trucks.map(t => Number(t.capacity_kg))) : 1));
   
   const hasEnoughCapacity = totalWeight <= totalCapacity;
-  const hasOrders = validOrders.length > 0;
+  const hasOrders = orders.length > 0;
+  
+  // Detectar se há diferença significativa entre peso total e peso dos pedidos válidos
+  const hasMismatch = Math.abs(allOrdersWeight - validOrdersWeight) > 100;
+  const invalidOrdersCount = orders.length - validOrders.length;
+  const invalidOrdersWeight = allOrdersWeight - validOrdersWeight;
 
-  // Metrics calculation
+  // Metrics calculation - mostrar todos os pedidos, não apenas válidos
   const metrics = [
     {
       label: 'Total de Pedidos',
-      value: validOrders.length.toString(),
+      value: orders.length.toString(),
+      subValue: invalidOrdersCount > 0 ? `(${validOrders.length} c/ endereço)` : undefined,
       icon: Package,
       color: 'text-primary',
     },
@@ -102,6 +118,22 @@ export function WeightValidation({ orders, trucks }: WeightValidationProps) {
         </CardContent>
       </Card>
 
+      {/* Alerta de Pedidos sem Endereço */}
+      {hasMismatch && invalidOrdersCount > 0 && (
+        <Card className="border-warning/50 bg-warning/5">
+          <CardContent className="flex items-center gap-4 py-4">
+            <AlertTriangle className="h-8 w-8 text-warning flex-shrink-0" />
+            <div>
+              <p className="font-medium text-warning">Alguns pedidos não têm endereço</p>
+              <p className="text-sm text-muted-foreground">
+                {invalidOrdersCount} pedido{invalidOrdersCount > 1 ? 's' : ''} sem endereço válido ({formatWeight(invalidOrdersWeight)}).
+                Corrija os endereços para incluí-los na rota.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Metrics Grid */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         {metrics.map((metric) => (
@@ -112,6 +144,9 @@ export function WeightValidation({ orders, trucks }: WeightValidationProps) {
                 <span className="text-xs text-muted-foreground">{metric.label}</span>
               </div>
               <p className="mt-1 text-xl font-bold">{metric.value}</p>
+              {metric.subValue && (
+                <p className="text-xs text-muted-foreground">{metric.subValue}</p>
+              )}
             </CardContent>
           </Card>
         ))}
