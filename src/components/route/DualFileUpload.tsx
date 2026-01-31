@@ -229,10 +229,22 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           }
         }
         
-        // Verificar se é formato Itinerário (Relatório de Vendas) - tabular com End. Ent.
-        const headers = rows[0].map(c => String(c ?? ''));
+        // Encontrar header row - pode não ser a primeira linha
+        let headerRowIdx = 0;
+        for (let i = 0; i < Math.min(10, rows.length); i++) {
+          const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
+          if (/cliente/i.test(rowText) && (/peso\s*bruto/i.test(rowText) || /end\.?\s*ent\.?/i.test(rowText))) {
+            headerRowIdx = i;
+            break;
+          }
+        }
+        
+        const headers = rows[headerRowIdx].map(c => String(c ?? ''));
+        console.log('[DualFileUpload] Header row:', headerRowIdx, headers.slice(0, 12).join(' | '));
+        
+        // Verificar se é formato MB (Itinerário) - NÃO USAR PARSER GENÉRICO
         if (isItinerarioExcelFormat(headers)) {
-          console.log('[DualFileUpload] Detectado: Relatório de Vendas (Excel Itinerário)');
+          console.log('[DualFileUpload] Detectado: Relatório de Vendas MB (Excel Itinerário)');
           const itinerarioRecords = parseItinerarioExcel(rows);
           
           if (itinerarioRecords.length > 0) {
@@ -251,17 +263,27 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             
             return { type: 'itinerario', data: itinerarioRecords };
           }
-        }
-        
-        // Fallback: usar parser genérico
-        console.log('[DualFileUpload] Usando parser genérico para Excel');
-        const result = await parseExcelWithValidation(file);
-        
-        if (result.validRows === 0) {
+          
+          // Se formato MB reconhecido mas sem dados, mostrar erro específico (não cair no genérico)
           setUploadState({
             file,
             status: 'error',
-            message: result.errors[0]?.message || 'Nenhum pedido válido',
+            message: 'Formato MB reconhecido mas sem dados válidos. Verifique se as linhas têm Cliente e Peso.',
+            data: null,
+          });
+          return null;
+        }
+        
+        // Fallback: usar parser genérico APENAS se NÃO for formato MB
+        console.log('[DualFileUpload] Formato não-MB, tentando parser genérico...');
+        const result = await parseExcelWithValidation(file);
+        
+        if (result.validRows === 0) {
+          // Mensagem de erro mais clara - sem mencionar template
+          setUploadState({
+            file,
+            status: 'error',
+            message: 'Formato não reconhecido. Colunas esperadas: Cliente, Peso Bruto, End. Ent., Bairro Ent.',
             data: null,
           });
           return null;
