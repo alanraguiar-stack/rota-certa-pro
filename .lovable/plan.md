@@ -1,192 +1,176 @@
 
-# Plano: Corrigir Cálculo do Peso Total do Relatório MB
+# Plano: Correção Definitiva do Cálculo do Peso Total - Coluna G
 
 ## Problema Identificado
 
-O sistema está exibindo **2.8t** quando o peso total correto deveria ser **13.048,56 kg**. A análise do arquivo Excel revela que:
+O sistema está exibindo **2.8t** quando o peso total correto é **13.048,56 kg**.
 
-### Estrutura Real do Excel (descoberta)
+### Análise do Arquivo Excel
 
-| Índice | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | ... |
-|--------|------|--------|-------|--------|-------|-----------|---------|----------|-----|
-| Header | Venda | Cliente | (vazio) | Total | Ordem | **Peso Bruto** | Cep Ent. | End. Ent. | ... |
+O arquivo `Relatório_de_Vendas_-_MB-2.xlsx` tem a seguinte estrutura de headers:
 
-O problema está no mapeamento de colunas do `parseItinerarioExcel`:
-- A coluna "Peso Bruto" está no **índice 5** (coluna F do Excel, ou coluna G se contando de 1)
-- O parser atual pode estar mapeando errado devido a colunas vazias no header
+| Índice | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
+|--------|-------|---------|-------|-------|-------|------------|---------|----------|----------|-----------|------------|
+| Header | Venda | Cliente | (vazio) | Total | Ordem | **Peso Bruto** | Cep Ent. | End. Ent. | Endereço | Bairro Ent. | Cidade Ent. |
 
-### Causa Raiz
+A soma correta da coluna G (Peso Bruto) é **13.048,56 kg** (confirmado na última linha do Excel).
 
-Na função `parseItinerarioExcel` em `src/lib/advParser.ts`, o mapeamento usa `findExactOrPattern` que procura por texto nos headers. O problema pode ser:
+### Causa Raiz Provável
 
-1. **Headers com espaços/normalização incorreta** - O header "Peso Bruto" pode não estar sendo encontrado corretamente
-2. **Índice errado** - O sistema pode estar lendo a coluna "Total" (índice 3) em vez de "Peso Bruto" (índice 5)
-3. **Conversão numérica falha** - A função `parseExcelWeight` pode não estar convertendo corretamente valores como `224.55` ou `1.060,25`
+1. **Coluna 4 (Ordem) está vazia nos dados mas presente no header** - O parser pode estar mapeando a coluna errada
+2. **Header com caracteres invisíveis** - O header "Peso Bruto" pode ter espaços extras ou caracteres especiais
+3. **A função `findExactOrPattern` pode estar falhando** - O índice retornado pode não ser o 5
 
-## Solução
+## Solução Definitiva
 
-### 1. Adicionar Debug Detalhado e Corrigir Mapeamento
+### Abordagem: Mapeamento Direto por Índice com Fallback
 
-Modificar `parseItinerarioExcel` para:
-1. Log detalhado de cada header e índice encontrado
-2. Garantir que a coluna "Peso Bruto" seja encontrada corretamente
-3. Corrigir o regex para aceitar variações do header
-
-### 2. Corrigir Função `findExactOrPattern`
-
-```typescript
-// Problema: headers podem ter espaços extras ou diferenças de case
-// Solução: normalizar antes de comparar
-const normalizedHeaders = headers.map(h => h.trim().toLowerCase());
-```
-
-### 3. Validar e Logar Pesos Extraídos
-
-Adicionar validação que soma os pesos durante o parsing e compara com esperado.
+Em vez de confiar apenas na busca por nome do header, adicionar lógica que:
+1. Primeiro, tenta encontrar pelo nome
+2. Se falhar, usa a **posição conhecida da coluna G (índice 5)**
+3. Adiciona logs detalhados mostrando o valor raw de cada célula
 
 ## Arquivos a Modificar
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `src/lib/advParser.ts` | Editar | Corrigir mapeamento de coluna "Peso Bruto" e adicionar logs de debug |
-| `src/components/route/DualFileUpload.tsx` | Editar | Adicionar validação e log do peso total após parsing |
+| `src/lib/advParser.ts` | Editar | Corrigir `parseItinerarioExcel` com fallback para índice fixo e logs detalhados |
 
-## Mudanças Técnicas Detalhadas
+## Mudanças Técnicas
 
-### 1. advParser.ts - Corrigir `parseItinerarioExcel`
+### 1. Função `parseItinerarioExcel` - Correção Completa
 
 ```typescript
 export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
-  // ... existing code to find header row ...
+  // ... código existente para encontrar headerRowIdx ...
   
   const headerRow = rows[headerRowIdx].map(c => {
-    const val = String(c ?? '').toLowerCase().trim();
-    console.log('[Debug Header]', headerRow.indexOf(val), '=', val);
-    return val;
+    const raw = String(c ?? '');
+    const normalized = normalizeText(raw).toLowerCase().trim();
+    return normalized;
   });
   
-  // Melhorar mapeamento - procurar pelo índice exato
-  const columnMap = {
-    venda: headerRow.findIndex(h => h === 'venda' || /^venda$/i.test(h)),
-    cliente: headerRow.findIndex(h => h === 'cliente' || /^cliente$/i.test(h)),
-    pesoBruto: headerRow.findIndex(h => 
-      h === 'peso bruto' || 
-      h === 'pesobruto' ||
-      /peso\s*bruto/i.test(h)
-    ),
-    endEnt: headerRow.findIndex(h => 
-      /end\.?\s*ent\.?/i.test(h)
-    ),
-    bairroEnt: headerRow.findIndex(h => 
-      /bairro\.?\s*ent\.?/i.test(h)
-    ),
-    cidadeEnt: headerRow.findIndex(h => 
-      /cidade\.?\s*ent\.?/i.test(h)
-    ),
-    cepEnt: headerRow.findIndex(h => 
-      /cep\.?\s*ent\.?/i.test(h)
-    ),
-  };
+  // DEBUG: Mostrar todos os headers com índice
+  console.log('[Itinerary Excel] HEADERS COMPLETOS:');
+  headerRow.forEach((h, idx) => {
+    console.log(`  [${idx}] = "${h}"`);
+  });
   
-  // LOG CRÍTICO: mostrar qual coluna foi mapeada para peso
-  console.log('[Peso Bruto] Column index:', columnMap.pesoBruto, 
-              '- Header value:', headerRow[columnMap.pesoBruto]);
+  // Mapear colunas - com fallback para índices conhecidos do formato MB
+  let pesoBrutoIdx = findExactOrPattern(headerRow, ['peso bruto'], [/peso\s*bruto/i]);
   
-  // ... rest of parsing ...
-  
-  // Ao final, mostrar peso total calculado
-  const totalWeight = records.reduce((sum, r) => sum + r.weight_kg, 0);
-  console.log('[Itinerary Excel] PESO TOTAL CALCULADO:', totalWeight.toFixed(2), 'kg');
-}
-```
-
-### 2. Corrigir `parseExcelWeight` para valores numéricos diretos
-
-O Excel pode retornar o peso já como número (não string). A função precisa tratar isso:
-
-```typescript
-function parseExcelWeight(value: string | number): number {
-  // Se já é número, retornar diretamente
-  if (typeof value === 'number' && !isNaN(value)) {
-    console.log('[parseExcelWeight] Number:', value);
-    return value;
+  // FALLBACK CRÍTICO: Se não encontrou "peso bruto" mas encontrou "cliente", 
+  // usar índice 5 (coluna G do formato MB padrão)
+  if (pesoBrutoIdx === -1) {
+    console.warn('[Itinerary Excel] ATENÇÃO: Header "Peso Bruto" não encontrado por nome');
+    console.warn('[Itinerary Excel] Tentando fallback para índice 5 (coluna G)...');
+    
+    // Verificar se índice 5 existe e parece ser peso (header ou dados numéricos)
+    if (headerRow.length > 5) {
+      const col5Header = headerRow[5];
+      const col5FirstData = rows[headerRowIdx + 1]?.[5];
+      
+      console.log('[Itinerary Excel] Coluna 5 - Header:', col5Header);
+      console.log('[Itinerary Excel] Coluna 5 - Primeiro dado:', col5FirstData);
+      
+      // Se o primeiro dado parece ser número, usar índice 5
+      if (typeof col5FirstData === 'number' || /^[\d.,]+$/.test(String(col5FirstData ?? ''))) {
+        pesoBrutoIdx = 5;
+        console.log('[Itinerary Excel] Usando índice 5 como Peso Bruto (fallback)');
+      }
+    }
   }
   
-  let str = String(value).trim();
-  if (!str) return 0;
+  console.log('[Itinerary Excel] Peso Bruto mapeado para índice:', pesoBrutoIdx);
   
-  // Log para debug
-  console.log('[parseExcelWeight] String:', str);
+  // ... resto do código ...
   
-  // ... existing conversion logic ...
+  // Ao processar cada linha, LOGAR os primeiros 10 pesos para debug
+  for (let i = headerRowIdx + 1; i < rows.length; i++) {
+    const row = rows[i];
+    // ...
+    
+    const pesoRaw = pesoBrutoIdx !== -1 ? row[pesoBrutoIdx] : 0;
+    const weight = parseExcelWeight(pesoRaw as string | number | null | undefined);
+    
+    // Log detalhado para primeiras 10 linhas
+    if (rowsProcessed <= 10) {
+      console.log(`[Peso] Linha ${i}: raw="${pesoRaw}" (tipo=${typeof pesoRaw}) -> converted=${weight}kg`);
+    }
+    
+    // ...
+  }
 }
 ```
 
-### 3. Validação no DualFileUpload
-
-Adicionar log do peso total após o parsing:
+### 2. Melhorar `findExactOrPattern` para ser mais robusto
 
 ```typescript
-if (itinerarioRecords.length > 0) {
-  const totalWeight = itinerarioRecords.reduce((sum, r) => sum + r.weight_kg, 0);
-  console.log('[DualFileUpload] Peso total dos itinerários:', totalWeight.toFixed(2), 'kg');
-  
-  // Alertar se peso parecer muito baixo
-  if (totalWeight < 1000 && itinerarioRecords.length > 10) {
-    console.warn('[DualFileUpload] ATENÇÃO: Peso total muito baixo para', 
-                 itinerarioRecords.length, 'registros');
+function findExactOrPattern(headers: string[], exactMatches: string[], patterns: RegExp[]): number {
+  // Primeiro: correspondência exata com normalização agressiva
+  for (const exact of exactMatches) {
+    const normalizedExact = exact.toLowerCase().trim().replace(/\s+/g, ' ');
+    
+    for (let i = 0; i < headers.length; i++) {
+      const normalizedHeader = headers[i].replace(/\s+/g, ' ').trim();
+      
+      if (normalizedHeader === normalizedExact) {
+        console.log(`[findExactOrPattern] Match exato: "${normalizedHeader}" no índice ${i}`);
+        return i;
+      }
+    }
   }
   
-  // ... rest of code ...
+  // Segundo: correspondência por padrão regex
+  for (let i = 0; i < headers.length; i++) {
+    for (const pattern of patterns) {
+      if (pattern.test(headers[i])) {
+        console.log(`[findExactOrPattern] Match regex: "${headers[i]}" no índice ${i}`);
+        return i;
+      }
+    }
+  }
+  
+  return -1;
 }
 ```
 
-## Diagrama do Fluxo de Debug
+### 3. Adicionar Validação Pós-Parsing
 
+Após o parsing, verificar se o peso total faz sentido:
+
+```typescript
+// Final do parseItinerarioExcel
+const calculatedTotalWeight = records.reduce((sum, r) => sum + r.weight_kg, 0);
+
+console.log('=====================================');
+console.log('VALIDAÇÃO FINAL DO PESO:');
+console.log(`  Registros: ${records.length}`);
+console.log(`  Peso Total: ${calculatedTotalWeight.toFixed(2)} kg`);
+console.log(`  Peso Total: ${(calculatedTotalWeight / 1000).toFixed(2)} t`);
+console.log(`  Peso Médio: ${(calculatedTotalWeight / records.length).toFixed(2)} kg/registro`);
+console.log('=====================================');
+
+// ALERTA CRÍTICO se peso parecer errado
+if (records.length > 50 && calculatedTotalWeight < 1000) {
+  console.error('❌ ERRO CRÍTICO: Peso total MUITO baixo!');
+  console.error('   Isso indica que a coluna Peso Bruto não foi mapeada corretamente.');
+  console.error('   Verificar índice da coluna pesoBruto:', pesoBrutoIdx);
+}
 ```
-Upload Excel
-     │
-     ▼
-┌─────────────────────────────────┐
-│ Encontrar Header Row            │
-│ LOG: Header index + valores     │
-└────────────┬────────────────────┘
-             │
-             ▼
-┌─────────────────────────────────┐
-│ Mapear Coluna "Peso Bruto"      │
-│ LOG: Índice = X, Valor = Y      │
-└────────────┬────────────────────┘
-             │
-             ▼
-┌─────────────────────────────────┐
-│ Para cada linha:                │
-│  - Extrair peso da coluna X     │
-│  - LOG: Peso raw = "224.55"     │
-│  - Converter com parseExcelWeight│
-│  - LOG: Peso converted = 224.55 │
-└────────────┬────────────────────┘
-             │
-             ▼
-┌─────────────────────────────────┐
-│ Somar todos os pesos            │
-│ LOG: PESO TOTAL = 13048.56 kg   │
-└─────────────────────────────────┘
-```
-
-## Validação Final
-
-Após as correções, o sistema deve:
-
-1. Mostrar nos logs qual coluna foi identificada como "Peso Bruto"
-2. Mostrar o valor raw de cada peso antes de converter
-3. Calcular e exibir o peso total correto: **13.048,56 kg**
-4. Exibir na interface "13,05 t" em vez de "2.8t"
 
 ## Resultado Esperado
 
-| Métrica | Antes (Errado) | Depois (Correto) |
-|---------|----------------|------------------|
-| Peso Total | 2.8t | 13,05t |
-| Pedidos | ? | 68 |
-| Caminhões Necessários | ? | 4 |
+| Métrica | Antes | Depois |
+|---------|-------|--------|
+| Peso Total | 2.8t | **13,05t** |
+| Pedidos | 72 | 72 |
+| Peso Médio | 39kg | ~181kg |
+| Caminhões | 1-2 | **4** |
+
+## Teste de Validação
+
+Após a correção, fazer upload do arquivo `Relatório_de_Vendas_-_MB-2.xlsx` e verificar:
+1. Console deve mostrar: `PESO TOTAL CALCULADO: 13048.56 kg`
+2. UI deve exibir: `Peso Total: 13.0t`
+3. Recomendação de frota: `4 caminhões`
