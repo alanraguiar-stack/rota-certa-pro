@@ -712,6 +712,9 @@ export function isADVExcelFormat(rows: unknown[][]): boolean {
 export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   if (rows.length < 2) return [];
   
+  console.log('[Itinerary Excel] =====================================');
+  console.log('[Itinerary Excel] Iniciando parsing de', rows.length, 'linhas');
+  
   // Encontrar header row - procurar em até 10 primeiras linhas
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(10, rows.length); i++) {
@@ -729,7 +732,12 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   }
   
   const headerRow = rows[headerRowIdx].map(c => normalizeText(String(c ?? '')).toLowerCase().trim());
-  console.log('[Itinerary Excel] Header row index:', headerRowIdx, '- headers:', headerRow.slice(0, 15).join(' | '));
+  
+  // DEBUG: Mostrar cada header com seu índice
+  console.log('[Itinerary Excel] Header row index:', headerRowIdx);
+  headerRow.forEach((h, idx) => {
+    if (h) console.log('[Itinerary Excel] Header[' + idx + '] = "' + h + '"');
+  });
   
   // Mapear colunas usando correspondência EXATA primeiro, depois regex
   const columnMap = {
@@ -742,7 +750,14 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     cepEnt: findExactOrPattern(headerRow, ['cep ent.', 'cep ent', 'cep ent.'], [/cep\.?\s*ent\.?/i]),
   };
   
-  console.log('[Itinerary Excel] Column mapping:', columnMap);
+  console.log('[Itinerary Excel] =====================================');
+  console.log('[Itinerary Excel] MAPEAMENTO DE COLUNAS:');
+  console.log('[Itinerary Excel]   Venda: índice', columnMap.venda, '-> valor do header:', headerRow[columnMap.venda] || '(não encontrado)');
+  console.log('[Itinerary Excel]   Cliente: índice', columnMap.cliente, '-> valor do header:', headerRow[columnMap.cliente] || '(não encontrado)');
+  console.log('[Itinerary Excel]   Peso Bruto: índice', columnMap.pesoBruto, '-> valor do header:', headerRow[columnMap.pesoBruto] || '(não encontrado)');
+  console.log('[Itinerary Excel]   End. Ent.: índice', columnMap.endEnt, '-> valor do header:', headerRow[columnMap.endEnt] || '(não encontrado)');
+  console.log('[Itinerary Excel]   Bairro Ent.: índice', columnMap.bairroEnt, '-> valor do header:', headerRow[columnMap.bairroEnt] || '(não encontrado)');
+  console.log('[Itinerary Excel] =====================================');
   
   // Validar colunas mínimas: Cliente é obrigatório, e precisa ter Peso OU Endereço
   if (columnMap.cliente === -1) {
@@ -756,6 +771,8 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   }
   
   const records: ItinerarioRecord[] = [];
+  let totalWeightDebug = 0;
+  let rowsProcessed = 0;
   
   // Processar linhas de dados (após header)
   for (let i = headerRowIdx + 1; i < rows.length; i++) {
@@ -772,14 +789,25 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     // Validar dados mínimos - precisa ter cliente
     if (!clientName) continue;
     
+    rowsProcessed++;
+    
     const address = columnMap.endEnt !== -1 ? String(row[columnMap.endEnt] ?? '').trim() : '';
     const neighborhood = columnMap.bairroEnt !== -1 ? String(row[columnMap.bairroEnt] ?? '').trim() : '';
     const city = columnMap.cidadeEnt !== -1 ? String(row[columnMap.cidadeEnt] ?? '').trim() : '';
     const cep = columnMap.cepEnt !== -1 ? String(row[columnMap.cepEnt] ?? '').trim() : '';
-    const pesoStr = columnMap.pesoBruto !== -1 ? String(row[columnMap.pesoBruto] ?? '0') : '0';
+    
+    // Obter valor raw do peso para debug
+    const pesoRaw = columnMap.pesoBruto !== -1 ? row[columnMap.pesoBruto] : 0;
     
     // Converter peso (suporta formato BR e US)
-    const weight = parseExcelWeight(pesoStr);
+    // Fazer cast para aceitar unknown do Excel
+    const weight = parseExcelWeight(pesoRaw as string | number | null | undefined);
+    totalWeightDebug += weight;
+    
+    // DEBUG: Log primeiros 5 registros e alguns do meio
+    if (rowsProcessed <= 5 || rowsProcessed % 20 === 0) {
+      console.log('[Itinerary Excel] Row', i, ':', clientName.substring(0, 20), '| Peso raw:', pesoRaw, '(tipo:', typeof pesoRaw + ') -> convertido:', weight, 'kg');
+    }
     
     // Aceitar registros mesmo com peso 0 se tiver endereço válido
     if (weight <= 0 && !address) continue;
@@ -795,7 +823,24 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     });
   }
   
-  console.log('[Itinerary Excel] Total records extracted:', records.length);
+  // VALIDAÇÃO CRÍTICA: Calcular e exibir peso total
+  const calculatedTotalWeight = records.reduce((sum, r) => sum + r.weight_kg, 0);
+  
+  console.log('[Itinerary Excel] =====================================');
+  console.log('[Itinerary Excel] RESUMO DO PARSING:');
+  console.log('[Itinerary Excel]   Linhas processadas:', rowsProcessed);
+  console.log('[Itinerary Excel]   Registros válidos:', records.length);
+  console.log('[Itinerary Excel]   PESO TOTAL CALCULADO:', calculatedTotalWeight.toFixed(2), 'kg');
+  console.log('[Itinerary Excel]   Peso total em toneladas:', (calculatedTotalWeight / 1000).toFixed(2), 't');
+  console.log('[Itinerary Excel] =====================================');
+  
+  // Alerta se peso parecer muito baixo para a quantidade de registros
+  if (records.length > 10 && calculatedTotalWeight < 1000) {
+    console.warn('[Itinerary Excel] ⚠️ ATENÇÃO: Peso total muito baixo para', records.length, 'registros!');
+    console.warn('[Itinerary Excel] Verifique se a coluna Peso Bruto está mapeada corretamente.');
+    console.warn('[Itinerary Excel] Índice atual do Peso Bruto:', columnMap.pesoBruto);
+  }
+  
   return records;
 }
 
@@ -957,9 +1002,25 @@ function findExcelColumnIndex(headers: string[], patterns: RegExp[]): number {
 
 /**
  * Parse peso de célula Excel (suporta formatos BR e US)
+ * 
+ * IMPORTANTE: O Excel pode retornar valores numéricos diretamente.
+ * Esta função trata tanto números quanto strings.
+ * 
+ * Formatos suportados:
+ * - Número direto: 224.55 (retorna como está)
+ * - String BR: "1.234,56" -> 1234.56
+ * - String US: "1,234.56" -> 1234.56
+ * - String simples: "224,55" -> 224.55 ou "224.55" -> 224.55
  */
-function parseExcelWeight(value: string | number): number {
-  if (typeof value === 'number') return value;
+function parseExcelWeight(value: string | number | null | undefined): number {
+  // Se é null ou undefined, retorna 0
+  if (value === null || value === undefined) return 0;
+  
+  // Se já é número válido, retornar diretamente
+  if (typeof value === 'number') {
+    if (isNaN(value)) return 0;
+    return value;
+  }
   
   let str = String(value).trim();
   if (!str) return 0;
@@ -967,29 +1028,34 @@ function parseExcelWeight(value: string | number): number {
   // Remove sufixos de unidade
   str = str.replace(/\s*(kg|kilos?|quilos?)\s*$/i, '');
   
-  // Detectar formato
+  // Detectar formato baseado em pontos e vírgulas
   const hasComma = str.includes(',');
   const hasDot = str.includes('.');
   
   if (hasComma && hasDot) {
+    // Ambos presentes - determinar qual é o decimal
     const commaPos = str.lastIndexOf(',');
     const dotPos = str.lastIndexOf('.');
+    
     if (commaPos > dotPos) {
-      // 1.234,56 (BR)
+      // Formato BR: 1.234,56 -> vírgula é decimal
       str = str.replace(/\./g, '').replace(',', '.');
     } else {
-      // 1,234.56 (US)
+      // Formato US: 1,234.56 -> ponto é decimal
       str = str.replace(/,/g, '');
     }
   } else if (hasComma) {
-    // Vírgula como decimal ou milhares
+    // Apenas vírgula - verificar contexto
     const match = str.match(/,(\d+)$/);
     if (match && match[1].length === 3) {
+      // Vírgula é separador de milhares: 1,234 -> 1234
       str = str.replace(/,/g, '');
     } else {
+      // Vírgula é decimal: 224,55 -> 224.55
       str = str.replace(',', '.');
     }
   }
+  // Se só tem ponto, parseFloat já trata corretamente
   
   const num = parseFloat(str);
   return isNaN(num) ? 0 : num;
