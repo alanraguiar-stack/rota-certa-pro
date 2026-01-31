@@ -24,6 +24,7 @@ import { CollapsibleAddressFixer } from '@/components/route/CollapsibleAddressFi
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { LoadConsolidationView } from '@/components/route/LoadConsolidationView';
 import { SideBySideManifests } from '@/components/route/SideBySideManifests';
+import { TruckManifestCards } from '@/components/route/TruckManifestCards';
 
 // Helper function to get strategy label
 function getStrategyLabel(strategy: RoutingStrategy): string {
@@ -763,32 +764,19 @@ export default function RouteDetails() {
               />
             )}
 
-            {/* DOCUMENTOS LADO A LADO */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileDown className="h-5 w-5" />
-                  Documentos Finais
-                </CardTitle>
-                <CardDescription>
-                  Romaneio de Carga (separação) e Romaneio de Entrega (motorista) lado a lado
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <SideBySideManifests
-                  routeName={route.name}
-                  date={new Date(route.created_at).toLocaleDateString('pt-BR')}
-                  trucks={route.route_trucks.map(rt => ({
-                    truck: rt.truck!,
-                    orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
-                    totalWeight: Number(rt.total_weight_kg),
-                    occupancyPercent: rt.occupancy_percent,
-                    departureTime: (rt as any).departure_time || undefined,
-                    estimatedReturnTime: (rt as any).estimated_return_time || undefined,
-                  }))}
-                />
-              </CardContent>
-            </Card>
+            {/* DOCUMENTOS POR CAMINHÃO - Layout com Cards */}
+            <TruckManifestCards
+              routeName={route.name}
+              date={new Date(route.created_at).toLocaleDateString('pt-BR')}
+              trucks={route.route_trucks.map(rt => ({
+                truck: rt.truck!,
+                orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
+                totalWeight: Number(rt.total_weight_kg),
+                occupancyPercent: rt.occupancy_percent,
+                departureTime: (rt as any).departure_time || undefined,
+                estimatedReturnTime: (rt as any).estimated_return_time || undefined,
+              }))}
+            />
           </>
         )}
 
