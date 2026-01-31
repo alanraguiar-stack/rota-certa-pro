@@ -211,6 +211,7 @@ export function detectColumnMapping(headers: string[]): ColumnMapping | null {
 
 /**
  * Parse weight value from various formats
+ * Supports both Brazilian (1.234,56) and US (1,234.56) formats
  */
 function parseWeight(value: unknown): number | null {
   if (typeof value === 'number') {
@@ -226,18 +227,49 @@ function parseWeight(value: unknown): number | null {
   
   // Remove common unit suffixes
   normalized = normalized.replace(/\s*(kg|kilos?|quilos?|kgs?)\s*$/i, '');
-  normalized = normalized.replace(/\s*(ton|toneladas?|t)\s*$/i, (match) => {
-    // If it ends with ton, multiply by 1000
-    return '';
-  });
   
   // Handle tons
   const isTons = /ton|toneladas?|\st$/i.test(value);
+  normalized = normalized.replace(/\s*(ton|toneladas?|t)\s*$/i, '');
   
-  // Replace comma with dot for decimal
-  normalized = normalized.replace(',', '.');
+  // Detect format: Brazilian (1.234,56) vs US (1,234.56) vs simple decimal (224.55)
+  const hasComma = normalized.includes(',');
+  const hasDot = normalized.includes('.');
   
-  // Remove any non-numeric characters except dot
+  if (hasComma && hasDot) {
+    // Both present: determine which is decimal separator
+    const commaPos = normalized.lastIndexOf(',');
+    const dotPos = normalized.lastIndexOf('.');
+    
+    if (commaPos > dotPos) {
+      // Format: 1.234,56 (Brazilian) - comma is decimal
+      normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else {
+      // Format: 1,234.56 (US) - dot is decimal
+      normalized = normalized.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    // Only comma: check if it's thousands or decimal separator
+    const commaMatch = normalized.match(/,(\d+)$/);
+    if (commaMatch && commaMatch[1].length === 3) {
+      // Comma followed by 3 digits: thousand separator (ex: 1,000)
+      normalized = normalized.replace(/,/g, '');
+    } else {
+      // Comma as decimal separator (ex: 12,50)
+      normalized = normalized.replace(',', '.');
+    }
+  }
+  // If only dot: could be either (224.55 is simple decimal, 1.234 is thousands)
+  else if (hasDot) {
+    const dotMatch = normalized.match(/\.(\d+)$/);
+    if (dotMatch && dotMatch[1].length === 3 && normalized.match(/^\d+\.\d{3}$/)) {
+      // Format: 1.234 (Brazilian thousands, no decimal)
+      normalized = normalized.replace(/\./g, '');
+    }
+    // Otherwise keep dot as decimal (224.55)
+  }
+  
+  // Remove any remaining non-numeric characters except dot
   normalized = normalized.replace(/[^\d.]/g, '');
   
   const num = parseFloat(normalized);

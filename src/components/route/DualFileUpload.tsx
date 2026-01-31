@@ -37,7 +37,12 @@ import {
   createOrdersFromItinerario,
   ItinerarioRecord,
   PDFDetectionResult,
+  isItinerarioExcelFormat,
+  isADVExcelFormat,
+  parseItinerarioExcel,
+  parseADVDetailExcel,
 } from '@/lib/advParser';
+import * as XLSX from 'xlsx';
 
 interface DualFileUploadProps {
   onDataReady: (orders: ParsedOrder[], hasItemDetails: boolean) => void;
@@ -179,11 +184,77 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
       setUploadState({
         file,
         status: 'processing',
-        message: 'Processando planilha...',
+        message: 'Analisando planilha...',
         data: null,
       });
       
       try {
+        // Ler Excel e detectar tipo automaticamente
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        
+        if (rows.length < 2) {
+          setUploadState({
+            file,
+            status: 'error',
+            message: 'Planilha vazia',
+            data: null,
+          });
+          return null;
+        }
+        
+        // Verificar se é formato ADV (Detalhe das Vendas) - hierárquico
+        if (isADVExcelFormat(rows)) {
+          console.log('[DualFileUpload] Detectado: Detalhe das Vendas (Excel ADV)');
+          const advOrders = parseADVDetailExcel(rows);
+          
+          if (advOrders.length > 0) {
+            setUploadState({
+              file,
+              status: 'success',
+              message: `${advOrders.length} pedidos com itens`,
+              data: advOrders,
+              detectedType: 'adv',
+            });
+            
+            toast({
+              title: 'Detalhe das Vendas detectado!',
+              description: `${advOrders.length} pedidos com itens detalhados`,
+            });
+            
+            return { type: 'adv', data: advOrders };
+          }
+        }
+        
+        // Verificar se é formato Itinerário (Relatório de Vendas) - tabular com End. Ent.
+        const headers = rows[0].map(c => String(c ?? ''));
+        if (isItinerarioExcelFormat(headers)) {
+          console.log('[DualFileUpload] Detectado: Relatório de Vendas (Excel Itinerário)');
+          const itinerarioRecords = parseItinerarioExcel(rows);
+          
+          if (itinerarioRecords.length > 0) {
+            setUploadState({
+              file,
+              status: 'success',
+              message: `${itinerarioRecords.length} vendas com endereço`,
+              data: itinerarioRecords,
+              detectedType: 'itinerario',
+            });
+            
+            toast({
+              title: 'Relatório de Vendas detectado!',
+              description: `${itinerarioRecords.length} endereços de entrega carregados`,
+            });
+            
+            return { type: 'itinerario', data: itinerarioRecords };
+          }
+        }
+        
+        // Fallback: usar parser genérico
+        console.log('[DualFileUpload] Usando parser genérico para Excel');
         const result = await parseExcelWithValidation(file);
         
         if (result.validRows === 0) {
