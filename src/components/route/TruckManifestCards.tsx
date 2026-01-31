@@ -1,9 +1,10 @@
 /**
  * Layout visual com cards por caminhão
  * Cada card exibe identificação do caminhão e botões para romaneios
+ * Inclui validação inteligente no topo
  */
 
-import { FileDown, Printer, Truck, Package, MapPin, Scale, ClipboardCheck } from 'lucide-react';
+import { FileDown, Printer, Truck, Package, MapPin, Scale, ClipboardCheck, Check, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -354,20 +355,46 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
     });
   };
   
+  // Calculate validation metrics
+  const totalWeightDistributed = trucks.reduce((sum, t) => sum + t.totalWeight, 0);
+  const totalOrders = trucks.reduce((sum, t) => sum + t.orders.length, 0);
+  const avgOccupancy = trucks.length > 0 
+    ? Math.round(trucks.reduce((sum, t) => sum + t.occupancyPercent, 0) / trucks.length)
+    : 0;
+  
   return (
     <div className="space-y-6">
+      {/* Validation Summary Header */}
+      <Card className="bg-success/5 border-success/30 border-2">
+        <CardContent className="py-4">
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+              <Check className="h-6 w-6 text-success" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-lg">Roteirização Concluída</p>
+              <p className="text-sm text-muted-foreground">
+                {totalOrders} entregas distribuídas em {trucks.length} caminhões • 
+                Peso total: {formatWeight(totalWeightDistributed)} • 
+                Ocupação média: {avgOccupancy}%
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+      
       {/* Header with total and download all */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold flex items-center gap-2">
             <Truck className="h-5 w-5 text-primary" />
-            {trucks.length} Caminhão(ões) Designado(s)
+            Documentos por Caminhão
           </h3>
           <p className="text-sm text-muted-foreground">
-            Total: {formatWeight(trucks.reduce((sum, t) => sum + t.totalWeight, 0))} • {trucks.reduce((sum, t) => sum + t.orders.length, 0)} entregas
+            Clique para baixar ou imprimir os romaneios
           </p>
         </div>
-        <Button onClick={handleDownloadAll} className="gap-2">
+        <Button onClick={handleDownloadAll} className="gap-2" size="lg">
           <FileDown className="h-4 w-4" />
           Baixar Todos ({trucks.length * 2} PDFs)
         </Button>
