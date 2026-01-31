@@ -1,255 +1,192 @@
 
-# Plano: Corrigir Parser Excel MB Definitivo
+# Plano: Corrigir Cálculo do Peso Total do Relatório MB
 
-## Problema Raiz Identificado
+## Problema Identificado
 
-O arquivo `Relatório_de_Vendas_-_MB-2.xlsx` possui a estrutura correta com headers na primeira linha:
+O sistema está exibindo **2.8t** quando o peso total correto deveria ser **13.048,56 kg**. A análise do arquivo Excel revela que:
 
+### Estrutura Real do Excel (descoberta)
+
+| Índice | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | ... |
+|--------|------|--------|-------|--------|-------|-----------|---------|----------|-----|
+| Header | Venda | Cliente | (vazio) | Total | Ordem | **Peso Bruto** | Cep Ent. | End. Ent. | ... |
+
+O problema está no mapeamento de colunas do `parseItinerarioExcel`:
+- A coluna "Peso Bruto" está no **índice 5** (coluna F do Excel, ou coluna G se contando de 1)
+- O parser atual pode estar mapeando errado devido a colunas vazias no header
+
+### Causa Raiz
+
+Na função `parseItinerarioExcel` em `src/lib/advParser.ts`, o mapeamento usa `findExactOrPattern` que procura por texto nos headers. O problema pode ser:
+
+1. **Headers com espaços/normalização incorreta** - O header "Peso Bruto" pode não estar sendo encontrado corretamente
+2. **Índice errado** - O sistema pode estar lendo a coluna "Total" (índice 3) em vez de "Peso Bruto" (índice 5)
+3. **Conversão numérica falha** - A função `parseExcelWeight` pode não estar convertendo corretamente valores como `224.55` ou `1.060,25`
+
+## Solução
+
+### 1. Adicionar Debug Detalhado e Corrigir Mapeamento
+
+Modificar `parseItinerarioExcel` para:
+1. Log detalhado de cada header e índice encontrado
+2. Garantir que a coluna "Peso Bruto" seja encontrada corretamente
+3. Corrigir o regex para aceitar variações do header
+
+### 2. Corrigir Função `findExactOrPattern`
+
+```typescript
+// Problema: headers podem ter espaços extras ou diferenças de case
+// Solução: normalizar antes de comparar
+const normalizedHeaders = headers.map(h => h.trim().toLowerCase());
 ```
-Venda | Cliente | (vazio) | Total | Ordem | Peso Bruto | Cep Ent. | End. Ent. | Endereço | Bairro Ent. | Cidade Ent. | ...
-```
 
-**Mapeamento do Usuário (de-para):**
-| Campo | Coluna Excel | Índice | Nome Header |
-|-------|--------------|--------|-------------|
-| Cliente | C | 1 | `Cliente` |
-| Peso | G | 5 | `Peso Bruto` |
-| Endereço | I | 7 | `End. Ent.` |
-| Bairro | K | 9 | `Bairro Ent.` |
-| Cidade | - | 10 | `Cidade Ent.` |
-| CEP | - | 6 | `Cep Ent.` |
+### 3. Validar e Logar Pesos Extraídos
 
-**Problema:** A função `isItinerarioExcelFormat()` em `src/lib/advParser.ts` está testando os headers mas está falhando porque:
-1. Pode haver uma coluna vazia entre os headers
-2. O fallback cai no parser genérico que exige template "Cliente, Peso_kg, Endereço" no formato padronizado
-
-**Mensagem de Erro:** "Colunas faltando: Cliente, Peso_kg, Endereço (Rua, Número, Bairro, Cidade, Estado). Baixe o template modelo para ver o formato correto."
-
-## Solução: Parser Dedicado para Formato MB
-
-Criar lógica específica para o formato MB que **não exige template**, mapeando colunas fixas pelo nome do header exato.
+Adicionar validação que soma os pesos durante o parsing e compara com esperado.
 
 ## Arquivos a Modificar
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `src/lib/advParser.ts` | Editar | Melhorar `isItinerarioExcelFormat` e `parseItinerarioExcel` para aceitar formato MB |
-| `src/components/route/DualFileUpload.tsx` | Editar | Remover fallback para parser genérico quando for formato MB |
+| `src/lib/advParser.ts` | Editar | Corrigir mapeamento de coluna "Peso Bruto" e adicionar logs de debug |
+| `src/components/route/DualFileUpload.tsx` | Editar | Adicionar validação e log do peso total após parsing |
 
 ## Mudanças Técnicas Detalhadas
 
-### 1. advParser.ts - Melhorar Detecção de Formato
-
-```typescript
-/**
- * Detecta se Excel é formato de Relatório de Vendas MB
- * Headers esperados: Cliente, Peso Bruto, End. Ent., Bairro Ent., Cidade Ent.
- */
-export function isItinerarioExcelFormat(headers: string[]): boolean {
-  const headerText = headers.map(h => String(h ?? '').toLowerCase()).join(' ');
-  
-  // Padrões do formato MB específico
-  const requiredPatterns = [
-    /cliente/i,           // Obrigatório: Cliente
-    /peso\s*bruto/i,      // Obrigatório: Peso Bruto
-  ];
-  
-  const addressPatterns = [
-    /end\.?\s*ent\.?/i,   // End. Ent.
-    /bairro\.?\s*ent\.?/i,// Bairro Ent.
-    /cidade\.?\s*ent\.?/i,// Cidade Ent.
-  ];
-  
-  // Precisa ter Cliente + Peso Bruto + pelo menos 1 endereço
-  const hasRequired = requiredPatterns.every(p => p.test(headerText));
-  const addressCount = addressPatterns.filter(p => p.test(headerText)).length;
-  
-  console.log('[Itinerary Excel] Detection:', { 
-    hasRequired, 
-    addressCount,
-    headers: headers.slice(0, 12).join(', ')
-  });
-  
-  return hasRequired && addressCount >= 1;
-}
-```
-
-### 2. advParser.ts - Melhorar Mapeamento de Colunas
+### 1. advParser.ts - Corrigir `parseItinerarioExcel`
 
 ```typescript
 export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
-  if (rows.length < 2) return [];
+  // ... existing code to find header row ...
   
-  // Encontrar header row - procurar em até 10 primeiras linhas
-  let headerRowIdx = -1;
-  for (let i = 0; i < Math.min(10, rows.length); i++) {
-    const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
-    if (/cliente/i.test(rowText) && (/peso\s*bruto/i.test(rowText) || /end\.?\s*ent\.?/i.test(rowText))) {
-      headerRowIdx = i;
-      break;
-    }
-  }
+  const headerRow = rows[headerRowIdx].map(c => {
+    const val = String(c ?? '').toLowerCase().trim();
+    console.log('[Debug Header]', headerRow.indexOf(val), '=', val);
+    return val;
+  });
   
-  if (headerRowIdx === -1) {
-    console.log('[Itinerary Excel] Header row not found');
-    return [];
-  }
-  
-  const headerRow = rows[headerRowIdx].map(c => String(c ?? '').toLowerCase().trim());
-  
-  // Mapear colunas usando correspondência EXATA primeiro, depois regex
+  // Melhorar mapeamento - procurar pelo índice exato
   const columnMap = {
-    venda: findExactOrPattern(headerRow, ['venda'], [/^venda$/i]),
-    cliente: findExactOrPattern(headerRow, ['cliente'], [/^cliente$/i]),
-    pesoBruto: findExactOrPattern(headerRow, ['peso bruto'], [/peso\s*bruto/i]),
-    endEnt: findExactOrPattern(headerRow, ['end. ent.', 'end ent'], [/end\.?\s*ent\.?/i]),
-    bairroEnt: findExactOrPattern(headerRow, ['bairro ent.', 'bairro ent'], [/bairro\.?\s*ent\.?/i]),
-    cidadeEnt: findExactOrPattern(headerRow, ['cidade ent.', 'cidade ent'], [/cidade\.?\s*ent\.?/i]),
-    cepEnt: findExactOrPattern(headerRow, ['cep ent.', 'cep ent'], [/cep\.?\s*ent\.?/i]),
+    venda: headerRow.findIndex(h => h === 'venda' || /^venda$/i.test(h)),
+    cliente: headerRow.findIndex(h => h === 'cliente' || /^cliente$/i.test(h)),
+    pesoBruto: headerRow.findIndex(h => 
+      h === 'peso bruto' || 
+      h === 'pesobruto' ||
+      /peso\s*bruto/i.test(h)
+    ),
+    endEnt: headerRow.findIndex(h => 
+      /end\.?\s*ent\.?/i.test(h)
+    ),
+    bairroEnt: headerRow.findIndex(h => 
+      /bairro\.?\s*ent\.?/i.test(h)
+    ),
+    cidadeEnt: headerRow.findIndex(h => 
+      /cidade\.?\s*ent\.?/i.test(h)
+    ),
+    cepEnt: headerRow.findIndex(h => 
+      /cep\.?\s*ent\.?/i.test(h)
+    ),
   };
   
-  // Aceitar se tiver Cliente + Peso OU Cliente + Endereço
-  if (columnMap.cliente === -1) {
-    console.log('[Itinerary Excel] Missing Cliente column');
-    return [];
-  }
+  // LOG CRÍTICO: mostrar qual coluna foi mapeada para peso
+  console.log('[Peso Bruto] Column index:', columnMap.pesoBruto, 
+              '- Header value:', headerRow[columnMap.pesoBruto]);
   
-  if (columnMap.pesoBruto === -1 && columnMap.endEnt === -1) {
-    console.log('[Itinerary Excel] Missing both Peso Bruto and End. Ent.');
-    return [];
-  }
+  // ... rest of parsing ...
   
-  // ... resto da lógica de parsing
-}
-
-function findExactOrPattern(headers: string[], exactMatches: string[], patterns: RegExp[]): number {
-  // Primeiro: correspondência exata
-  for (const exact of exactMatches) {
-    const idx = headers.indexOf(exact);
-    if (idx !== -1) return idx;
-  }
-  
-  // Segundo: correspondência por padrão
-  for (let i = 0; i < headers.length; i++) {
-    for (const pattern of patterns) {
-      if (pattern.test(headers[i])) return i;
-    }
-  }
-  
-  return -1;
+  // Ao final, mostrar peso total calculado
+  const totalWeight = records.reduce((sum, r) => sum + r.weight_kg, 0);
+  console.log('[Itinerary Excel] PESO TOTAL CALCULADO:', totalWeight.toFixed(2), 'kg');
 }
 ```
 
-### 3. DualFileUpload.tsx - Melhorar Fluxo de Detecção
+### 2. Corrigir `parseExcelWeight` para valores numéricos diretos
+
+O Excel pode retornar o peso já como número (não string). A função precisa tratar isso:
 
 ```typescript
-// Modificar processFile() para não cair no parser genérico quando detectar formato MB
-
-if (isExcelFile(file)) {
-  // Ler Excel
-  const arrayBuffer = await file.arrayBuffer();
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-  const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-  
-  // Encontrar header row (pode não ser a primeira linha)
-  let headerRowIdx = 0;
-  for (let i = 0; i < Math.min(10, rows.length); i++) {
-    const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
-    if (/cliente/i.test(rowText) && /peso/i.test(rowText)) {
-      headerRowIdx = i;
-      break;
-    }
+function parseExcelWeight(value: string | number): number {
+  // Se já é número, retornar diretamente
+  if (typeof value === 'number' && !isNaN(value)) {
+    console.log('[parseExcelWeight] Number:', value);
+    return value;
   }
   
-  const headers = rows[headerRowIdx].map(c => String(c ?? ''));
+  let str = String(value).trim();
+  if (!str) return 0;
   
-  // Verificar se é formato MB (Itinerário)
-  if (isItinerarioExcelFormat(headers)) {
-    const records = parseItinerarioExcel(rows);
-    if (records.length > 0) {
-      // Sucesso - retornar como itinerário
-      return { type: 'itinerario', data: records };
-    }
-    
-    // Se parseItinerarioExcel retornou vazio, mostrar erro específico
-    setUploadState({
-      file,
-      status: 'error',
-      message: 'Formato reconhecido mas sem dados válidos. Verifique se as linhas têm Cliente e Peso.',
-      data: null,
-    });
-    return null;
-  }
+  // Log para debug
+  console.log('[parseExcelWeight] String:', str);
   
-  // NÃO cair no parser genérico - mostrar erro claro
-  setUploadState({
-    file,
-    status: 'error',
-    message: 'Formato não reconhecido. A planilha deve ter colunas: Cliente, Peso Bruto, End. Ent., Bairro Ent.',
-    data: null,
-  });
-  return null;
+  // ... existing conversion logic ...
 }
 ```
 
-### 4. Remover Dependência de Template
+### 3. Validação no DualFileUpload
 
-O sistema não deve mais exigir template padrão. Aceitar qualquer planilha que tenha:
-- Coluna `Cliente` (obrigatória)
-- Coluna `Peso Bruto` ou similar (obrigatória)  
-- Coluna `End. Ent.` ou similar (obrigatória para geocodificação)
-- Colunas `Bairro Ent.`, `Cidade Ent.`, `Cep Ent.` (opcionais, melhoram geocodificação)
+Adicionar log do peso total após o parsing:
 
-## Diagrama do Fluxo Corrigido
+```typescript
+if (itinerarioRecords.length > 0) {
+  const totalWeight = itinerarioRecords.reduce((sum, r) => sum + r.weight_kg, 0);
+  console.log('[DualFileUpload] Peso total dos itinerários:', totalWeight.toFixed(2), 'kg');
+  
+  // Alertar se peso parecer muito baixo
+  if (totalWeight < 1000 && itinerarioRecords.length > 10) {
+    console.warn('[DualFileUpload] ATENÇÃO: Peso total muito baixo para', 
+                 itinerarioRecords.length, 'registros');
+  }
+  
+  // ... rest of code ...
+}
+```
+
+## Diagrama do Fluxo de Debug
 
 ```
 Upload Excel
      │
      ▼
-┌─────────────────────────┐
-│ Encontrar Header Row    │
-│ (procurar "Cliente" +   │
-│  "Peso" nas primeiras   │
-│  10 linhas)             │
-└────────────┬────────────┘
+┌─────────────────────────────────┐
+│ Encontrar Header Row            │
+│ LOG: Header index + valores     │
+└────────────┬────────────────────┘
              │
              ▼
-┌─────────────────────────┐
-│ isItinerarioExcelFormat │
-│ Headers: Cliente +      │
-│ Peso Bruto + End.Ent.?  │
-└────────────┬────────────┘
+┌─────────────────────────────────┐
+│ Mapear Coluna "Peso Bruto"      │
+│ LOG: Índice = X, Valor = Y      │
+└────────────┬────────────────────┘
              │
-        ┌────┴────┐
-        │         │
-       SIM       NÃO
-        │         │
-        ▼         ▼
-┌───────────┐  ┌─────────────────┐
-│ Parse MB  │  │ Erro: "Formato  │
-│ Format    │  │ não reconhecido"│
-└─────┬─────┘  └─────────────────┘
-      │
-      ▼
-┌───────────────────────────┐
-│ Extrair registros:        │
-│ - Venda (ID)              │
-│ - Cliente                 │
-│ - Peso Bruto              │
-│ - End. Ent. + Bairro +    │
-│   Cidade + CEP            │
-└───────────────────────────┘
+             ▼
+┌─────────────────────────────────┐
+│ Para cada linha:                │
+│  - Extrair peso da coluna X     │
+│  - LOG: Peso raw = "224.55"     │
+│  - Converter com parseExcelWeight│
+│  - LOG: Peso converted = 224.55 │
+└────────────┬────────────────────┘
+             │
+             ▼
+┌─────────────────────────────────┐
+│ Somar todos os pesos            │
+│ LOG: PESO TOTAL = 13048.56 kg   │
+└─────────────────────────────────┘
 ```
+
+## Validação Final
+
+Após as correções, o sistema deve:
+
+1. Mostrar nos logs qual coluna foi identificada como "Peso Bruto"
+2. Mostrar o valor raw de cada peso antes de converter
+3. Calcular e exibir o peso total correto: **13.048,56 kg**
+4. Exibir na interface "13,05 t" em vez de "2.8t"
 
 ## Resultado Esperado
 
-1. Upload do arquivo `Relatório_de_Vendas_-_MB.xlsx` funciona sem erros
-2. Sistema reconhece automaticamente o formato MB pelos headers
-3. Dados extraídos corretamente:
-   - Cliente da coluna C
-   - Peso da coluna G (Peso Bruto)
-   - Endereço da coluna I (End. Ent.)
-   - Bairro da coluna K (Bairro Ent.)
-   - Cidade e CEP das respectivas colunas
-4. Não aparece mais mensagem de "template modelo"
-5. Funciona para qualquer planilha do sistema MB sem adaptação
+| Métrica | Antes (Errado) | Depois (Correto) |
+|---------|----------------|------------------|
+| Peso Total | 2.8t | 13,05t |
+| Pedidos | ? | 68 |
+| Caminhões Necessários | ? | 4 |
