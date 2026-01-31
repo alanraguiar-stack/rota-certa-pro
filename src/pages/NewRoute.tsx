@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, Brain, AlertTriangle } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,12 +11,14 @@ import { DualFileUpload } from '@/components/route/DualFileUpload';
 import { AutoCompositionView } from '@/components/route/AutoCompositionView';
 import { WeightValidation } from '@/components/route/WeightValidation';
 import { FleetRecommendation } from '@/components/route/FleetRecommendation';
+import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
 import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
+import { analyzeFleetRequirements, validateFinalResult } from '@/lib/routeIntelligence';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 
@@ -280,29 +282,25 @@ export default function NewRoute() {
 
             {currentStep === 'fleet' && (
               <>
-                {inputMode === 'auto' && autoResult && !fleetConfirmed ? (
-                  <AutoCompositionView
-                    result={autoResult}
-                    onConfirm={handleConfirmFleet}
-                    isProcessing={false}
-                  />
-                ) : (
-                  <FleetRecommendation
-                    trucks={activeTrucks}
-                    totalWeight={totalWeight}
-                    totalOrders={validOrders.length}
-                    selectedTruckIds={selectedTruckIds}
-                    onSelectionChange={setSelectedTruckIds}
-                    onConfirm={handleConfirmFleet}
-                    disabled={fleetConfirmed}
-                  />
-                )}
+                {/* Usar o novo painel inteligente que mostra o raciocínio */}
+                <IntelligentFleetPanel
+                  trucks={activeTrucks}
+                  totalWeight={totalWeight}
+                  totalOrders={validOrders.length}
+                  selectedTruckIds={selectedTruckIds}
+                  onSelectionChange={setSelectedTruckIds}
+                  onConfirm={handleConfirmFleet}
+                  disabled={fleetConfirmed}
+                />
                 
                 {fleetConfirmed && (
                   <div className="mt-4 p-4 rounded-lg bg-success/10 border border-success/30">
-                    <p className="text-sm text-success font-medium">
-                      ✓ Frota confirmada: {selectedTruckIds.length} caminhão(ões)
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <Check className="h-5 w-5 text-success" />
+                      <p className="text-sm text-success font-medium">
+                        Frota confirmada: {selectedTruckIds.length} caminhão(ões)
+                      </p>
+                    </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       Esta seleção será usada para romaneio e roteirização. Use "Voltar" para alterar.
                     </p>
@@ -320,23 +318,64 @@ export default function NewRoute() {
 
             {currentStep === 'distribution' && (
               <div className="space-y-6">
-                {/* Summary of configuration */}
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-lg border p-4 text-center">
-                    <p className="text-2xl font-bold text-primary">{validOrders.length}</p>
-                    <p className="text-sm text-muted-foreground">Pedidos</p>
-                  </div>
-                  <div className="rounded-lg border p-4 text-center">
-                    <p className="text-2xl font-bold text-primary">{selectedTruckIds.length}</p>
-                    <p className="text-sm text-muted-foreground">Caminhões</p>
-                  </div>
-                  <div className="rounded-lg border p-4 text-center">
-                    <p className="text-2xl font-bold text-primary">
-                      {(totalWeight / 1000).toFixed(1)}t
-                    </p>
-                    <p className="text-sm text-muted-foreground">Peso Total</p>
-                  </div>
-                </div>
+                {/* Validação Inteligente */}
+                {(() => {
+                  const fleetAnalysis = analyzeFleetRequirements(totalWeight, activeTrucks, 10);
+                  const selectedTrucks = activeTrucks.filter(t => selectedTruckIds.includes(t.id));
+                  const totalCapacity = selectedTrucks.reduce((sum, t) => sum + Number(t.capacity_kg), 0);
+                  const utilizationPercent = totalCapacity > 0 ? Math.round((totalWeight / totalCapacity) * 100) : 0;
+                  const isValid = totalCapacity >= totalWeight;
+                  
+                  return (
+                    <>
+                      {/* Header com status */}
+                      <div className={`p-4 rounded-lg border-2 ${isValid ? 'bg-success/10 border-success/30' : 'bg-destructive/10 border-destructive/30'}`}>
+                        <div className="flex items-center gap-3">
+                          {isValid ? (
+                            <Check className="h-6 w-6 text-success" />
+                          ) : (
+                            <AlertTriangle className="h-6 w-6 text-destructive" />
+                          )}
+                          <div>
+                            <p className="font-semibold text-lg">
+                              {isValid ? 'Configuração Validada' : 'Erro de Configuração'}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {isValid 
+                                ? 'O sistema verificou que a frota selecionada comporta toda a carga.'
+                                : 'A capacidade selecionada é insuficiente para o peso total.'
+                              }
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Summary of configuration */}
+                      <div className="grid gap-4 sm:grid-cols-4">
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className="text-2xl font-bold text-primary">{validOrders.length}</p>
+                          <p className="text-sm text-muted-foreground">Pedidos</p>
+                        </div>
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className="text-2xl font-bold text-primary">{selectedTruckIds.length}</p>
+                          <p className="text-sm text-muted-foreground">de {fleetAnalysis.minimumTrucksRequired} necessários</p>
+                        </div>
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className="text-2xl font-bold text-primary">
+                            {(totalWeight / 1000).toFixed(2).replace('.', ',')} t
+                          </p>
+                          <p className="text-sm text-muted-foreground">Peso Total</p>
+                        </div>
+                        <div className="rounded-lg border p-4 text-center">
+                          <p className={`text-2xl font-bold ${utilizationPercent > 95 ? 'text-warning' : 'text-success'}`}>
+                            {utilizationPercent}%
+                          </p>
+                          <p className="text-sm text-muted-foreground">Ocupação</p>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
                 
                 <div className="text-center space-y-4">
                   <p className="text-muted-foreground">
