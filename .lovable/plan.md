@@ -1,145 +1,185 @@
 
-# Plano: Corrigir Seletor de Estratégia e Romaneio de Carga
+# Plano: Adaptar Parsers para Arquivos Excel MB
 
-## Problemas Identificados
+## Problema Identificado
 
-### Problema 1: Seletor de Estratégia Aparecendo na Etapa Errada
-O componente `RoutingStrategySelector` (com todas as opções de escolha) está sendo exibido na etapa de Romaneio de Carga, mesmo que o usuário já tenha selecionado a estratégia na fase anterior do wizard.
+O sistema está gerando erros ao processar os arquivos Excel do usuário porque:
 
-**Causa:** No arquivo `RouteDetails.tsx` (linhas 658-661), o seletor completo está sempre sendo renderizado na etapa `loading_manifest`.
+1. **Relatório de Vendas**: O parser não está reconhecendo corretamente todas as colunas do formato específico (ex: linhas vazias entre os dados, formato do "Peso Bruto" com ponto como separador de milhares)
+2. **Detalhe das Vendas**: O parser de Excel não está tratando o formato hierárquico (Cliente → Venda → Itens) que está presente no arquivo Excel
 
-### Problema 2: Romaneio de Carga Vazio
-Os dados de `order_items` estão todos vazios (`nil`) no banco de dados para esta rota.
+## Análise dos Arquivos do Usuário
 
-**Causa:** A rota foi criada ANTES das correções de persistência de itens. O código atual que salva os itens (useRoutes.ts linhas 266-280) só funciona para NOVAS rotas criadas após a correção.
+### Relatório de Vendas MB (Excel)
+| Coluna | Exemplo | Uso |
+|--------|---------|-----|
+| `Venda` | 276584 | ID do pedido (para cruzamento) |
+| `Cliente` | RANIERY JOSE DA SILVA | Nome do cliente |
+| `Peso Bruto` | 224.55 | Peso total da entrega em kg |
+| `End. Ent.` | HERBERT LAAS, 73 | Endereço + número |
+| `Bairro Ent.` | PARQUE TAIPAS | Bairro |
+| `Cidade Ent.` | SAO PAULO | Cidade |
+| `Cep Ent.` | 02988-100 | CEP |
+
+**Observações:**
+- Linhas vazias entre os registros
+- Peso usa ponto como decimal (224.55)
+- Coluna `End. Ent.` já inclui o número
+
+### Detalhe das Vendas MB (Excel)
+Formato hierárquico com seções:
+```
+Cliente: A P SOARES DA SILVA MERCADO E PADARIA
+Venda Nº: 276598  NFe Nº: 51088
+  Código | Descrição | Qtde. | Unitário | Total
+  5677   | REFRIGERANTE TUBAINA - 2 LT | 20 | 26.85 | 537.00
+```
+
+**Observações:**
+- `Qtde.` representa o peso em kg (não quantidade de unidades)
+- Estrutura hierárquica em Excel, não tabular puro
 
 ## Solução
 
-### Parte 1: Remover Seletor de Estratégia da Etapa de Romaneio
+### Parte 1: Melhorar Parser do Relatório de Vendas (orderParser.ts)
 
-Substituir o `RoutingStrategySelector` completo por um resumo simples da estratégia já selecionada. A estratégia já vem definida do wizard (`location.state.routingStrategy`).
+1. Adicionar suporte a linhas vazias entre registros
+2. Melhorar detecção da coluna `Peso Bruto`
+3. Garantir que colunas com sufixo `Ent.` sejam priorizadas
 
-### Parte 2: Usar Peso Total do Pedido como Fallback
+### Parte 2: Criar Parser de Detalhe de Vendas em Excel (advParser.ts)
 
-Quando não houver `order_items` detalhados, o romaneio de carga deve consolidar os pesos usando o peso total de cada pedido (`weight_kg`), agrupando por caminhão. Não ficará vazio.
+1. Adicionar função `parseADVExcel()` para processar o formato hierárquico em Excel
+2. Detectar linhas de `Cliente:`, `Venda Nº:` e itens
+3. Extrair `Qtde.` como peso em kg
+
+### Parte 3: Atualizar DualFileUpload para Excel
+
+1. Detectar automaticamente se Excel é "Relatório Geral" ou "Detalhe"
+2. Aplicar o parser correto baseado no conteúdo
 
 ## Arquivos a Modificar
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `src/pages/RouteDetails.tsx` | Editar | Remover seletor de estratégia, mostrar apenas resumo |
-| `src/components/route/LoadingManifest.tsx` | Editar | Melhorar fallback para exibir peso total quando não houver itens detalhados |
+| `src/lib/orderParser.ts` | Editar | Melhorar tolerância a linhas vazias e formatação de peso |
+| `src/lib/advParser.ts` | Editar | Adicionar `parseADVDetailExcel()` para Excel hierárquico |
+| `src/components/route/DualFileUpload.tsx` | Editar | Integrar detecção automática de tipo para Excel |
 
-## Mudanças Técnicas
+## Mudanças Técnicas Detalhadas
 
-### 1. RouteDetails.tsx (linhas 647-674)
-
-Substituir o bloco de seleção de estratégia por um resumo:
-
-```typescript
-// ANTES (linha 647-674)
-<Card className="border-primary/50 bg-primary/5">
-  <CardContent className="py-6">
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div>
-        <p className="font-medium text-lg">Pronto para roteirizar?</p>
-        <p className="text-sm text-muted-foreground">
-          Defina a estratégia e gere o Romaneio de Entrega com a ordem otimizada.
-        </p>
-      </div>
-      <div className="flex flex-col gap-3 w-full sm:w-auto">
-        <RoutingStrategySelector
-          selectedStrategy={routingStrategy}
-          onStrategyChange={setRoutingStrategy}
-        />
-        <Button ...>Roteirizar Agora</Button>
-      </div>
-    </div>
-  </CardContent>
-</Card>
-
-// DEPOIS
-<Card className="border-primary/50 bg-primary/5">
-  <CardContent className="py-6">
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <RouteIcon className="h-5 w-5" />
-        </div>
-        <div>
-          <p className="font-medium text-lg">Pronto para roteirizar</p>
-          <p className="text-sm text-muted-foreground">
-            Estratégia: <strong>{getStrategyLabel(routingStrategy)}</strong>
-          </p>
-        </div>
-      </div>
-      <Button 
-        size="lg"
-        onClick={handleOptimizeRoutes}
-        disabled={optimizeRoutes.isPending}
-      >
-        <RouteIcon className="mr-2 h-4 w-4" />
-        {optimizeRoutes.isPending ? 'Otimizando rotas...' : 'Roteirizar Agora'}
-      </Button>
-    </div>
-  </CardContent>
-</Card>
-```
-
-Adicionar função helper:
+### 1. orderParser.ts - Melhorar Detecção de Colunas
 
 ```typescript
-function getStrategyLabel(strategy: RoutingStrategy): string {
-  const labels: Record<RoutingStrategy, string> = {
-    economy: 'Economia (menor distância)',
-    speed: 'Velocidade (menor tempo)',
-    end_near_cd: 'Finalizar no CD',
-    start_far: 'Longe → Perto',
-    start_near: 'Perto → Longe',
-  };
-  return labels[strategy] || strategy;
+// Atualizar COLUMN_PATTERNS.weight para priorizar "Peso Bruto"
+weight: [
+  /^peso\s*bruto$/i,  // Exata: "Peso Bruto" (máxima prioridade)
+  /peso\s*bruto/i,    // Contém: "Peso Bruto"
+  /peso/i, /weight/i, /kg/i,
+],
+
+// Melhorar parseWeight para lidar com formato brasileiro
+function parseWeight(value: unknown): number | null {
+  // Detectar formato: 1.234,56 (BR) vs 1,234.56 (US)
+  // Se tem ponto antes de vírgula, é formato BR
+  // Se tem vírgula seguida de 3 dígitos, vírgula é separador de milhares
 }
 ```
 
-### 2. LoadingManifest.tsx - Melhorar Fallback
-
-Quando não houver `order_items`, mostrar lista de clientes com peso total em vez de "Produto não especificado":
+### 2. advParser.ts - Novo Parser para Excel ADV
 
 ```typescript
-// Em consolidateProducts(), melhorar fallback (linhas 46-54)
-} else {
-  // Fallback: usar client_name + peso total do pedido
-  const label = order.product_description || `Pedido ${order.client_name}`;
-  const existing = productMap.get(label) || { weight: 0, count: 0 };
-  productMap.set(label, {
-    weight: existing.weight + Number(order.weight_kg),
-    count: existing.count + 1,
-  });
+/**
+ * Detecta se Excel é formato de Detalhe das Vendas ADV
+ */
+export function isADVExcelFormat(rows: unknown[][]): boolean {
+  const text = rows.map(r => r.join(' ')).join('\n');
+  
+  return (
+    /cliente\s*:/i.test(text) &&
+    /venda\s*n[º°]?\s*:/i.test(text) &&
+    /qtde\.?/i.test(text)
+  );
+}
+
+/**
+ * Parser para Detalhe das Vendas em Excel
+ */
+export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
+  // Processar linha por linha
+  // Detectar "Cliente:" para novo cliente
+  // Detectar "Venda Nº:" para nova venda
+  // Coletar itens até próximo cliente/venda
 }
 ```
 
-## Fluxo Visual Corrigido
+### 3. DualFileUpload.tsx - Integrar Detecção
 
-Antes:
-
-```text
-[Romaneio de Carga] 
-    └── Seletor de Estratégia (COMPLETO) ← Usuário já escolheu antes
-    └── Botão Roteirizar
+```typescript
+// Em processFile(), adicionar detecção para Excel
+if (isExcelFile(file)) {
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 });
+  
+  // Verificar se é formato ADV (Detalhe das Vendas)
+  if (isADVExcelFormat(rows)) {
+    const advOrders = parseADVDetailExcel(rows);
+    // Retornar como tipo 'adv' para cruzamento
+  }
+  
+  // Verificar se é formato Itinerário (Relatório Geral)
+  if (detectItineraryFormat(headers)) {
+    // Processar como itinerário
+  }
+}
 ```
 
-Depois:
+## Fluxo de Cruzamento
 
 ```text
-[Romaneio de Carga]
-    └── Resumo: "Estratégia: Economia" ← Apenas informativo
-    └── Botão Roteirizar
+┌─────────────────────────┐    ┌─────────────────────────┐
+│ Relatório_de_Vendas.xlsx│    │ Detalhe_das_Vendas.xlsx │
+│ ────────────────────────│    │ ────────────────────────│
+│ Venda: 276584           │    │ Venda Nº: 276584        │
+│ Cliente: RANIERY        │    │ Item: Mortadela 10kg    │
+│ End. Ent.: HERBERT...   │    │ Item: Mussarela 20kg    │
+│ Peso Bruto: 224.55      │    │                         │
+└────────────┬────────────┘    └────────────┬────────────┘
+             │                              │
+             │ Detectado como               │ Detectado como
+             │ "itinerário"                 │ "adv"
+             │                              │
+             └──────────┬───────────────────┘
+                        │
+                        ▼
+              ┌─────────────────────┐
+              │ Cruzamento por Venda│
+              │ ────────────────────│
+              │ Venda: 276584       │
+              │ Cliente: RANIERY    │
+              │ Endereço: HERBERT...│
+              │ Peso: 224.55kg      │
+              │ Itens:              │
+              │  - Mortadela 10kg   │
+              │  - Mussarela 20kg   │
+              └─────────────────────┘
 ```
 
 ## Resultado Esperado
 
-1. O seletor de estratégia NÃO aparece mais na etapa de romaneio
-2. Apenas um resumo da estratégia selecionada é exibido
-3. O romaneio de carga mostra lista de pedidos por caminhão com pesos totais
-4. Para novas rotas com itens detalhados, o romaneio consolidará por produto
-5. Para rotas antigas sem itens, o romaneio mostrará lista de clientes/pedidos com pesos
+1. Upload do "Relatório_de_Vendas_MB.xlsx" → Detectado automaticamente como fonte de endereços
+2. Upload do "Detalhe_das_Vendas_MB.xlsx" → Detectado automaticamente como fonte de itens
+3. Cruzamento automático pelo número da Venda
+4. Romaneio de Carga com itens consolidados (ex: Mortadela 50kg, Mussarela 120kg)
+5. Romaneio de Entrega com ordem de paradas e peso por cliente
+
+## Tratamento de Casos Especiais
+
+| Caso | Comportamento |
+|------|---------------|
+| Linhas vazias no Excel | Ignorar linhas completamente vazias |
+| Cliente com múltiplas vendas | Agrupar por endereço (mesmo cliente, mesmo local = 1 entrega) |
+| Venda sem match no cruzamento | Marcar como inválida com aviso |
+| Peso com formato BR (1.234,56) | Converter automaticamente |
+| Peso como decimal simples (224.55) | Aceitar diretamente |
