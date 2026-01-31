@@ -623,18 +623,35 @@ export async function detectAndParsePDF(file: File): Promise<PDFDetectionResult>
 
 /**
  * Encontra correspondência exata ou por padrão em array de headers
+ * Normalização agressiva: remove espaços extras, caracteres invisíveis, etc.
  */
 function findExactOrPattern(headers: string[], exactMatches: string[], patterns: RegExp[]): number {
-  // Primeiro: correspondência exata (lowercase)
+  // Normalizar todos os headers de forma agressiva
+  const normalizedHeaders = headers.map(h => 
+    h.replace(/\s+/g, ' ')      // Múltiplos espaços -> 1 espaço
+     .replace(/[\u00A0\u200B\uFEFF]/g, ' ')  // Espaços unicode invisíveis
+     .trim()
+  );
+  
+  // Primeiro: correspondência exata (lowercase) com normalização
   for (const exact of exactMatches) {
-    const idx = headers.indexOf(exact.toLowerCase());
-    if (idx !== -1) return idx;
+    const normalizedExact = exact.toLowerCase().replace(/\s+/g, ' ').trim();
+    
+    for (let i = 0; i < normalizedHeaders.length; i++) {
+      if (normalizedHeaders[i] === normalizedExact) {
+        console.log('[findExactOrPattern] Match exato: "' + normalizedHeaders[i] + '" no índice ' + i);
+        return i;
+      }
+    }
   }
   
-  // Segundo: correspondência por padrão
-  for (let i = 0; i < headers.length; i++) {
+  // Segundo: correspondência por padrão regex
+  for (let i = 0; i < normalizedHeaders.length; i++) {
     for (const pattern of patterns) {
-      if (pattern.test(headers[i])) return i;
+      if (pattern.test(normalizedHeaders[i])) {
+        console.log('[findExactOrPattern] Match regex: "' + normalizedHeaders[i] + '" no índice ' + i);
+        return i;
+      }
     }
   }
   
@@ -740,7 +757,7 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   });
   
   // Mapear colunas usando correspondência EXATA primeiro, depois regex
-  const columnMap = {
+  let columnMap = {
     venda: findExactOrPattern(headerRow, ['venda'], [/^venda$/i]),
     cliente: findExactOrPattern(headerRow, ['cliente'], [/^cliente$/i, /nome/i, /razao/i]),
     pesoBruto: findExactOrPattern(headerRow, ['peso bruto'], [/peso\s*bruto/i]),
@@ -750,11 +767,40 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     cepEnt: findExactOrPattern(headerRow, ['cep ent.', 'cep ent', 'cep ent.'], [/cep\.?\s*ent\.?/i]),
   };
   
+  // ========================================================================
+  // FALLBACK CRÍTICO PARA PESO BRUTO - COLUNA G (Índice 5)
+  // Se não encontrou "Peso Bruto" pelo nome, tentar índice conhecido do formato MB
+  // ========================================================================
+  if (columnMap.pesoBruto === -1) {
+    console.warn('[Itinerary Excel] ⚠️ Peso Bruto NÃO encontrado pelo nome do header!');
+    console.warn('[Itinerary Excel] Tentando fallback para COLUNA G (índice 5)...');
+    
+    // Verificar se coluna 5 existe e contém dados numéricos
+    if (headerRow.length > 5) {
+      const col5Header = headerRow[5];
+      const col5FirstData = rows[headerRowIdx + 1]?.[5];
+      
+      console.log('[Itinerary Excel] Coluna 5 - Header raw:', col5Header);
+      console.log('[Itinerary Excel] Coluna 5 - Primeiro dado:', col5FirstData, '(tipo:', typeof col5FirstData + ')');
+      
+      // Aceitar se o dado parece ser numérico (peso em kg)
+      const isNumericData = typeof col5FirstData === 'number' || 
+                            /^[\d.,]+$/.test(String(col5FirstData ?? '').trim());
+      
+      if (isNumericData) {
+        columnMap.pesoBruto = 5;
+        console.log('[Itinerary Excel] ✅ FALLBACK ATIVADO: Usando índice 5 como Peso Bruto');
+      } else {
+        console.error('[Itinerary Excel] ❌ Coluna 5 não parece conter pesos numéricos');
+      }
+    }
+  }
+  
   console.log('[Itinerary Excel] =====================================');
-  console.log('[Itinerary Excel] MAPEAMENTO DE COLUNAS:');
+  console.log('[Itinerary Excel] MAPEAMENTO FINAL DE COLUNAS:');
   console.log('[Itinerary Excel]   Venda: índice', columnMap.venda, '-> valor do header:', headerRow[columnMap.venda] || '(não encontrado)');
   console.log('[Itinerary Excel]   Cliente: índice', columnMap.cliente, '-> valor do header:', headerRow[columnMap.cliente] || '(não encontrado)');
-  console.log('[Itinerary Excel]   Peso Bruto: índice', columnMap.pesoBruto, '-> valor do header:', headerRow[columnMap.pesoBruto] || '(não encontrado)');
+  console.log('[Itinerary Excel]   🎯 Peso Bruto: índice', columnMap.pesoBruto, '-> valor do header:', headerRow[columnMap.pesoBruto] || '(não encontrado)');
   console.log('[Itinerary Excel]   End. Ent.: índice', columnMap.endEnt, '-> valor do header:', headerRow[columnMap.endEnt] || '(não encontrado)');
   console.log('[Itinerary Excel]   Bairro Ent.: índice', columnMap.bairroEnt, '-> valor do header:', headerRow[columnMap.bairroEnt] || '(não encontrado)');
   console.log('[Itinerary Excel] =====================================');
@@ -804,9 +850,9 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     const weight = parseExcelWeight(pesoRaw as string | number | null | undefined);
     totalWeightDebug += weight;
     
-    // DEBUG: Log primeiros 5 registros e alguns do meio
-    if (rowsProcessed <= 5 || rowsProcessed % 20 === 0) {
-      console.log('[Itinerary Excel] Row', i, ':', clientName.substring(0, 20), '| Peso raw:', pesoRaw, '(tipo:', typeof pesoRaw + ') -> convertido:', weight, 'kg');
+    // DEBUG: Log primeiros 10 registros com todos os detalhes
+    if (rowsProcessed <= 10) {
+      console.log('[Peso] Linha ' + i + ': raw="' + pesoRaw + '" (tipo=' + typeof pesoRaw + ') -> converted=' + weight + 'kg');
     }
     
     // Aceitar registros mesmo com peso 0 se tiver endereço válido
@@ -825,14 +871,24 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   
   // VALIDAÇÃO CRÍTICA: Calcular e exibir peso total
   const calculatedTotalWeight = records.reduce((sum, r) => sum + r.weight_kg, 0);
+  const avgWeight = records.length > 0 ? calculatedTotalWeight / records.length : 0;
   
-  console.log('[Itinerary Excel] =====================================');
-  console.log('[Itinerary Excel] RESUMO DO PARSING:');
-  console.log('[Itinerary Excel]   Linhas processadas:', rowsProcessed);
-  console.log('[Itinerary Excel]   Registros válidos:', records.length);
-  console.log('[Itinerary Excel]   PESO TOTAL CALCULADO:', calculatedTotalWeight.toFixed(2), 'kg');
-  console.log('[Itinerary Excel]   Peso total em toneladas:', (calculatedTotalWeight / 1000).toFixed(2), 't');
-  console.log('[Itinerary Excel] =====================================');
+  console.log('=====================================');
+  console.log('🎯 VALIDAÇÃO FINAL DO PESO:');
+  console.log('   Registros: ' + records.length);
+  console.log('   PESO TOTAL: ' + calculatedTotalWeight.toFixed(2) + ' kg');
+  console.log('   Peso em toneladas: ' + (calculatedTotalWeight / 1000).toFixed(2) + ' t');
+  console.log('   Peso médio/registro: ' + avgWeight.toFixed(2) + ' kg');
+  console.log('   Índice da coluna Peso Bruto: ' + columnMap.pesoBruto);
+  console.log('=====================================');
+  
+  // ALERTA CRÍTICO se peso parecer errado
+  if (records.length > 50 && calculatedTotalWeight < 1000) {
+    console.error('❌ ERRO CRÍTICO: Peso total MUITO baixo!');
+    console.error('   Isso indica que a coluna Peso Bruto não foi mapeada corretamente.');
+    console.error('   Índice atual:', columnMap.pesoBruto);
+    console.error('   Headers disponíveis:', headerRow.filter(h => h).join(', '));
+  }
   
   // Alerta se peso parecer muito baixo para a quantidade de registros
   if (records.length > 10 && calculatedTotalWeight < 1000) {
