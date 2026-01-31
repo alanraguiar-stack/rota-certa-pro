@@ -622,6 +622,21 @@ export async function detectAndParsePDF(file: File): Promise<PDFDetectionResult>
 // ============================================================================
 
 /**
+ * Normalização SUPER AGRESSIVA para encontrar headers
+ * Remove TODOS os caracteres não-alfanuméricos
+ * "Peso  Bruto" -> "pesobruto"
+ * "Peso\u00A0Bruto" -> "pesobruto"
+ * "Peso Bruto " -> "pesobruto"
+ */
+function superNormalize(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[^a-z0-9]/g, '');      // Remove tudo que não é letra/número
+}
+
+/**
  * Encontra correspondência exata ou por padrão em array de headers
  * Normalização agressiva: remove espaços extras, caracteres invisíveis, etc.
  */
@@ -632,6 +647,9 @@ function findExactOrPattern(headers: string[], exactMatches: string[], patterns:
      .replace(/[\u00A0\u200B\uFEFF]/g, ' ')  // Espaços unicode invisíveis
      .trim()
   );
+  
+  // SUPER normalização para fallback
+  const superNormalizedHeaders = headers.map(h => superNormalize(h));
   
   // Primeiro: correspondência exata (lowercase) com normalização
   for (const exact of exactMatches) {
@@ -645,7 +663,19 @@ function findExactOrPattern(headers: string[], exactMatches: string[], patterns:
     }
   }
   
-  // Segundo: correspondência por padrão regex
+  // Segundo: correspondência por super normalização (remove todos caracteres especiais)
+  for (const exact of exactMatches) {
+    const superNormalizedExact = superNormalize(exact);
+    
+    for (let i = 0; i < superNormalizedHeaders.length; i++) {
+      if (superNormalizedHeaders[i] === superNormalizedExact) {
+        console.log('[findExactOrPattern] Match super-normalizado: "' + headers[i] + '" -> "' + superNormalizedHeaders[i] + '" no índice ' + i);
+        return i;
+      }
+    }
+  }
+  
+  // Terceiro: correspondência por padrão regex
   for (let i = 0; i < normalizedHeaders.length; i++) {
     for (const pattern of patterns) {
       if (pattern.test(normalizedHeaders[i])) {
@@ -668,9 +698,12 @@ function findExactOrPattern(headers: string[], exactMatches: string[], patterns:
 export function isItinerarioExcelFormat(headers: string[]): boolean {
   const headerText = headers.map(h => String(h ?? '').toLowerCase()).join(' ');
   
+  // Também testar com super normalização
+  const superNormalizedText = headers.map(h => superNormalize(String(h ?? ''))).join(' ');
+  
   // Padrões obrigatórios do formato MB
   const hasCliente = /cliente/i.test(headerText);
-  const hasPesoBruto = /peso\s*bruto/i.test(headerText);
+  const hasPesoBruto = /peso\s*bruto/i.test(headerText) || superNormalizedText.includes('pesobruto');
   
   // Padrões de endereço (pelo menos 1 é obrigatório)
   const addressPatterns = [
@@ -736,8 +769,14 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   let headerRowIdx = -1;
   for (let i = 0; i < Math.min(10, rows.length); i++) {
     const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
+    const superNormalizedRow = rows[i].map(c => superNormalize(String(c ?? ''))).join(' ');
+    
     // Header precisa ter "cliente" E ("peso bruto" OU "end. ent.")
-    if (/cliente/i.test(rowText) && (/peso\s*bruto/i.test(rowText) || /end\.?\s*ent\.?/i.test(rowText))) {
+    const hasCliente = /cliente/i.test(rowText);
+    const hasPeso = /peso\s*bruto/i.test(rowText) || superNormalizedRow.includes('pesobruto');
+    const hasEnd = /end\.?\s*ent\.?/i.test(rowText);
+    
+    if (hasCliente && (hasPeso || hasEnd)) {
       headerRowIdx = i;
       break;
     }
@@ -750,17 +789,27 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   
   const headerRow = rows[headerRowIdx].map(c => normalizeText(String(c ?? '')).toLowerCase().trim());
   
-  // DEBUG: Mostrar cada header com seu índice
+  // DEBUG: Mostrar cada header com seu índice e valor raw
   console.log('[Itinerary Excel] Header row index:', headerRowIdx);
+  console.log('[Itinerary Excel] ===== HEADERS COM ÍNDICES =====');
   headerRow.forEach((h, idx) => {
-    if (h) console.log('[Itinerary Excel] Header[' + idx + '] = "' + h + '"');
+    const rawValue = rows[headerRowIdx][idx];
+    const superNorm = superNormalize(h);
+    console.log(`[Itinerary Excel] Header[${idx}] = "${h}" | super="${superNorm}" | raw=${typeof rawValue === 'string' ? '"' + rawValue + '"' : rawValue}`);
   });
+  console.log('[Itinerary Excel] ================================');
+  
+  // Detectar se é formato MB (para priorizar índice 5)
+  const isMBFormat = headerRow.some(h => h.includes('cliente')) && 
+                     headerRow.some(h => superNormalize(h).includes('pesobruto') || h.includes('peso'));
+  
+  console.log('[Itinerary Excel] Formato MB detectado:', isMBFormat);
   
   // Mapear colunas usando correspondência EXATA primeiro, depois regex
   let columnMap = {
     venda: findExactOrPattern(headerRow, ['venda'], [/^venda$/i]),
     cliente: findExactOrPattern(headerRow, ['cliente'], [/^cliente$/i, /nome/i, /razao/i]),
-    pesoBruto: findExactOrPattern(headerRow, ['peso bruto'], [/peso\s*bruto/i]),
+    pesoBruto: findExactOrPattern(headerRow, ['peso bruto', 'pesobruto'], [/peso\s*bruto/i]),
     endEnt: findExactOrPattern(headerRow, ['end. ent.', 'end ent', 'end. ent'], [/end\.?\s*ent\.?/i]),
     bairroEnt: findExactOrPattern(headerRow, ['bairro ent.', 'bairro ent', 'bairro ent.'], [/bairro\.?\s*ent\.?/i]),
     cidadeEnt: findExactOrPattern(headerRow, ['cidade ent.', 'cidade ent', 'cidade ent.'], [/cidade\.?\s*ent\.?/i]),
@@ -768,17 +817,29 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   };
   
   // ========================================================================
-  // SISTEMA DE 4 NÍVEIS PARA DETECÇÃO DE COLUNA DE PESO BRUTO
+  // SISTEMA DE 5 NÍVEIS PARA DETECÇÃO DE COLUNA DE PESO BRUTO
   // ========================================================================
   
-  // NÍVEL 1: Já foi encontrado pelo nome? (linha 763)
+  // NÍVEL 1: Já foi encontrado pelo nome? (linha anterior)
   if (columnMap.pesoBruto !== -1) {
     console.log('[Itinerary Excel] ✅ NÍVEL 1: Peso Bruto encontrado pelo nome no índice', columnMap.pesoBruto);
   }
   
+  // NÍVEL 1.5: Procurar por super normalização (pesobruto)
+  if (columnMap.pesoBruto === -1) {
+    console.log('[Itinerary Excel] ⚠️ NÍVEL 1 falhou. Tentando super-normalização...');
+    for (let i = 0; i < headerRow.length; i++) {
+      if (superNormalize(headerRow[i]) === 'pesobruto') {
+        columnMap.pesoBruto = i;
+        console.log('[Itinerary Excel] ✅ NÍVEL 1.5: Encontrou "pesobruto" via super-normalização no índice', i);
+        break;
+      }
+    }
+  }
+  
   // NÍVEL 2: Procurar por qualquer coluna contendo "peso"
   if (columnMap.pesoBruto === -1) {
-    console.warn('[Itinerary Excel] ⚠️ NÍVEL 1 falhou. Tentando NÍVEL 2: busca por "peso"...');
+    console.warn('[Itinerary Excel] ⚠️ NÍVEL 1.5 falhou. Tentando NÍVEL 2: busca por "peso"...');
     const pesoIdx = headerRow.findIndex(h => h && h.includes('peso'));
     if (pesoIdx !== -1) {
       columnMap.pesoBruto = pesoIdx;
@@ -786,50 +847,70 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     }
   }
   
-  // NÍVEL 3: Fallback para índice 5 (Coluna G do formato MB padrão)
-  if (columnMap.pesoBruto === -1 && headerRow.length > 5) {
-    console.warn('[Itinerary Excel] ⚠️ NÍVEL 2 falhou. Tentando NÍVEL 3: índice 5 (Coluna G)...');
+  // NÍVEL 3: PRIORIDADE para formato MB - usar índice 5 (Coluna F) ANTES da heurística
+  if (columnMap.pesoBruto === -1 && isMBFormat && headerRow.length > 5) {
+    console.warn('[Itinerary Excel] ⚠️ NÍVEL 2 falhou. Tentando NÍVEL 3: índice 5 (Coluna F do formato MB)...');
     
-    // Verificar se coluna 5 contém dados numéricos
-    let numericCount = 0;
-    const sampleValues: unknown[] = [];
-    for (let i = headerRowIdx + 1; i < Math.min(headerRowIdx + 6, rows.length); i++) {
-      const val = rows[i]?.[5];
-      sampleValues.push(val);
-      if (typeof val === 'number' || /^[\d.,]+$/.test(String(val ?? '').trim())) {
-        numericCount++;
-      }
+    // Coletar valores da coluna 5 para validação
+    const col5Values: number[] = [];
+    for (let i = headerRowIdx + 1; i < Math.min(headerRowIdx + 15, rows.length); i++) {
+      const val = parseExcelWeight(rows[i]?.[5] as string | number | null | undefined);
+      if (val > 0) col5Values.push(val);
     }
     
-    console.log('[Itinerary Excel] Coluna 5 - Amostra:', sampleValues);
-    console.log('[Itinerary Excel] Coluna 5 - Valores numéricos:', numericCount, '/', sampleValues.length);
+    console.log('[Itinerary Excel] Coluna 5 - Valores encontrados:', col5Values.length);
+    console.log('[Itinerary Excel] Coluna 5 - Primeiros valores:', col5Values.slice(0, 5));
     
-    if (numericCount >= 2) {
-      columnMap.pesoBruto = 5;
-      console.log('[Itinerary Excel] ✅ NÍVEL 3: Usando índice 5 como Peso Bruto');
+    if (col5Values.length >= 5) {
+      const avgCol5 = col5Values.reduce((a, b) => a + b, 0) / col5Values.length;
+      const minVal = Math.min(...col5Values);
+      const maxVal = Math.max(...col5Values);
+      
+      console.log('[Itinerary Excel] Coluna 5 - Média:', avgCol5.toFixed(2), 'Min:', minVal.toFixed(2), 'Max:', maxVal.toFixed(2));
+      
+      // Validar: valores devem estar entre 1 e 2000 kg (realistas para entregas)
+      if (avgCol5 >= 1 && avgCol5 <= 1500 && minVal >= 0.1 && maxVal <= 5000) {
+        columnMap.pesoBruto = 5;
+        console.log('[Itinerary Excel] ✅ NÍVEL 3: Forçando índice 5 como Peso Bruto - média:', avgCol5.toFixed(2), 'kg');
+      } else {
+        console.log('[Itinerary Excel] ⚠️ Coluna 5 tem valores fora do range esperado de peso (1-1500 kg)');
+      }
     }
   }
   
   // NÍVEL 4: ÚLTIMO RECURSO - Encontrar coluna numérica com maior soma
+  // MAS EXCLUIR colunas que parecem ser valores monetários!
   if (columnMap.pesoBruto === -1) {
     console.warn('[Itinerary Excel] ⚠️ NÍVEL 3 falhou. Tentando NÍVEL 4: detecção heurística...');
     
+    // Headers que indicam valores MONETÁRIOS (não são peso!)
+    const monetaryHeaders = ['total', 'valor', 'preco', 'preço', 'r$', 'reais', 'subtotal', 'unitario', 'unitário'];
+    
     let maxSum = 0;
     let maxSumIdx = -1;
-    const columnAnalysis: Array<{idx: number, header: string, sum: number, count: number}> = [];
+    const columnAnalysis: Array<{idx: number, header: string, sum: number, count: number, avg: number}> = [];
     
     for (let colIdx = 0; colIdx < headerRow.length; colIdx++) {
+      const header = headerRow[colIdx] || '';
+      
+      // IMPORTANTE: Pular colunas que parecem ser valores monetários!
+      if (monetaryHeaders.some(m => header.includes(m))) {
+        console.log('[Itinerary Excel] NÍVEL 4: Pulando coluna', colIdx, '("' + header + '") - parece ser valor monetário');
+        continue;
+      }
+      
       let colSum = 0;
       let numericCount = 0;
       
       for (let rowIdx = headerRowIdx + 1; rowIdx < Math.min(rows.length, headerRowIdx + 50); rowIdx++) {
         const val = rows[rowIdx]?.[colIdx];
-        if (typeof val === 'number' && val > 0 && val < 10000) {
+        if (typeof val === 'number' && val > 0 && val < 5000) {
           colSum += val;
           numericCount++;
         } else if (typeof val === 'string') {
           const num = parseExcelWeight(val);
-          if (num > 0 && num < 10000) {
+          // Filtrar valores que parecem monetários (muito altos para peso individual)
+          if (num > 0 && num < 5000) {
             colSum += num;
             numericCount++;
           }
@@ -837,21 +918,27 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
       }
       
       if (numericCount > 5) {
-        columnAnalysis.push({ idx: colIdx, header: headerRow[colIdx], sum: colSum, count: numericCount });
-      }
-      
-      // Preferir colunas com muitos valores numéricos e soma alta
-      if (numericCount >= 10 && colSum > maxSum) {
-        maxSum = colSum;
-        maxSumIdx = colIdx;
+        const avg = colSum / numericCount;
+        columnAnalysis.push({ idx: colIdx, header, sum: colSum, count: numericCount, avg });
+        
+        // Preferir colunas com média realista de peso (1-1500 kg)
+        // E que tenham muitos valores numéricos
+        if (numericCount >= 10 && avg >= 1 && avg <= 1500 && colSum > maxSum) {
+          maxSum = colSum;
+          maxSumIdx = colIdx;
+        }
       }
     }
     
-    console.log('[Itinerary Excel] NÍVEL 4 - Análise de colunas numéricas:', columnAnalysis);
+    console.log('[Itinerary Excel] NÍVEL 4 - Análise de colunas numéricas (excluindo monetárias):');
+    columnAnalysis.forEach(c => {
+      console.log(`  [${c.idx}] "${c.header}": soma=${c.sum.toFixed(2)}, count=${c.count}, média=${c.avg.toFixed(2)}kg`);
+    });
     
     if (maxSumIdx !== -1) {
       columnMap.pesoBruto = maxSumIdx;
-      console.log('[Itinerary Excel] ✅ NÍVEL 4: Coluna', maxSumIdx, 'selecionada (header:', headerRow[maxSumIdx], ', soma:', maxSum.toFixed(2) + ')');
+      const selected = columnAnalysis.find(c => c.idx === maxSumIdx);
+      console.log('[Itinerary Excel] ✅ NÍVEL 4: Coluna', maxSumIdx, 'selecionada (header:', headerRow[maxSumIdx], ', soma:', maxSum.toFixed(2), ', média:', selected?.avg.toFixed(2) + 'kg)');
     } else {
       console.error('[Itinerary Excel] ❌ TODOS OS NÍVEIS FALHARAM! Não foi possível encontrar coluna de peso.');
     }
@@ -942,6 +1029,21 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   console.log('   Peso médio/registro: ' + avgWeight.toFixed(2) + ' kg');
   console.log('   Índice da coluna Peso Bruto: ' + columnMap.pesoBruto);
   console.log('=====================================');
+  
+  // VALIDAÇÃO: Verificar se o peso médio faz sentido
+  if (records.length > 0) {
+    if (avgWeight < 10) {
+      console.error('⚠️ PESO MÉDIO SUSPEITO:', avgWeight.toFixed(2), 'kg - muito baixo!');
+      console.error('   Isso pode indicar coluna errada ou formato de número incorreto');
+      console.error('   Esperado: entre 50-500 kg por entrega');
+    } else if (avgWeight > 2000) {
+      console.error('⚠️ PESO MÉDIO SUSPEITO:', avgWeight.toFixed(2), 'kg - muito alto!');
+      console.error('   Isso pode indicar que a coluna "Total" (R$) foi selecionada em vez de "Peso Bruto"');
+      console.error('   Esperado: entre 50-500 kg por entrega');
+    } else {
+      console.log('✅ Peso médio OK:', avgWeight.toFixed(2), 'kg/entrega');
+    }
+  }
   
   // ALERTA CRÍTICO se peso parecer errado
   if (records.length > 50 && calculatedTotalWeight < 1000) {
