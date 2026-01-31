@@ -768,31 +768,92 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   };
   
   // ========================================================================
-  // FALLBACK CRÍTICO PARA PESO BRUTO - COLUNA G (Índice 5)
-  // Se não encontrou "Peso Bruto" pelo nome, tentar índice conhecido do formato MB
+  // SISTEMA DE 4 NÍVEIS PARA DETECÇÃO DE COLUNA DE PESO BRUTO
   // ========================================================================
+  
+  // NÍVEL 1: Já foi encontrado pelo nome? (linha 763)
+  if (columnMap.pesoBruto !== -1) {
+    console.log('[Itinerary Excel] ✅ NÍVEL 1: Peso Bruto encontrado pelo nome no índice', columnMap.pesoBruto);
+  }
+  
+  // NÍVEL 2: Procurar por qualquer coluna contendo "peso"
   if (columnMap.pesoBruto === -1) {
-    console.warn('[Itinerary Excel] ⚠️ Peso Bruto NÃO encontrado pelo nome do header!');
-    console.warn('[Itinerary Excel] Tentando fallback para COLUNA G (índice 5)...');
+    console.warn('[Itinerary Excel] ⚠️ NÍVEL 1 falhou. Tentando NÍVEL 2: busca por "peso"...');
+    const pesoIdx = headerRow.findIndex(h => h && h.includes('peso'));
+    if (pesoIdx !== -1) {
+      columnMap.pesoBruto = pesoIdx;
+      console.log('[Itinerary Excel] ✅ NÍVEL 2: Encontrou coluna com "peso" no índice', pesoIdx);
+    }
+  }
+  
+  // NÍVEL 3: Fallback para índice 5 (Coluna G do formato MB padrão)
+  if (columnMap.pesoBruto === -1 && headerRow.length > 5) {
+    console.warn('[Itinerary Excel] ⚠️ NÍVEL 2 falhou. Tentando NÍVEL 3: índice 5 (Coluna G)...');
     
-    // Verificar se coluna 5 existe e contém dados numéricos
-    if (headerRow.length > 5) {
-      const col5Header = headerRow[5];
-      const col5FirstData = rows[headerRowIdx + 1]?.[5];
-      
-      console.log('[Itinerary Excel] Coluna 5 - Header raw:', col5Header);
-      console.log('[Itinerary Excel] Coluna 5 - Primeiro dado:', col5FirstData, '(tipo:', typeof col5FirstData + ')');
-      
-      // Aceitar se o dado parece ser numérico (peso em kg)
-      const isNumericData = typeof col5FirstData === 'number' || 
-                            /^[\d.,]+$/.test(String(col5FirstData ?? '').trim());
-      
-      if (isNumericData) {
-        columnMap.pesoBruto = 5;
-        console.log('[Itinerary Excel] ✅ FALLBACK ATIVADO: Usando índice 5 como Peso Bruto');
-      } else {
-        console.error('[Itinerary Excel] ❌ Coluna 5 não parece conter pesos numéricos');
+    // Verificar se coluna 5 contém dados numéricos
+    let numericCount = 0;
+    const sampleValues: unknown[] = [];
+    for (let i = headerRowIdx + 1; i < Math.min(headerRowIdx + 6, rows.length); i++) {
+      const val = rows[i]?.[5];
+      sampleValues.push(val);
+      if (typeof val === 'number' || /^[\d.,]+$/.test(String(val ?? '').trim())) {
+        numericCount++;
       }
+    }
+    
+    console.log('[Itinerary Excel] Coluna 5 - Amostra:', sampleValues);
+    console.log('[Itinerary Excel] Coluna 5 - Valores numéricos:', numericCount, '/', sampleValues.length);
+    
+    if (numericCount >= 2) {
+      columnMap.pesoBruto = 5;
+      console.log('[Itinerary Excel] ✅ NÍVEL 3: Usando índice 5 como Peso Bruto');
+    }
+  }
+  
+  // NÍVEL 4: ÚLTIMO RECURSO - Encontrar coluna numérica com maior soma
+  if (columnMap.pesoBruto === -1) {
+    console.warn('[Itinerary Excel] ⚠️ NÍVEL 3 falhou. Tentando NÍVEL 4: detecção heurística...');
+    
+    let maxSum = 0;
+    let maxSumIdx = -1;
+    const columnAnalysis: Array<{idx: number, header: string, sum: number, count: number}> = [];
+    
+    for (let colIdx = 0; colIdx < headerRow.length; colIdx++) {
+      let colSum = 0;
+      let numericCount = 0;
+      
+      for (let rowIdx = headerRowIdx + 1; rowIdx < Math.min(rows.length, headerRowIdx + 50); rowIdx++) {
+        const val = rows[rowIdx]?.[colIdx];
+        if (typeof val === 'number' && val > 0 && val < 10000) {
+          colSum += val;
+          numericCount++;
+        } else if (typeof val === 'string') {
+          const num = parseExcelWeight(val);
+          if (num > 0 && num < 10000) {
+            colSum += num;
+            numericCount++;
+          }
+        }
+      }
+      
+      if (numericCount > 5) {
+        columnAnalysis.push({ idx: colIdx, header: headerRow[colIdx], sum: colSum, count: numericCount });
+      }
+      
+      // Preferir colunas com muitos valores numéricos e soma alta
+      if (numericCount >= 10 && colSum > maxSum) {
+        maxSum = colSum;
+        maxSumIdx = colIdx;
+      }
+    }
+    
+    console.log('[Itinerary Excel] NÍVEL 4 - Análise de colunas numéricas:', columnAnalysis);
+    
+    if (maxSumIdx !== -1) {
+      columnMap.pesoBruto = maxSumIdx;
+      console.log('[Itinerary Excel] ✅ NÍVEL 4: Coluna', maxSumIdx, 'selecionada (header:', headerRow[maxSumIdx], ', soma:', maxSum.toFixed(2) + ')');
+    } else {
+      console.error('[Itinerary Excel] ❌ TODOS OS NÍVEIS FALHARAM! Não foi possível encontrar coluna de peso.');
     }
   }
   
