@@ -622,24 +622,61 @@ export async function detectAndParsePDF(file: File): Promise<PDFDetectionResult>
 // ============================================================================
 
 /**
+ * Encontra correspondência exata ou por padrão em array de headers
+ */
+function findExactOrPattern(headers: string[], exactMatches: string[], patterns: RegExp[]): number {
+  // Primeiro: correspondência exata (lowercase)
+  for (const exact of exactMatches) {
+    const idx = headers.indexOf(exact.toLowerCase());
+    if (idx !== -1) return idx;
+  }
+  
+  // Segundo: correspondência por padrão
+  for (let i = 0; i < headers.length; i++) {
+    for (const pattern of patterns) {
+      if (pattern.test(headers[i])) return i;
+    }
+  }
+  
+  return -1;
+}
+
+/**
  * Detecta se Excel é formato de Relatório de Vendas MB (Itinerário)
- * Colunas esperadas: Venda, Cliente, Peso Bruto, End. Ent., Bairro Ent., Cidade Ent., Cep Ent.
+ * Headers esperados: Cliente, Peso Bruto, End. Ent., Bairro Ent., Cidade Ent., Cep Ent.
+ * 
+ * IMPORTANTE: Esta função aceita o formato MB sem exigir template padrão.
+ * Basta ter: Cliente + Peso Bruto + pelo menos 1 campo de endereço
  */
 export function isItinerarioExcelFormat(headers: string[]): boolean {
-  const headerText = headers.join(' ').toLowerCase();
+  const headerText = headers.map(h => String(h ?? '').toLowerCase()).join(' ');
   
-  const patterns = [
+  // Padrões obrigatórios do formato MB
+  const hasCliente = /cliente/i.test(headerText);
+  const hasPesoBruto = /peso\s*bruto/i.test(headerText);
+  
+  // Padrões de endereço (pelo menos 1 é obrigatório)
+  const addressPatterns = [
     /end\.?\s*ent\.?/i,          // End. Ent.
     /bairro\.?\s*ent\.?/i,       // Bairro Ent.
     /cidade\.?\s*ent\.?/i,       // Cidade Ent.
-    /peso\s*bruto/i,             // Peso Bruto
+    /cep\.?\s*ent\.?/i,          // Cep Ent.
   ];
   
-  const matchCount = patterns.filter(p => p.test(headerText)).length;
-  console.log('[Itinerary Excel] Matches:', matchCount, 'headers:', headers.slice(0, 10).join(', '));
+  const addressMatchCount = addressPatterns.filter(p => p.test(headerText)).length;
   
-  // Precisa ter pelo menos 2 padrões (End Ent + outro)
-  return matchCount >= 2;
+  // Formato MB: Cliente + Peso Bruto + pelo menos 1 campo de endereço
+  const isMBFormat = hasCliente && hasPesoBruto && addressMatchCount >= 1;
+  
+  console.log('[Itinerary Excel] Detection:', { 
+    hasCliente, 
+    hasPesoBruto, 
+    addressMatchCount,
+    isMBFormat,
+    headers: headers.slice(0, 12).join(', ')
+  });
+  
+  return isMBFormat;
 }
 
 /**
@@ -663,39 +700,58 @@ export function isADVExcelFormat(rows: unknown[][]): boolean {
 /**
  * Parse Excel do Relatório de Vendas MB (Itinerário)
  * Formato tabular com colunas: Venda, Cliente, Peso Bruto, End. Ent., etc
+ * 
+ * Mapeamento MB:
+ * - Cliente: coluna "Cliente"
+ * - Peso: coluna "Peso Bruto"
+ * - Endereço: coluna "End. Ent."
+ * - Bairro: coluna "Bairro Ent."
+ * - Cidade: coluna "Cidade Ent."
+ * - CEP: coluna "Cep Ent."
  */
 export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   if (rows.length < 2) return [];
   
-  // Encontrar header row (pode haver linhas vazias no início)
-  let headerRowIdx = 0;
-  for (let i = 0; i < Math.min(5, rows.length); i++) {
+  // Encontrar header row - procurar em até 10 primeiras linhas
+  let headerRowIdx = -1;
+  for (let i = 0; i < Math.min(10, rows.length); i++) {
     const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
-    if (/cliente/i.test(rowText) && /end\.?\s*ent\.?|peso/i.test(rowText)) {
+    // Header precisa ter "cliente" E ("peso bruto" OU "end. ent.")
+    if (/cliente/i.test(rowText) && (/peso\s*bruto/i.test(rowText) || /end\.?\s*ent\.?/i.test(rowText))) {
       headerRowIdx = i;
       break;
     }
   }
   
-  const headerRow = rows[headerRowIdx].map(c => normalizeText(String(c ?? '')).toLowerCase());
-  console.log('[Itinerary Excel] Header row:', headerRowIdx, headerRow);
+  if (headerRowIdx === -1) {
+    console.log('[Itinerary Excel] Header row not found');
+    return [];
+  }
   
-  // Mapear colunas
+  const headerRow = rows[headerRowIdx].map(c => normalizeText(String(c ?? '')).toLowerCase().trim());
+  console.log('[Itinerary Excel] Header row index:', headerRowIdx, '- headers:', headerRow.slice(0, 15).join(' | '));
+  
+  // Mapear colunas usando correspondência EXATA primeiro, depois regex
   const columnMap = {
-    venda: findExcelColumnIndex(headerRow, [/^venda$/i, /n[º°]?\s*venda/i]),
-    cliente: findExcelColumnIndex(headerRow, [/^cliente$/i, /nome/i, /razao/i]),
-    endEnt: findExcelColumnIndex(headerRow, [/end\.?\s*ent\.?/i, /endere[çc]o\s*ent/i]),
-    bairroEnt: findExcelColumnIndex(headerRow, [/bairro\.?\s*ent\.?/i, /bairro/i]),
-    cidadeEnt: findExcelColumnIndex(headerRow, [/cidade\.?\s*ent\.?/i, /cidade/i]),
-    cepEnt: findExcelColumnIndex(headerRow, [/cep\.?\s*ent\.?/i, /cep/i]),
-    pesoBruto: findExcelColumnIndex(headerRow, [/peso\s*bruto/i, /peso/i]),
+    venda: findExactOrPattern(headerRow, ['venda'], [/^venda$/i]),
+    cliente: findExactOrPattern(headerRow, ['cliente'], [/^cliente$/i, /nome/i, /razao/i]),
+    pesoBruto: findExactOrPattern(headerRow, ['peso bruto'], [/peso\s*bruto/i]),
+    endEnt: findExactOrPattern(headerRow, ['end. ent.', 'end ent', 'end. ent'], [/end\.?\s*ent\.?/i]),
+    bairroEnt: findExactOrPattern(headerRow, ['bairro ent.', 'bairro ent', 'bairro ent.'], [/bairro\.?\s*ent\.?/i]),
+    cidadeEnt: findExactOrPattern(headerRow, ['cidade ent.', 'cidade ent', 'cidade ent.'], [/cidade\.?\s*ent\.?/i]),
+    cepEnt: findExactOrPattern(headerRow, ['cep ent.', 'cep ent', 'cep ent.'], [/cep\.?\s*ent\.?/i]),
   };
   
   console.log('[Itinerary Excel] Column mapping:', columnMap);
   
-  // Validar colunas mínimas
-  if (columnMap.cliente === -1 || (columnMap.endEnt === -1 && columnMap.pesoBruto === -1)) {
-    console.log('[Itinerary Excel] Missing required columns');
+  // Validar colunas mínimas: Cliente é obrigatório, e precisa ter Peso OU Endereço
+  if (columnMap.cliente === -1) {
+    console.log('[Itinerary Excel] ERRO: Missing Cliente column');
+    return [];
+  }
+  
+  if (columnMap.pesoBruto === -1 && columnMap.endEnt === -1) {
+    console.log('[Itinerary Excel] ERRO: Missing both Peso Bruto and End. Ent.');
     return [];
   }
   
@@ -705,7 +761,7 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
   for (let i = headerRowIdx + 1; i < rows.length; i++) {
     const row = rows[i];
     
-    // Pular linhas vazias
+    // Pular linhas vazias ou quase vazias
     if (!row || row.every(cell => !cell || String(cell).trim() === '')) {
       continue;
     }
@@ -713,7 +769,7 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     const vendaId = columnMap.venda !== -1 ? String(row[columnMap.venda] ?? '').trim() : '';
     const clientName = columnMap.cliente !== -1 ? String(row[columnMap.cliente] ?? '').trim() : '';
     
-    // Validar dados mínimos
+    // Validar dados mínimos - precisa ter cliente
     if (!clientName) continue;
     
     const address = columnMap.endEnt !== -1 ? String(row[columnMap.endEnt] ?? '').trim() : '';
@@ -725,7 +781,8 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     // Converter peso (suporta formato BR e US)
     const weight = parseExcelWeight(pesoStr);
     
-    if (weight <= 0) continue;
+    // Aceitar registros mesmo com peso 0 se tiver endereço válido
+    if (weight <= 0 && !address) continue;
     
     records.push({
       venda_id: vendaId,
@@ -738,7 +795,7 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
     });
   }
   
-  console.log('[Itinerary Excel] Total records:', records.length);
+  console.log('[Itinerary Excel] Total records extracted:', records.length);
   return records;
 }
 
