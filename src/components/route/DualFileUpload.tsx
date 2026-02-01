@@ -6,12 +6,19 @@
  * 
  * Os arquivos podem ser carregados em qualquer ordem.
  * O sistema detecta automaticamente o tipo e cruza pelo número da venda.
+ * 
+ * ATUALIZADO: Agora usa o Motor Inteligente de Leitura de Planilhas
+ * que opera como um analista logístico humano:
+ * - Lê TUDO primeiro
+ * - Entende o significado dos dados
+ * - Valida coerência antes de decidir
  */
 
 import { useState, useRef, useEffect } from 'react';
 import { 
   Upload, FileSpreadsheet, CheckCircle2, XCircle, 
-  Download, AlertCircle, Package, RefreshCcw, FileText, Link2
+  Download, AlertCircle, Package, RefreshCcw, FileText, Link2,
+  Scale, Info
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +27,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ParsedOrder } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -44,6 +52,15 @@ import {
 } from '@/lib/advParser';
 import * as XLSX from 'xlsx';
 
+// Motor Inteligente de Leitura
+import { 
+  analyzeSpreadsheet, 
+  convertToLegacyFormat,
+  formatWeight as formatWeightIntl,
+  SpreadsheetAnalysis,
+  ExtractedOrder,
+} from '@/lib/spreadsheet';
+
 interface DualFileUploadProps {
   onDataReady: (orders: ParsedOrder[], hasItemDetails: boolean) => void;
 }
@@ -53,7 +70,9 @@ interface UploadState {
   status: 'idle' | 'processing' | 'success' | 'error';
   message: string;
   data: any;
-  detectedType?: 'adv' | 'itinerario' | 'excel' | 'generic';
+  detectedType?: 'adv' | 'itinerario' | 'excel' | 'generic' | 'intelligent';
+  analysis?: SpreadsheetAnalysis | null;
+  extractedOrders?: ExtractedOrder[];
 }
 
 interface MergeSummary {
@@ -62,7 +81,8 @@ interface MergeSummary {
   unmatched: number;
 }
 
-function formatWeight(weight: number): string {
+// Usar formatWeight local para consistência, mas disponibilizar o inteligente também
+function formatWeightDisplay(weight: number): string {
   if (weight >= 1000) {
     return `${(weight / 1000).toFixed(1)}t`;
   }
@@ -95,12 +115,114 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   const file1InputRef = useRef<HTMLInputElement>(null);
   const file2InputRef = useRef<HTMLInputElement>(null);
   
-  // Processar arquivo com detecção automática de tipo
+  // Processar arquivo com MOTOR INTELIGENTE como primeira opção
   const processFile = async (
     file: File,
     setUploadState: React.Dispatch<React.SetStateAction<UploadState>>
   ): Promise<{ type: string; data: any } | null> => {
-    // Verificar se é PDF ou Excel
+    
+    // PRIMEIRO: Tentar o Motor Inteligente para arquivos Excel
+    if (isExcelFile(file)) {
+      setUploadState({
+        file,
+        status: 'processing',
+        message: 'Analisando planilha com motor inteligente...',
+        data: null,
+      });
+      
+      try {
+        console.log('[DualFileUpload] Usando Motor Inteligente para:', file.name);
+        
+        // Usar o novo motor inteligente
+        const { analysis, orders: extractedOrders } = await analyzeSpreadsheet(file);
+        
+        // Verificar se conseguiu extrair dados
+        if (extractedOrders.length > 0) {
+          const totalWeight = extractedOrders.reduce((sum, o) => sum + o.weight_kg, 0);
+          const hasAddresses = extractedOrders.some(o => o.address && o.address.length >= 10);
+          
+          // Determinar tipo baseado no formato detectado
+          let detectedType: UploadState['detectedType'] = 'intelligent';
+          if (analysis.format === 'mb_itinerario' || analysis.format === 'itinerario_generic') {
+            detectedType = 'itinerario';
+          } else if (analysis.format === 'mb_detalhe' || analysis.format === 'adv_hierarchical') {
+            detectedType = 'adv';
+          }
+          
+          // Converter para formato legado
+          const legacyOrders = convertToLegacyFormat(extractedOrders);
+          
+          // Criar ItinerarioRecord se tiver endereços (para compatibilidade com merge)
+          if (hasAddresses && (detectedType === 'itinerario' || detectedType === 'intelligent')) {
+            const itinerarioRecords: ItinerarioRecord[] = extractedOrders.map(o => ({
+              venda_id: o.pedido_id,
+              client_name: o.client_name,
+              address: o.address_parts.street || '',
+              neighborhood: o.address_parts.neighborhood || '',
+              city: o.address_parts.city || '',
+              cep: o.address_parts.cep || '',
+              weight_kg: o.weight_kg,
+            }));
+            
+            setUploadState({
+              file,
+              status: 'success',
+              message: `${extractedOrders.length} vendas | ${formatWeightIntl(totalWeight)}`,
+              data: itinerarioRecords,
+              detectedType: 'itinerario',
+              analysis,
+              extractedOrders,
+            });
+            
+            toast({
+              title: '✅ Motor Inteligente',
+              description: `${extractedOrders.length} pedidos (${formatWeightIntl(totalWeight)}) - ${analysis.format}`,
+            });
+            
+            return { type: 'itinerario', data: itinerarioRecords };
+          }
+          
+          // Se não tem endereços, é tipo ADV (só itens)
+          setUploadState({
+            file,
+            status: 'success',
+            message: `${extractedOrders.length} pedidos | ${formatWeightIntl(totalWeight)}`,
+            data: legacyOrders,
+            detectedType,
+            analysis,
+            extractedOrders,
+          });
+          
+          toast({
+            title: '✅ Planilha analisada',
+            description: `${extractedOrders.length} pedidos (${formatWeightIntl(totalWeight)})`,
+          });
+          
+          return { type: detectedType, data: legacyOrders };
+        }
+        
+        // Se motor inteligente não encontrou dados, mostrar diagnóstico
+        const diagnostics = analysis.validation.errors.map(e => e.message).join('; ');
+        
+        setUploadState({
+          file,
+          status: 'error',
+          message: diagnostics || 'Não foi possível identificar dados válidos',
+          data: null,
+          analysis,
+        });
+        
+        return null;
+        
+      } catch (error) {
+        console.error('[DualFileUpload] Erro no motor inteligente:', error);
+        
+        // Fallback para parser antigo
+        console.log('[DualFileUpload] Tentando parser legado...');
+      }
+    }
+    
+    // Verificar se é PDF
     if (isPDFFile(file)) {
       setUploadState({
         file,
@@ -113,34 +235,38 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         const result = await detectAndParsePDF(file);
         
         if (result.type === 'itinerario' && result.itinerarioRecords && result.itinerarioRecords.length > 0) {
+          const totalWeight = result.itinerarioRecords.reduce((sum, r) => sum + r.weight_kg, 0);
+          
           setUploadState({
             file,
             status: 'success',
-            message: `${result.itinerarioRecords.length} vendas com endereço`,
+            message: `${result.itinerarioRecords.length} vendas | ${formatWeightIntl(totalWeight)}`,
             data: result.itinerarioRecords,
             detectedType: 'itinerario',
           });
           
           toast({
             title: 'Relatório Geral detectado!',
-            description: `${result.itinerarioRecords.length} endereços de entrega carregados`,
+            description: `${result.itinerarioRecords.length} endereços (${formatWeightIntl(totalWeight)})`,
           });
           
           return { type: 'itinerario', data: result.itinerarioRecords };
         }
         
         if (result.type === 'adv' && result.advOrders && result.advOrders.length > 0) {
+          const totalWeight = result.advOrders.reduce((sum, o) => sum + o.weight_kg, 0);
+          
           setUploadState({
             file,
             status: 'success',
-            message: `${result.advOrders.length} pedidos com itens`,
+            message: `${result.advOrders.length} pedidos | ${formatWeightIntl(totalWeight)}`,
             data: result.advOrders,
             detectedType: 'adv',
           });
           
           toast({
             title: 'Detalhe das Vendas detectado!',
-            description: `${result.advOrders.length} pedidos com itens detalhados`,
+            description: `${result.advOrders.length} pedidos (${formatWeightIntl(totalWeight)})`,
           });
           
           return { type: 'adv', data: result.advOrders };
@@ -173,143 +299,6 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           file,
           status: 'error',
           message: 'Erro ao processar PDF',
-          data: null,
-        });
-        return null;
-      }
-    }
-    
-    // Processar Excel
-    if (isExcelFile(file)) {
-      setUploadState({
-        file,
-        status: 'processing',
-        message: 'Analisando planilha...',
-        data: null,
-      });
-      
-      try {
-        // Ler Excel e detectar tipo automaticamente
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-        
-        if (rows.length < 2) {
-          setUploadState({
-            file,
-            status: 'error',
-            message: 'Planilha vazia',
-            data: null,
-          });
-          return null;
-        }
-        
-        // Verificar se é formato ADV (Detalhe das Vendas) - hierárquico
-        if (isADVExcelFormat(rows)) {
-          console.log('[DualFileUpload] Detectado: Detalhe das Vendas (Excel ADV)');
-          const advOrders = parseADVDetailExcel(rows);
-          
-          if (advOrders.length > 0) {
-            setUploadState({
-              file,
-              status: 'success',
-              message: `${advOrders.length} pedidos com itens`,
-              data: advOrders,
-              detectedType: 'adv',
-            });
-            
-            toast({
-              title: 'Detalhe das Vendas detectado!',
-              description: `${advOrders.length} pedidos com itens detalhados`,
-            });
-            
-            return { type: 'adv', data: advOrders };
-          }
-        }
-        
-        // Encontrar header row - pode não ser a primeira linha
-        let headerRowIdx = 0;
-        for (let i = 0; i < Math.min(10, rows.length); i++) {
-          const rowText = rows[i].map(c => String(c ?? '').toLowerCase()).join(' ');
-          if (/cliente/i.test(rowText) && (/peso\s*bruto/i.test(rowText) || /end\.?\s*ent\.?/i.test(rowText))) {
-            headerRowIdx = i;
-            break;
-          }
-        }
-        
-        const headers = rows[headerRowIdx].map(c => String(c ?? ''));
-        console.log('[DualFileUpload] Header row:', headerRowIdx, headers.slice(0, 12).join(' | '));
-        
-        // Verificar se é formato MB (Itinerário) - NÃO USAR PARSER GENÉRICO
-        if (isItinerarioExcelFormat(headers)) {
-          console.log('[DualFileUpload] Detectado: Relatório de Vendas MB (Excel Itinerário)');
-          const itinerarioRecords = parseItinerarioExcel(rows);
-          
-          if (itinerarioRecords.length > 0) {
-            setUploadState({
-              file,
-              status: 'success',
-              message: `${itinerarioRecords.length} vendas com endereço`,
-              data: itinerarioRecords,
-              detectedType: 'itinerario',
-            });
-            
-            toast({
-              title: 'Relatório de Vendas detectado!',
-              description: `${itinerarioRecords.length} endereços de entrega carregados`,
-            });
-            
-            return { type: 'itinerario', data: itinerarioRecords };
-          }
-          
-          // Se formato MB reconhecido mas sem dados, mostrar erro específico (não cair no genérico)
-          setUploadState({
-            file,
-            status: 'error',
-            message: 'Formato MB reconhecido mas sem dados válidos. Verifique se as linhas têm Cliente e Peso.',
-            data: null,
-          });
-          return null;
-        }
-        
-        // Fallback: usar parser genérico APENAS se NÃO for formato MB
-        console.log('[DualFileUpload] Formato não-MB, tentando parser genérico...');
-        const result = await parseExcelWithValidation(file);
-        
-        if (result.validRows === 0) {
-          // Mensagem de erro mais clara - sem mencionar template
-          setUploadState({
-            file,
-            status: 'error',
-            message: 'Formato não reconhecido. Colunas esperadas: Cliente, Peso Bruto, End. Ent., Bairro Ent.',
-            data: null,
-          });
-          return null;
-        }
-        
-        setUploadState({
-          file,
-          status: 'success',
-          message: `${result.validRows} pedidos carregados`,
-          data: result,
-          detectedType: 'excel',
-        });
-        
-        toast({
-          title: 'Planilha carregada!',
-          description: `${result.validRows} pedidos prontos`,
-        });
-        
-        return { type: 'excel', data: result };
-        
-      } catch (error) {
-        console.error('Erro ao processar Excel:', error);
-        setUploadState({
-          file,
-          status: 'error',
-          message: 'Erro ao processar planilha',
           data: null,
         });
         return null;
