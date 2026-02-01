@@ -840,6 +840,178 @@ export function useRouteDetails(routeId: string | undefined) {
     },
   });
 
+  // Move order between trucks
+  const moveOrderToTruck = useMutation({
+    mutationFn: async ({ 
+      orderId, 
+      fromRouteTruckId, 
+      toRouteTruckId, 
+      newSequence 
+    }: { 
+      orderId: string; 
+      fromRouteTruckId: string;
+      toRouteTruckId: string; 
+      newSequence: number;
+    }) => {
+      const route = routeQuery.data;
+      if (!route) throw new Error('Rota não encontrada');
+      
+      const order = route.orders.find(o => o.id === orderId);
+      if (!order) throw new Error('Pedido não encontrado');
+      
+      const toRouteTruck = route.route_trucks.find(rt => rt.id === toRouteTruckId);
+      if (!toRouteTruck) throw new Error('Caminhão destino não encontrado');
+      
+      // Delete old assignment
+      await supabase
+        .from('order_assignments')
+        .delete()
+        .eq('order_id', orderId);
+      
+      // Create new assignment in destination truck
+      const { error: insertError } = await supabase
+        .from('order_assignments')
+        .insert({
+          order_id: orderId,
+          route_truck_id: toRouteTruckId,
+          delivery_sequence: newSequence,
+        });
+      
+      if (insertError) throw insertError;
+      
+      // Recalculate totals for both trucks
+      const fromTruck = route.route_trucks.find(rt => rt.id === fromRouteTruckId);
+      if (fromTruck) {
+        const newFromWeight = Number(fromTruck.total_weight_kg) - Number(order.weight_kg);
+        const newFromOrders = (fromTruck.total_orders || 1) - 1;
+        
+        await supabase
+          .from('route_trucks')
+          .update({
+            total_weight_kg: Math.max(0, newFromWeight),
+            total_orders: Math.max(0, newFromOrders),
+          })
+          .eq('id', fromRouteTruckId);
+      }
+      
+      const newToWeight = Number(toRouteTruck.total_weight_kg) + Number(order.weight_kg);
+      const newToOrders = (toRouteTruck.total_orders || 0) + 1;
+      
+      await supabase
+        .from('route_trucks')
+        .update({
+          total_weight_kg: newToWeight,
+          total_orders: newToOrders,
+        })
+        .eq('id', toRouteTruckId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      toast({ title: 'Pedido movido com sucesso!' });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao mover pedido',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Reorder single delivery within a truck
+  const reorderSingleDelivery = useMutation({
+    mutationFn: async ({ 
+      routeTruckId, 
+      orderId, 
+      newSequence 
+    }: { 
+      routeTruckId: string; 
+      orderId: string; 
+      newSequence: number;
+    }) => {
+      const route = routeQuery.data;
+      if (!route) throw new Error('Rota não encontrada');
+      
+      const routeTruck = route.route_trucks.find(rt => rt.id === routeTruckId);
+      if (!routeTruck) throw new Error('Caminhão não encontrado');
+      
+      const assignments = routeTruck.assignments || [];
+      const currentAssignment = assignments.find(a => a.order?.id === orderId);
+      if (!currentAssignment) throw new Error('Atribuição não encontrada');
+      
+      const currentSequence = currentAssignment.delivery_sequence;
+      const isMovingUp = newSequence < currentSequence;
+      
+      // Update other assignments' sequences
+      for (const a of assignments) {
+        if (a.id === currentAssignment.id) continue;
+        
+        let newSeq = a.delivery_sequence;
+        
+        if (isMovingUp) {
+          // Moving up: shift others down
+          if (a.delivery_sequence >= newSequence && a.delivery_sequence < currentSequence) {
+            newSeq = a.delivery_sequence + 1;
+          }
+        } else {
+          // Moving down: shift others up
+          if (a.delivery_sequence > currentSequence && a.delivery_sequence <= newSequence) {
+            newSeq = a.delivery_sequence - 1;
+          }
+        }
+        
+        if (newSeq !== a.delivery_sequence) {
+          await supabase
+            .from('order_assignments')
+            .update({ delivery_sequence: newSeq })
+            .eq('id', a.id);
+        }
+      }
+      
+      // Update the moved assignment
+      await supabase
+        .from('order_assignments')
+        .update({ delivery_sequence: newSequence })
+        .eq('id', currentAssignment.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao reordenar entrega',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
+  // Lock/unlock truck route (for confirmation workflow)
+  const lockTruckRoute = useMutation({
+    mutationFn: async (routeTruckId: string) => {
+      // We'll use a custom field or status - for now store in the route_trucks
+      // Since we don't have a locked field, we can use estimated_return_time as a flag
+      // or add metadata. For now, we'll set a special marker.
+      // In production, you'd add a 'is_locked' column via migration.
+      
+      // For now, we'll track this in local state only and emit success
+      // The UI will manage the locked state
+      return { routeTruckId, locked: true };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+    },
+  });
+
+  const unlockTruckRoute = useMutation({
+    mutationFn: async (routeTruckId: string) => {
+      return { routeTruckId, locked: false };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+    },
+  });
+
   return {
     route: routeQuery.data,
     isLoading: routeQuery.isLoading,
@@ -855,6 +1027,10 @@ export function useRouteDetails(routeId: string | undefined) {
     updateDepartureTimes,
     updateOrderAddress,
     setManualCoords,
+    moveOrderToTruck,
+    reorderSingleDelivery,
+    lockTruckRoute,
+    unlockTruckRoute,
     refetch: routeQuery.refetch,
   };
 }
