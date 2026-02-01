@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,6 +25,7 @@ import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelec
 import { LoadConsolidationView } from '@/components/route/LoadConsolidationView';
 import { SideBySideManifests } from '@/components/route/SideBySideManifests';
 import { TruckManifestCards } from '@/components/route/TruckManifestCards';
+import { TruckRouteEditor } from '@/components/route/TruckRouteEditor';
 
 // Helper function to get strategy label
 function getStrategyLabel(strategy: RoutingStrategy): string {
@@ -64,7 +65,11 @@ export default function RouteDetails() {
     reorderDeliveries, 
     updateDepartureTimes, 
     updateOrderAddress, 
-    setManualCoords, 
+    setManualCoords,
+    moveOrderToTruck,
+    reorderSingleDelivery,
+    lockTruckRoute,
+    unlockTruckRoute,
     refetch 
   } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
@@ -76,6 +81,10 @@ export default function RouteDetails() {
   const [showMap, setShowMap] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [isGeocoding, setIsGeocoding] = useState(false);
+  
+  // Track locked trucks (in-memory state until we add DB column)
+  const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
+
   
   // Track if fleet was pre-configured in wizard
   const [fleetFromWizard, setFleetFromWizard] = useState(false);
@@ -330,6 +339,55 @@ export default function RouteDetails() {
     });
     // Just dismiss the warning - the flow continues naturally
   };
+
+  // Handlers for TruckRouteEditor
+  const handleOrderMoveToTruck = useCallback(async (
+    orderId: string, 
+    fromTruckId: string, 
+    toTruckId: string, 
+    newSequence: number
+  ) => {
+    await moveOrderToTruck.mutateAsync({ 
+      orderId, 
+      fromRouteTruckId: fromTruckId, 
+      toRouteTruckId: toTruckId, 
+      newSequence 
+    });
+    await refetch();
+  }, [moveOrderToTruck, refetch]);
+
+  const handleReorderInTruck = useCallback(async (
+    truckId: string, 
+    orderId: string, 
+    newSequence: number
+  ) => {
+    await reorderSingleDelivery.mutateAsync({ routeTruckId: truckId, orderId, newSequence });
+    await refetch();
+  }, [reorderSingleDelivery, refetch]);
+
+  const handleLockTruck = useCallback(async (truckId: string) => {
+    setLockedTruckIds(prev => new Set([...prev, truckId]));
+    await lockTruckRoute.mutateAsync(truckId);
+  }, [lockTruckRoute]);
+
+  const handleUnlockTruck = useCallback(async (truckId: string) => {
+    setLockedTruckIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(truckId);
+      return newSet;
+    });
+    await unlockTruckRoute.mutateAsync(truckId);
+  }, [unlockTruckRoute]);
+
+  const handleConfirmAllRoutesAndProceed = useCallback(async () => {
+    // Optimize routes with the selected strategy
+    await optimizeRoutes.mutateAsync(routingStrategy);
+    await refetch();
+    toast({
+      title: 'Rotas confirmadas e otimizadas!',
+      description: 'Os romaneios estão prontos para geração.',
+    });
+  }, [optimizeRoutes, routingStrategy, refetch, toast]);
 
   // Handlers for manual map selection
   const handleStartMapSelection = (orderId: string, clientName: string) => {
@@ -627,75 +685,94 @@ export default function RouteDetails() {
         )}
 
         {/* ============================================ */}
-        {/* ETAPA 3: ROMANEIO DE CARGA + ROTEIRIZAÇÃO   */}
+        {/* ETAPA 3: AJUSTE MANUAL DE ROTAS + ROMANEIO */}
         {/* ============================================ */}
         {activeStep === 'loading_manifest' && (
           <div className="space-y-6">
-            {/* Sub-etapa 1: Consolidação de Carga */}
-            <LoadConsolidationView
-              orders={route.orders}
-              trucks={truckDataForComponents}
+            {/* Editor de Rotas por Caminhão */}
+            <TruckRouteEditor
+              routeName={route.name}
+              trucks={route.route_trucks.map(rt => ({
+                truck: rt.truck!,
+                routeTruckId: rt.id,
+                orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
+                totalWeight: Number(rt.total_weight_kg),
+                occupancyPercent: rt.occupancy_percent,
+                isLocked: lockedTruckIds.has(rt.id),
+              }))}
+              onOrderMove={handleOrderMoveToTruck}
+              onReorder={handleReorderInTruck}
+              onLockTruck={handleLockTruck}
+              onUnlockTruck={handleUnlockTruck}
+              onConfirmAllRoutes={handleConfirmAllRoutesAndProceed}
+              isProcessing={optimizeRoutes.isPending || moveOrderToTruck.isPending}
             />
             
-            {/* Sub-etapa 2: Romaneio de Carga por Caminhão (para impressão) */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileDown className="h-5 w-5" />
-                  Romaneios de Carga para Impressão
-                </CardTitle>
-                <CardDescription>
-                  Gere o romaneio para separação e conferência no Centro de Distribuição.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
+            {/* Sub-etapa: Consolidação de Carga (colapsável) */}
+            <details className="group">
+              <summary className="cursor-pointer list-none">
+                <Card className="hover:bg-muted/30 transition-colors">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Package className="h-4 w-4" />
+                      Ver Consolidação de Carga
+                      <ChevronLeft className="ml-auto h-4 w-4 transition-transform group-open:rotate-[-90deg]" />
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+              </summary>
+              <div className="mt-4">
+                <LoadConsolidationView
+                  orders={route.orders}
+                  trucks={truckDataForComponents}
+                />
+              </div>
+            </details>
+            
+            {/* Romaneio de Carga por Caminhão (para impressão) - colapsável */}
+            <details className="group">
+              <summary className="cursor-pointer list-none">
+                <Card className="hover:bg-muted/30 transition-colors">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <FileDown className="h-4 w-4" />
+                      Romaneios de Carga para Impressão
+                      <ChevronLeft className="ml-auto h-4 w-4 transition-transform group-open:rotate-[-90deg]" />
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+              </summary>
+              <div className="mt-4">
                 <LoadingManifest
                   routeName={route.name}
                   date={new Date(route.created_at).toLocaleDateString('pt-BR')}
                   trucks={truckDataForComponents}
                 />
-              </CardContent>
-            </Card>
+              </div>
+            </details>
 
-            {/* Botão para Roteirizar Diretamente - SEM seletor de estratégia (já escolhida no wizard) */}
-            <Card className="border-primary/50 bg-primary/5">
-              <CardContent className="py-6">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                      <RouteIcon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-lg">Pronto para roteirizar</p>
-                      <p className="text-sm text-muted-foreground">
-                        Estratégia: <strong>{getStrategyLabel(routingStrategy)}</strong>
-                      </p>
-                    </div>
-                  </div>
-                  <Button 
-                    size="lg"
-                    onClick={handleOptimizeRoutes}
-                    disabled={optimizeRoutes.isPending}
-                  >
-                    <RouteIcon className="mr-2 h-4 w-4" />
-                    {optimizeRoutes.isPending ? 'Otimizando rotas...' : 'Roteirizar Agora'}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Confirmação de Carregamento - Agora OPCIONAL */}
-            <div className="opacity-80">
-              <p className="text-sm text-muted-foreground text-center mb-2">
-                Opcional: Registrar conferência física antes de roteirizar
-              </p>
-              <LoadingConfirmation
-                routeName={route.name}
-                trucks={truckDataForComponents}
-                onConfirm={handleConfirmLoading}
-                isLoading={confirmLoading.isPending}
-              />
-            </div>
+            {/* Confirmação de Carregamento - OPCIONAL */}
+            <details className="group opacity-80">
+              <summary className="cursor-pointer list-none">
+                <Card className="hover:bg-muted/30 transition-colors">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Lock className="h-4 w-4" />
+                      Conferência Física (Opcional)
+                      <ChevronLeft className="ml-auto h-4 w-4 transition-transform group-open:rotate-[-90deg]" />
+                    </CardTitle>
+                  </CardHeader>
+                </Card>
+              </summary>
+              <div className="mt-4">
+                <LoadingConfirmation
+                  routeName={route.name}
+                  trucks={truckDataForComponents}
+                  onConfirm={handleConfirmLoading}
+                  isLoading={confirmLoading.isPending}
+                />
+              </div>
+            </details>
           </div>
         )}
 
