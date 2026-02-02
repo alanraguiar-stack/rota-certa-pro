@@ -1,110 +1,64 @@
 
-# Plano: Motor Inteligente de Leitura de Planilhas ✅ IMPLEMENTADO
 
-## Resumo da Implementação
+# Plano: Corrigir Logout e Redirecionamento para Página de Login
 
-O sistema foi completamente reestruturado para operar como um "analista logístico humano":
-- Lê TUDO primeiro, sem exceção
-- Entende o significado dos dados
-- Valida coerência antes de decidir
-- Só então toma decisões
+## Resumo do Problema
+O botão "Sair" não está redirecionando para a página de login porque:
+1. A função `signOut` não faz navegação explícita
+2. Quando a sessão já está expirada, o logout falha silenciosamente
+3. O estado do usuário não é limpo adequadamente em todos os cenários
 
-## Arquitetura Final
+## Solução
 
-```
-src/lib/spreadsheet/
-├── index.ts              # Exportações públicas
-├── types.ts              # Tipos e interfaces
-├── columnDetector.ts     # Detecção semântica de colunas
-├── weightExtractor.ts    # Extração robusta de peso
-├── validationEngine.ts   # Validação de coerência
-└── intelligentReader.ts  # Motor principal
-```
-
-## Funcionalidades Implementadas
-
-### 1. Leitura Completa da Planilha ✅
-- Lê TODAS as linhas
-- Lê TODAS as colunas
-- Classifica cada linha: header, dados, vazia, totalização, observação
-- Ignora automaticamente linhas irrelevantes
-
-### 2. Identificação de Colunas por Significado ✅
-- Detecta colunas pelo NOME, não pela posição
-- Palavras-chave para cada tipo semântico:
-  - Peso: "Peso Bruto", "Peso Total", "Total KG", etc.
-  - Cliente: "Cliente", "Razão Social", "Nome", etc.
-  - Endereço: "End. Ent.", "Rua", "Bairro", "Cidade", "CEP", etc.
-- Normalização super-agressiva: "Peso  Bruto" → "pesobruto"
-
-### 3. Detecção Inteligente de Peso ✅
-- 5 níveis de detecção com fallback:
-  1. Nome exato da coluna
-  2. Super-normalização
-  3. Busca por "peso" no nome
-  4. Índice fixo para formato MB (coluna F = índice 5)
-  5. Heurística numérica (excluindo monetárias)
-- Exclui colunas monetárias automaticamente
-- Valida média de peso (1-1500 kg/entrega)
-
-### 4. Tratamento de Dados Sujos ✅
-- Ignora linhas vazias
-- Ignora linhas de totalização ("TOTAL GERAL")
-- Trata formatos BR (1.234,56) e US (1,234.56)
-- Remove sufixos de unidade (kg, g, t)
-
-### 5. Validação de Coerência ✅
-- Verifica peso médio realista (10-2000 kg)
-- Detecta se coluna "Total (R$)" foi confundida com peso
-- Valida se endereços são suficientes
-- Calcula caminhões estimados
-
-### 6. Autocorreção e Diagnóstico ✅
-- Gera relatório detalhado de diagnóstico
-- Mostra qual coluna foi interpretada como peso
-- Lista warnings e sugestões
-- Permite identificar problemas rapidamente
-
-## Integração no Componente de Upload
-
-O `DualFileUpload.tsx` agora usa o motor inteligente como **primeira opção** para arquivos Excel:
+### 1. Melhorar a Função signOut no AuthContext
+Modificar `src/contexts/AuthContext.tsx` para:
+- Limpar manualmente o estado do usuário e sessão após logout
+- Usar scope: 'local' para garantir limpeza mesmo se o servidor não responder
+- Tratar erros silenciosamente (o importante é limpar o estado local)
 
 ```typescript
-// PRIMEIRO: Tentar o Motor Inteligente
-const { analysis, orders } = await analyzeSpreadsheet(file);
-
-// Exibe diagnóstico no console
-// Retorna peso total formatado (ex: "13,05 t")
-// Estima caminhões necessários
+const signOut = async () => {
+  try {
+    await supabase.auth.signOut({ scope: 'local' });
+  } catch (error) {
+    console.error('Erro no logout:', error);
+  } finally {
+    // Garante limpeza do estado mesmo se houver erro
+    setUser(null);
+    setSession(null);
+  }
+};
 ```
 
+### 2. Adicionar Navegação Programática no AppSidebar
+Modificar `src/components/layout/AppSidebar.tsx` para:
+- Importar `useNavigate` do react-router-dom
+- Navegar para `/login` após chamar signOut
+
+```typescript
+import { useNavigate } from 'react-router-dom';
+
+// No componente:
+const navigate = useNavigate();
+
+const handleSignOut = async () => {
+  await signOut();
+  navigate('/login', { replace: true });
+};
+```
+
+### 3. Corrigir Warning do AnimatedTruck
+Modificar `src/pages/Auth.tsx` para resolver o warning de ref:
+- Remover qualquer ref que esteja sendo passada para o componente
+- Ou envolver com forwardRef se necessário
+
+## Arquivos a Modificar
+1. `src/contexts/AuthContext.tsx` - Melhorar lógica de signOut
+2. `src/components/layout/AppSidebar.tsx` - Adicionar navegação após logout
+3. `src/pages/Auth.tsx` - Corrigir warning do AnimatedTruck (opcional, não bloqueia)
+
 ## Resultado Esperado
+- Clicar em "Sair" limpa o estado do usuário
+- Navegação automática para `/login`
+- Funciona mesmo se a sessão já estiver expirada no servidor
 
-| Métrica | Antes | Depois |
-|---------|-------|--------|
-| Coluna Selecionada | Às vezes "Total" (R$) | **Sempre "Peso Bruto"** |
-| Peso Total | Variável/errado | **Correto** |
-| Diagnóstico | Nenhum | **Completo no console** |
-| Robustez | Frágil | **Tolerante a variações** |
-
-## Arquivos Criados/Modificados
-
-### Novos:
-- `src/lib/spreadsheet/types.ts`
-- `src/lib/spreadsheet/columnDetector.ts`
-- `src/lib/spreadsheet/weightExtractor.ts`
-- `src/lib/spreadsheet/validationEngine.ts`
-- `src/lib/spreadsheet/intelligentReader.ts`
-- `src/lib/spreadsheet/index.ts`
-- `src/hooks/useIntelligentParser.ts`
-- `src/test/spreadsheet.test.ts`
-
-### Modificados:
-- `src/components/route/DualFileUpload.tsx` - Integrado motor inteligente
-
-## Próximos Passos
-
-1. **Testar com planilha real** - Upload do `Relatório_de_Vendas_-_MB-3.xlsx`
-2. **Verificar peso total** - Deve ser ~13.048,56 kg
-3. **Verificar console** - Diagnóstico completo visível
-4. **Ajustar se necessário** - O motor registra tudo para debug
