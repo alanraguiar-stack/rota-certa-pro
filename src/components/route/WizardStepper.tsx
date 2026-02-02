@@ -12,7 +12,7 @@ export function WizardStepper({ currentStep, completedSteps, onStepClick }: Wiza
   const currentIndex = WIZARD_STEPS.findIndex((s) => s.id === currentStep);
 
   return (
-    <div className="flex items-center justify-between gap-2">
+    <div className="flex items-center justify-between gap-3">
       {WIZARD_STEPS.map((step, index) => {
         const isActive = step.id === currentStep;
         const isCompleted = completedSteps.includes(step.id);
@@ -24,7 +24,7 @@ export function WizardStepper({ currentStep, completedSteps, onStepClick }: Wiza
             key={step.id}
             className={cn(
               'flex flex-1 items-center',
-              index < WIZARD_STEPS.length - 1 && 'gap-2'
+              index < WIZARD_STEPS.length - 1 && 'gap-3'
             )}
           >
             <button
@@ -32,26 +32,26 @@ export function WizardStepper({ currentStep, completedSteps, onStepClick }: Wiza
               onClick={() => isClickable && onStepClick(step.id)}
               disabled={!isClickable}
               className={cn(
-                'flex flex-col items-center gap-1.5 transition-all',
+                'flex flex-col items-center gap-2 transition-all duration-300',
                 isClickable && 'cursor-pointer hover:opacity-80',
                 !isClickable && 'cursor-default'
               )}
             >
               <div
                 className={cn(
-                  'flex h-9 w-9 items-center justify-center rounded-full text-sm font-semibold transition-all',
-                  isActive && 'bg-primary text-primary-foreground shadow-lg ring-4 ring-primary/20',
-                  isCompleted && 'bg-success text-success-foreground',
+                  'flex h-11 w-11 items-center justify-center rounded-full text-sm font-bold transition-all duration-300',
+                  isActive && 'bg-gradient-to-br from-accent to-accent/80 text-accent-foreground shadow-lg shadow-accent/25 ring-4 ring-accent/20',
+                  isCompleted && 'bg-success text-success-foreground shadow-md',
                   isPending && 'bg-muted text-muted-foreground'
                 )}
               >
-                {isCompleted ? <Check className="h-4 w-4" /> : step.number}
+                {isCompleted ? <Check className="h-5 w-5" /> : step.number}
               </div>
               <div className="hidden text-center sm:block">
                 <p
                   className={cn(
-                    'text-xs font-medium',
-                    isActive && 'text-primary',
+                    'text-xs font-semibold transition-colors duration-300',
+                    isActive && 'text-accent',
                     isCompleted && 'text-success',
                     isPending && 'text-muted-foreground'
                   )}
@@ -65,7 +65,7 @@ export function WizardStepper({ currentStep, completedSteps, onStepClick }: Wiza
             {index < WIZARD_STEPS.length - 1 && (
               <div
                 className={cn(
-                  'h-0.5 flex-1',
+                  'h-1 flex-1 rounded-full transition-all duration-500',
                   index < currentIndex ? 'bg-success' : 'bg-muted'
                 )}
               />

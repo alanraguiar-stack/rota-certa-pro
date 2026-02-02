@@ -43,6 +43,10 @@ export default {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
         },
+        cta: {
+          DEFAULT: "hsl(var(--cta))",
+          foreground: "hsl(var(--cta-foreground))",
+        },
         muted: {
           DEFAULT: "hsl(var(--muted))",
           foreground: "hsl(var(--muted-foreground))",
@@ -84,15 +88,17 @@ export default {
         sm: "calc(var(--radius) - 4px)",
         xl: "calc(var(--radius) + 4px)",
         "2xl": "calc(var(--radius) + 8px)",
+        "3xl": "calc(var(--radius) + 16px)",
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
       boxShadow: {
-        'soft': '0 2px 8px -2px hsl(var(--foreground) / 0.08), 0 4px 16px -4px hsl(var(--foreground) / 0.06)',
-        'soft-lg': '0 4px 16px -4px hsl(var(--foreground) / 0.1), 0 8px 32px -8px hsl(var(--foreground) / 0.08)',
-        'glow': '0 0 20px hsl(var(--primary) / 0.15)',
-        'glow-accent': '0 0 20px hsl(var(--accent) / 0.2)',
+        'soft': '0 2px 8px -2px hsl(var(--foreground) / 0.06), 0 6px 18px -6px hsl(var(--foreground) / 0.08)',
+        'soft-lg': '0 4px 16px -4px hsl(var(--foreground) / 0.1), 0 12px 36px -8px hsl(var(--foreground) / 0.1)',
+        'glow': '0 0 24px hsl(var(--accent) / 0.2)',
+        'glow-cta': '0 0 24px hsl(var(--cta) / 0.25)',
+        'glow-accent': '0 0 24px hsl(var(--accent) / 0.25)',
       },
       keyframes: {
         "accordion-down": {
@@ -121,7 +127,7 @@ export default {
         },
         "pulse-slow": {
           "0%, 100%": { opacity: "0.4" },
-          "50%": { opacity: "0.7" },
+          "50%": { opacity: "0.8" },
         },
         "float": {
           "0%, 100%": { transform: "translateY(0) rotate(0deg)" },
@@ -130,6 +136,10 @@ export default {
         shimmer: {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
+        },
+        "glow-pulse": {
+          "0%, 100%": { boxShadow: "0 0 20px hsl(var(--accent) / 0.2)" },
+          "50%": { boxShadow: "0 0 35px hsl(var(--accent) / 0.35)" },
         },
       },
       animation: {
@@ -141,7 +151,8 @@ export default {
         "scale-in": "scale-in 0.2s ease-out",
         "pulse-slow": "pulse-slow 4s ease-in-out infinite",
         "float": "float 6s ease-in-out infinite",
-        "shimmer": "shimmer 2s linear infinite",
+        "shimmer": "shimmer 2.5s linear infinite",
+        "glow-pulse": "glow-pulse 3s ease-in-out infinite",
       },
     },
   },
