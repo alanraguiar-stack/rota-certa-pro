@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, Truck, Route, History, LogOut, Settings, FileText, HelpCircle, ChevronRight, Menu } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
@@ -37,9 +38,15 @@ const secondaryMenuItems = [
 
 export function AppSidebar() {
   const { signOut, user } = useAuth();
+  const navigate = useNavigate();
   const { state, setOpen } = useSidebar();
   const isCollapsed = state === 'collapsed';
   const [isHovering, setIsHovering] = useState(false);
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login', { replace: true });
+  };
 
   // Expand on hover when collapsed
   const handleMouseEnter = () => {
@@ -227,8 +234,8 @@ export function AppSidebar() {
                   "w-full text-sidebar-foreground/60 hover:bg-destructive/10 hover:text-destructive transition-colors",
                   showExpanded ? "justify-start gap-3 px-3 h-11" : "h-11 w-11"
                 )}
-                onClick={signOut}
-              >
+              onClick={handleSignOut}
+            >
                 <LogOut className="h-5 w-5" />
                 {showExpanded && <span className="font-medium animate-fade-in">Sair</span>}
               </Button>
