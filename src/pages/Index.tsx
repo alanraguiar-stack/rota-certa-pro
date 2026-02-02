@@ -1,14 +1,168 @@
-import { Package, Truck, Route, Clock, ArrowRight, Plus, Activity, MapPin, Zap } from 'lucide-react';
+import { Package, Truck, Route, Clock, ArrowRight, Plus, Activity, MapPin, Zap, TrendingUp, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { FuturisticStatsCard } from '@/components/dashboard/FuturisticStatsCard';
-import { AbstractRouteVisualization } from '@/components/dashboard/AbstractRouteVisualization';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useRoutes } from '@/hooks/useRoutes';
 import { cn } from '@/lib/utils';
+
+// Modern Stats Card Component
+function StatsCard({ 
+  title, 
+  value, 
+  subtitle, 
+  icon: Icon, 
+  variant = 'default',
+  delay = 0 
+}: { 
+  title: string; 
+  value: string | number; 
+  subtitle: string; 
+  icon: React.ElementType;
+  variant?: 'default' | 'accent' | 'success' | 'info' | 'warning';
+  delay?: number;
+}) {
+  const variants = {
+    default: {
+      iconBg: 'bg-primary/10',
+      iconColor: 'text-primary',
+      accentBg: 'from-primary/5 to-transparent',
+    },
+    accent: {
+      iconBg: 'bg-accent/10',
+      iconColor: 'text-accent',
+      accentBg: 'from-accent/5 to-transparent',
+    },
+    success: {
+      iconBg: 'bg-success/10',
+      iconColor: 'text-success',
+      accentBg: 'from-success/5 to-transparent',
+    },
+    info: {
+      iconBg: 'bg-info/10',
+      iconColor: 'text-info',
+      accentBg: 'from-info/5 to-transparent',
+    },
+    warning: {
+      iconBg: 'bg-warning/10',
+      iconColor: 'text-warning',
+      accentBg: 'from-warning/5 to-transparent',
+    },
+  };
+
+  const v = variants[variant];
+
+  return (
+    <Card 
+      className="group relative overflow-hidden border shadow-soft hover:shadow-elevated transition-all duration-300 hover:-translate-y-1 opacity-0 animate-fade-in-up"
+      style={{ animationDelay: `${delay}ms`, animationFillMode: 'forwards' }}
+    >
+      {/* Accent gradient */}
+      <div className={cn("absolute inset-0 bg-gradient-to-br opacity-0 group-hover:opacity-100 transition-opacity duration-300", v.accentBg)} />
+      
+      {/* Accent bar */}
+      <div className={cn("absolute left-0 top-0 h-full w-1 rounded-r-full transition-all duration-300", v.iconBg, "group-hover:w-1.5")} />
+      
+      <CardContent className="relative p-6">
+        <div className="flex items-start justify-between">
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-muted-foreground">{title}</p>
+            <p className="text-3xl font-bold tracking-tight">{value}</p>
+            <p className="text-sm text-muted-foreground">{subtitle}</p>
+          </div>
+          <div className={cn("flex h-14 w-14 items-center justify-center rounded-2xl transition-transform duration-300 group-hover:scale-110", v.iconBg)}>
+            <Icon className={cn("h-7 w-7", v.iconColor)} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Abstract Route Visualization
+function RouteVisualization() {
+  return (
+    <div className="relative h-[300px] overflow-hidden rounded-2xl bg-gradient-to-br from-primary/5 via-accent/5 to-info/5">
+      {/* Background grid */}
+      <div className="absolute inset-0 bg-grid-pattern opacity-50" />
+      
+      {/* SVG Routes */}
+      <svg className="absolute inset-0 h-full w-full" viewBox="0 0 400 300" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="routeGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="hsl(168, 76%, 42%)" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="hsl(192, 91%, 48%)" stopOpacity="0.4" />
+          </linearGradient>
+          <linearGradient id="routeGrad2" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="hsl(24, 95%, 58%)" stopOpacity="0.6" />
+            <stop offset="100%" stopColor="hsl(168, 76%, 42%)" stopOpacity="0.3" />
+          </linearGradient>
+        </defs>
+        
+        {/* Animated paths */}
+        <path
+          d="M20,150 Q100,80 180,120 T300,100 T380,150"
+          fill="none"
+          stroke="url(#routeGrad1)"
+          strokeWidth="3"
+          strokeDasharray="8 4"
+          className="animate-path-draw"
+        />
+        <path
+          d="M20,200 Q80,160 160,180 T280,160 T380,200"
+          fill="none"
+          stroke="url(#routeGrad2)"
+          strokeWidth="2"
+          strokeDasharray="6 3"
+          className="animate-path-draw"
+          style={{ animationDelay: '0.5s' }}
+        />
+        
+        {/* Nodes */}
+        {[
+          { cx: 50, cy: 140, r: 6 },
+          { cx: 140, cy: 110, r: 8 },
+          { cx: 220, cy: 125, r: 6 },
+          { cx: 300, cy: 95, r: 7 },
+          { cx: 360, cy: 145, r: 6 },
+          { cx: 100, cy: 185, r: 5 },
+          { cx: 200, cy: 170, r: 6 },
+          { cx: 320, cy: 175, r: 5 },
+        ].map((node, i) => (
+          <g key={i}>
+            <circle
+              cx={node.cx}
+              cy={node.cy}
+              r={node.r + 4}
+              fill="hsl(168, 76%, 42%)"
+              opacity="0.2"
+              className="animate-dot-pulse"
+              style={{ animationDelay: `${i * 0.2}s` }}
+            />
+            <circle
+              cx={node.cx}
+              cy={node.cy}
+              r={node.r}
+              fill="hsl(168, 76%, 50%)"
+              className="animate-dot-pulse"
+              style={{ animationDelay: `${i * 0.2}s` }}
+            />
+          </g>
+        ))}
+      </svg>
+      
+      {/* Floating label */}
+      <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+        <div className="flex items-center gap-2 rounded-full bg-background/90 px-4 py-2 shadow-soft backdrop-blur-sm">
+          <div className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+          <span className="text-sm font-medium">Rotas em tempo real</span>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Index() {
   const { activeTrucks, totalCapacity, isLoading: loadingTrucks } = useTrucks();
@@ -21,7 +175,6 @@ export default function Index() {
 
   const totalOrdersToday = todayRoutes.reduce((sum, r) => sum + r.total_orders, 0);
   const totalWeightToday = todayRoutes.reduce((sum, r) => sum + Number(r.total_weight_kg), 0);
-  const trucksUsedToday = new Set(todayRoutes.flatMap((r) => r.id)).size;
 
   const recentRoutes = routes.slice(0, 5);
 
@@ -69,12 +222,9 @@ export default function Index() {
         <div className="flex items-center justify-center py-20">
           <div className="flex flex-col items-center gap-4">
             <div className="relative">
-              <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <Activity className="h-5 w-5 text-primary animate-pulse" />
-              </div>
+              <div className="h-14 w-14 animate-spin rounded-full border-4 border-accent/20 border-t-accent" />
             </div>
-            <p className="text-sm text-muted-foreground">Carregando dados operacionais...</p>
+            <p className="text-sm font-medium text-muted-foreground">Carregando dados operacionais...</p>
           </div>
         </div>
       </AppLayout>
@@ -84,102 +234,83 @@ export default function Index() {
   return (
     <AppLayout>
       <div className="space-y-8">
-        {/* Hero Header - Futuristic */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-8">
+        {/* Hero Header */}
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-primary via-primary/95 to-primary/90 p-8 text-primary-foreground shadow-elevated">
           {/* Background effects */}
-          <div className="absolute inset-0 bg-grid-pattern opacity-30" />
-          <div className="absolute inset-0 bg-radial-gradient" />
+          <div className="absolute inset-0 bg-grid-pattern opacity-10" />
+          <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-accent/20 blur-3xl" />
+          <div className="absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-cta/15 blur-3xl" />
           
-          {/* Animated accent lines */}
-          <div className="absolute left-0 top-1/2 h-px w-full bg-gradient-to-r from-transparent via-primary/50 to-transparent opacity-50" />
-          <div className="absolute left-1/2 top-0 h-full w-px bg-gradient-to-b from-transparent via-accent/30 to-transparent opacity-50" />
-
           <div className="relative z-10 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-primary/80">
-                <Activity className="h-4 w-4" />
-                <span className="text-xs font-medium uppercase tracking-wider">Centro de Controle</span>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">
+                  <Activity className="h-4 w-4" />
+                </div>
+                <span className="text-sm font-semibold uppercase tracking-wider text-white/70">Centro de Controle</span>
               </div>
-              <h1 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-                Operação de Entregas
+              <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+                Painel de Operações
               </h1>
-              <p className="flex items-center gap-2 text-slate-400">
-                <Clock className="h-4 w-4" />
+              <p className="flex items-center gap-2 text-lg text-white/70">
+                <Clock className="h-5 w-5" />
                 <span className="capitalize">{getTodayDate()}</span>
               </p>
             </div>
 
-            {/* Operation Status */}
-            <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-3 rounded-full border border-success/30 bg-success/10 px-4 py-2">
-                <div className="h-2 w-2 animate-pulse rounded-full bg-success" />
-                <span className="text-sm font-medium text-success">Sistema Operacional</span>
+            {/* CTA Button */}
+            <div className="flex flex-col items-start gap-4 sm:items-end">
+              <div className="hidden sm:flex items-center gap-3 rounded-full bg-white/10 px-5 py-2.5 backdrop-blur-sm">
+                <div className="h-2.5 w-2.5 animate-pulse rounded-full bg-success" />
+                <span className="text-sm font-semibold">Sistema Operacional</span>
               </div>
               
-              <Button asChild size="lg" className="group shadow-lg hover:shadow-primary/25">
+              <Button 
+                asChild 
+                size="lg" 
+                className="group h-14 bg-gradient-to-r from-cta to-warning px-8 text-lg font-semibold shadow-glow-cta hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
+              >
                 <Link to="/nova-rota">
-                  <Zap className="mr-2 h-5 w-5" />
+                  <Zap className="mr-2 h-6 w-6" />
                   Nova Rota
-                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  <ArrowRight className="ml-3 h-5 w-5 transition-transform group-hover:translate-x-1" />
                 </Link>
               </Button>
             </div>
           </div>
-
-          {/* Stats preview */}
-          <div className="relative z-10 mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {[
-              { label: 'Entregas Hoje', value: totalOrdersToday, icon: Package },
-              { label: 'Peso Total', value: formatWeight(totalWeightToday), icon: Truck },
-              { label: 'Rotas Ativas', value: todayRoutes.length, icon: Route },
-              { label: 'Frota Disponível', value: activeTrucks.length, icon: Truck },
-            ].map((stat, index) => (
-              <div
-                key={stat.label}
-                className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm transition-all duration-300 hover:border-white/20 hover:bg-white/10"
-                style={{ animationDelay: `${index * 100}ms` }}
-              >
-                <div className="flex items-center gap-2 text-slate-400">
-                  <stat.icon className="h-4 w-4" />
-                  <span className="text-xs font-medium">{stat.label}</span>
-                </div>
-                <p className="mt-2 text-2xl font-bold text-white">{stat.value}</p>
-              </div>
-            ))}
-          </div>
         </div>
 
-        {/* Main Stats Grid */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <FuturisticStatsCard
-            title="Peso Total Processado"
-            value={formatWeight(totalWeightToday)}
-            subtitle={`${totalOrdersToday} pedidos hoje`}
-            icon={<Package className="h-7 w-7" />}
-            variant="primary"
+        {/* Stats Grid */}
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <StatsCard
+            title="Entregas Hoje"
+            value={totalOrdersToday}
+            subtitle={`${todayRoutes.length} rotas criadas`}
+            icon={Package}
+            variant="accent"
             delay={100}
           />
-          <FuturisticStatsCard
+          <StatsCard
+            title="Peso Total"
+            value={formatWeight(totalWeightToday)}
+            subtitle="Processado hoje"
+            icon={TrendingUp}
+            variant="info"
+            delay={200}
+          />
+          <StatsCard
             title="Frota Disponível"
             value={activeTrucks.length}
             subtitle={`Capacidade: ${formatWeight(totalCapacity)}`}
-            icon={<Truck className="h-7 w-7" />}
+            icon={Truck}
             variant="success"
-            delay={200}
-          />
-          <FuturisticStatsCard
-            title="Rotas do Dia"
-            value={todayRoutes.length}
-            subtitle={`${trucksUsedToday} veículos alocados`}
-            icon={<Route className="h-7 w-7" />}
-            variant="info"
             delay={300}
           />
-          <FuturisticStatsCard
-            title="Histórico Total"
+          <StatsCard
+            title="Rotas Totais"
             value={routes.length}
-            subtitle="Rotas registradas"
-            icon={<Clock className="h-7 w-7" />}
+            subtitle="No sistema"
+            icon={Route}
             variant="default"
             delay={400}
           />
@@ -189,15 +320,17 @@ export default function Index() {
         <div className="grid gap-6 lg:grid-cols-5">
           {/* Abstract Route Visualization */}
           <Card className="lg:col-span-2 overflow-hidden border-0 shadow-elevated">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-lg font-semibold">
-                <MapPin className="h-5 w-5 text-primary" />
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-3 text-lg font-semibold">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+                  <MapPin className="h-5 w-5 text-accent" />
+                </div>
                 Visualização de Rotas
               </CardTitle>
               <CardDescription>Fluxo abstrato das operações</CardDescription>
             </CardHeader>
-            <CardContent className="p-0">
-              <AbstractRouteVisualization className="h-[280px]" animated />
+            <CardContent className="p-4 pt-0">
+              <RouteVisualization />
             </CardContent>
           </Card>
 
@@ -208,7 +341,7 @@ export default function Index() {
                 <CardTitle className="text-lg font-semibold">Rotas Recentes</CardTitle>
                 <CardDescription>Últimas operações registradas</CardDescription>
               </div>
-              <Button variant="ghost" size="sm" asChild className="gap-1 text-primary">
+              <Button variant="ghost" size="sm" asChild className="gap-1 text-accent hover:text-accent/80">
                 <Link to="/historico">
                   Ver todas
                   <ArrowRight className="h-4 w-4" />
@@ -217,15 +350,15 @@ export default function Index() {
             </CardHeader>
             <CardContent>
               {recentRoutes.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/10 to-accent/10">
-                    <Route className="h-10 w-10 text-primary" />
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="mb-5 flex h-24 w-24 items-center justify-center rounded-3xl bg-gradient-to-br from-accent/10 to-info/10">
+                    <Route className="h-12 w-12 text-accent" />
                   </div>
-                  <p className="font-semibold">Nenhuma rota criada</p>
-                  <p className="mb-6 mt-1 text-sm text-muted-foreground">
+                  <p className="text-lg font-semibold">Nenhuma rota criada</p>
+                  <p className="mb-6 mt-2 text-sm text-muted-foreground">
                     Comece criando sua primeira rota de entregas
                   </p>
-                  <Button asChild className="gap-2">
+                  <Button asChild className="gap-2 bg-gradient-to-r from-cta to-warning">
                     <Link to="/nova-rota">
                       <Plus className="h-4 w-4" />
                       Criar primeira rota
@@ -241,18 +374,18 @@ export default function Index() {
                         key={route.id}
                         to={`/rota/${route.id}`}
                         className={cn(
-                          "group relative flex items-center justify-between rounded-xl border border-transparent p-4 transition-all duration-300",
-                          "hover:border-border hover:bg-muted/50 hover:shadow-sm",
+                          "group relative flex items-center justify-between rounded-2xl border border-transparent p-4 transition-all duration-300",
+                          "hover:border-border hover:bg-accent/5 hover:shadow-soft",
                           "opacity-0 animate-slide-in-bottom"
                         )}
                         style={{ 
-                          animationDelay: `${(index + 1) * 100}ms`,
+                          animationDelay: `${(index + 1) * 80}ms`,
                           animationFillMode: 'forwards'
                         }}
                       >
-                        {/* Status indicator line */}
+                        {/* Status indicator */}
                         <div className={cn(
-                          "absolute left-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-full transition-all duration-300",
+                          "absolute left-0 top-1/2 h-10 w-1.5 -translate-y-1/2 rounded-full transition-all duration-300",
                           "opacity-0 group-hover:opacity-100",
                           statusConfig.color
                         )} />
@@ -260,7 +393,7 @@ export default function Index() {
                         <div className="min-w-0 flex-1 pl-2">
                           <div className="flex items-center gap-3">
                             <p className="font-semibold">{route.name}</p>
-                            <Badge variant={statusConfig.variant} className="text-xs">
+                            <Badge variant={statusConfig.variant} className="text-xs font-medium">
                               {statusConfig.label}
                             </Badge>
                           </div>
@@ -285,26 +418,26 @@ export default function Index() {
         </div>
 
         {/* Quick Actions Grid */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {/* Fleet Status */}
-          <Card className="shadow-soft hover-glow transition-all duration-300">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-success/10">
-                  <Truck className="h-4 w-4 text-success" />
+          <Card className="shadow-soft hover:shadow-elevated transition-all duration-300 hover:-translate-y-0.5">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-3 text-base font-semibold">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
+                  <Truck className="h-5 w-5 text-success" />
                 </div>
                 Status da Frota
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Veículos ativos</span>
-                  <span className="font-bold">{activeTrucks.length}</span>
+                  <span className="text-lg font-bold">{activeTrucks.length}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Capacidade total</span>
-                  <span className="font-bold">{formatWeight(totalCapacity)}</span>
+                  <span className="text-lg font-bold">{formatWeight(totalCapacity)}</span>
                 </div>
               </div>
               <Button variant="outline" size="sm" asChild className="w-full">
@@ -314,11 +447,11 @@ export default function Index() {
           </Card>
 
           {/* Quick Actions */}
-          <Card className="shadow-soft hover-glow transition-all duration-300">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
-                  <Zap className="h-4 w-4 text-primary" />
+          <Card className="shadow-soft hover:shadow-elevated transition-all duration-300 hover:-translate-y-0.5">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-3 text-base font-semibold">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+                  <Zap className="h-5 w-5 text-accent" />
                 </div>
                 Ações Rápidas
               </CardTitle>
@@ -342,44 +475,47 @@ export default function Index() {
           {/* No Fleet Warning or Performance */}
           {activeTrucks.length === 0 ? (
             <Card className="border-warning/30 bg-warning/5 shadow-soft lg:col-span-2">
-              <CardContent className="flex items-center gap-4 p-6">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-warning/10">
-                  <Truck className="h-7 w-7 text-warning" />
+              <CardContent className="flex items-center gap-5 p-6">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-warning/10">
+                  <Truck className="h-8 w-8 text-warning" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold">Configure sua Frota</p>
+                  <p className="text-lg font-semibold">Configure sua Frota</p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     Cadastre seus caminhões para começar a roteirização inteligente
                   </p>
-                  <Button variant="outline" size="sm" asChild className="mt-3">
+                  <Button variant="outline" size="sm" asChild className="mt-4">
                     <Link to="/frota">Cadastrar Veículos</Link>
                   </Button>
                 </div>
               </CardContent>
             </Card>
           ) : (
-            <Card className="shadow-soft hover-glow transition-all duration-300 lg:col-span-2">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base font-semibold">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-info/10">
-                    <Activity className="h-4 w-4 text-info" />
+            <Card className="shadow-soft hover:shadow-elevated transition-all duration-300 hover:-translate-y-0.5 lg:col-span-2">
+              <CardHeader className="pb-4">
+                <CardTitle className="flex items-center gap-3 text-base font-semibold">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10">
+                    <Activity className="h-5 w-5 text-info" />
                   </div>
                   Performance do Sistema
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-6">
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-primary">{routes.length}</p>
-                    <p className="text-xs text-muted-foreground">Rotas Totais</p>
+                    <p className="text-3xl font-bold text-accent">{routes.length}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Rotas Totais</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-success">{activeTrucks.length}</p>
-                    <p className="text-xs text-muted-foreground">Veículos Ativos</p>
+                    <p className="text-3xl font-bold text-success">{activeTrucks.length}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Veículos Ativos</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-2xl font-bold text-info">100%</p>
-                    <p className="text-xs text-muted-foreground">Uptime</p>
+                    <div className="flex items-center justify-center gap-1">
+                      <CheckCircle2 className="h-6 w-6 text-success" />
+                      <p className="text-3xl font-bold text-success">100%</p>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">Uptime</p>
                   </div>
                 </div>
               </CardContent>

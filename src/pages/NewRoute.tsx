@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, Brain, AlertTriangle } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, AlertTriangle, Sparkles } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -186,16 +186,22 @@ export default function NewRoute() {
   return (
     <AppLayout>
       <div className="mx-auto max-w-5xl space-y-6">
+        {/* Page Header */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Nova Rota</h1>
-            <p className="text-muted-foreground">Siga os passos para criar uma rota otimizada</p>
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+                <Sparkles className="h-5 w-5 text-accent" />
+              </div>
+              <h1 className="text-2xl font-bold">Nova Rota</h1>
+            </div>
+            <p className="text-muted-foreground pl-[52px]">Siga os passos para criar uma rota otimizada</p>
           </div>
           {/* Summary badges */}
           <div className="flex gap-2">
             {getStepSummary().map((item, i) => (
-              <Badge key={i} variant="secondary" className="gap-1">
-                <Check className="h-3 w-3" />
+              <Badge key={i} variant="secondary" className="gap-1.5 px-3 py-1">
+                <Check className="h-3 w-3 text-success" />
                 {item}
               </Badge>
             ))}
@@ -203,8 +209,8 @@ export default function NewRoute() {
         </div>
 
         {/* Wizard Stepper */}
-        <Card>
-          <CardContent className="py-4">
+        <Card className="shadow-soft">
+          <CardContent className="py-5">
             <WizardStepper
               currentStep={currentStep}
               completedSteps={completedSteps}
@@ -214,17 +220,33 @@ export default function NewRoute() {
         </Card>
 
         {/* Step Content */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              {currentStep === 'orders' && 'Inserir Pedidos'}
-              {currentStep === 'validation' && 'Validar Peso Total'}
+        <Card className="shadow-elevated">
+          <CardHeader className="border-b pb-5">
+            <CardTitle className="flex items-center gap-3 text-xl">
+              {currentStep === 'orders' && (
+                <>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
+                    <Zap className="h-5 w-5 text-accent" />
+                  </div>
+                  Inserir Pedidos
+                </>
+              )}
+              {currentStep === 'validation' && (
+                <>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10">
+                    <Check className="h-5 w-5 text-info" />
+                  </div>
+                  Validar Peso Total
+                </>
+              )}
               {currentStep === 'fleet' && (
                 <>
-                  <Truck className="h-5 w-5" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
+                    <Truck className="h-5 w-5 text-success" />
+                  </div>
                   Definir Frota
                   {fleetConfirmed && (
-                    <Badge variant="outline" className="ml-2 text-success border-success">
+                    <Badge variant="outline" className="ml-2 text-success border-success/30 bg-success/10">
                       <Check className="h-3 w-3 mr-1" />
                       Confirmada
                     </Badge>
@@ -233,13 +255,22 @@ export default function NewRoute() {
               )}
               {currentStep === 'strategy' && (
                 <>
-                  <RouteIcon className="h-5 w-5" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+                    <RouteIcon className="h-5 w-5 text-primary" />
+                  </div>
                   Estratégia de Roteirização
                 </>
               )}
-              {currentStep === 'distribution' && 'Criar Rota'}
+              {currentStep === 'distribution' && (
+                <>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cta/10">
+                    <Sparkles className="h-5 w-5 text-cta" />
+                  </div>
+                  Criar Rota
+                </>
+              )}
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="pl-[52px] pt-1">
               {currentStep === 'orders' && 'Carregue as vendas do dia para roteirização automática'}
               {currentStep === 'validation' && 'Confirme o peso total e dê um nome para a rota'}
               {currentStep === 'fleet' && (
@@ -251,15 +282,15 @@ export default function NewRoute() {
               {currentStep === 'distribution' && 'Tudo pronto! Crie a rota para prosseguir com os romaneios.'}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             {currentStep === 'orders' && (
               <Tabs value={inputMode} onValueChange={(v) => setInputMode(v as 'auto' | 'manual')}>
-                <TabsList className="grid w-full grid-cols-2 mb-4">
-                  <TabsTrigger value="auto" className="gap-2">
+                <TabsList className="grid w-full grid-cols-2 mb-5 h-12">
+                  <TabsTrigger value="auto" className="gap-2 text-sm">
                     <Zap className="h-4 w-4" />
                     Automático
                   </TabsTrigger>
-                  <TabsTrigger value="manual">Manual</TabsTrigger>
+                  <TabsTrigger value="manual" className="text-sm">Manual</TabsTrigger>
                 </TabsList>
                 <TabsContent value="auto">
                   <DualFileUpload onDataReady={handleAutoDataReady} />
@@ -273,11 +304,12 @@ export default function NewRoute() {
             {currentStep === 'validation' && (
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Nome da Rota *</label>
+                  <label className="text-sm font-semibold">Nome da Rota *</label>
                   <Input
                     value={routeName}
                     onChange={(e) => setRouteName(e.target.value)}
                     placeholder="Ex: Entregas Centro - 21/01"
+                    className="h-12"
                   />
                 </div>
                 <WeightValidation orders={orders} trucks={activeTrucks} />
@@ -298,16 +330,20 @@ export default function NewRoute() {
                 />
                 
                 {fleetConfirmed && (
-                  <div className="mt-4 p-4 rounded-lg bg-success/10 border border-success/30">
-                    <div className="flex items-center gap-2">
-                      <Check className="h-5 w-5 text-success" />
-                      <p className="text-sm text-success font-medium">
-                        Frota confirmada: {selectedTruckIds.length} caminhão(ões)
-                      </p>
+                  <div className="mt-6 p-5 rounded-2xl bg-success/10 border border-success/30">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/20">
+                        <Check className="h-5 w-5 text-success" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-success">
+                          Frota confirmada: {selectedTruckIds.length} caminhão(ões)
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-0.5">
+                          Esta seleção será usada para romaneio e roteirização.
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Esta seleção será usada para romaneio e roteirização. Use "Voltar" para alterar.
-                    </p>
                   </div>
                 )}
               </>
@@ -333,15 +369,17 @@ export default function NewRoute() {
                   return (
                     <>
                       {/* Header com status */}
-                      <div className={`p-4 rounded-lg border-2 ${isValid ? 'bg-success/10 border-success/30' : 'bg-destructive/10 border-destructive/30'}`}>
-                        <div className="flex items-center gap-3">
-                          {isValid ? (
-                            <Check className="h-6 w-6 text-success" />
-                          ) : (
-                            <AlertTriangle className="h-6 w-6 text-destructive" />
-                          )}
+                      <div className={`p-5 rounded-2xl border-2 ${isValid ? 'bg-success/10 border-success/30' : 'bg-destructive/10 border-destructive/30'}`}>
+                        <div className="flex items-center gap-4">
+                          <div className={`flex h-12 w-12 items-center justify-center rounded-xl ${isValid ? 'bg-success/20' : 'bg-destructive/20'}`}>
+                            {isValid ? (
+                              <Check className="h-6 w-6 text-success" />
+                            ) : (
+                              <AlertTriangle className="h-6 w-6 text-destructive" />
+                            )}
+                          </div>
                           <div>
-                            <p className="font-semibold text-lg">
+                            <p className="font-bold text-lg">
                               {isValid ? 'Configuração Validada' : 'Erro de Configuração'}
                             </p>
                             <p className="text-sm text-muted-foreground">
@@ -356,32 +394,23 @@ export default function NewRoute() {
                       
                       {/* Summary of configuration */}
                       <div className="grid gap-4 sm:grid-cols-4">
-                        <div className="rounded-lg border p-4 text-center">
-                          <p className="text-2xl font-bold text-primary">{validOrders.length}</p>
-                          <p className="text-sm text-muted-foreground">Pedidos</p>
-                        </div>
-                        <div className="rounded-lg border p-4 text-center">
-                          <p className="text-2xl font-bold text-primary">{selectedTruckIds.length}</p>
-                          <p className="text-sm text-muted-foreground">de {fleetAnalysis.minimumTrucksRequired} necessários</p>
-                        </div>
-                        <div className="rounded-lg border p-4 text-center">
-                          <p className="text-2xl font-bold text-primary">
-                            {(totalWeight / 1000).toFixed(2).replace('.', ',')} t
-                          </p>
-                          <p className="text-sm text-muted-foreground">Peso Total</p>
-                        </div>
-                        <div className="rounded-lg border p-4 text-center">
-                          <p className={`text-2xl font-bold ${utilizationPercent > 95 ? 'text-warning' : 'text-success'}`}>
-                            {utilizationPercent}%
-                          </p>
-                          <p className="text-sm text-muted-foreground">Ocupação</p>
-                        </div>
+                        {[
+                          { label: 'Pedidos', value: validOrders.length, color: 'text-accent' },
+                          { label: `de ${fleetAnalysis.minimumTrucksRequired} necessários`, value: selectedTruckIds.length, color: 'text-primary' },
+                          { label: 'Peso Total', value: `${(totalWeight / 1000).toFixed(2).replace('.', ',')} t`, color: 'text-info' },
+                          { label: 'Ocupação', value: `${utilizationPercent}%`, color: utilizationPercent > 95 ? 'text-warning' : 'text-success' },
+                        ].map((item, index) => (
+                          <div key={index} className="rounded-2xl border bg-card p-5 text-center shadow-soft">
+                            <p className={`text-3xl font-bold ${item.color}`}>{item.value}</p>
+                            <p className="text-sm text-muted-foreground mt-1">{item.label}</p>
+                          </div>
+                        ))}
                       </div>
                     </>
                   );
                 })()}
                 
-                <div className="text-center space-y-4">
+                <div className="text-center space-y-5 pt-4">
                   <p className="text-muted-foreground">
                     Clique em "Criar Rota" para salvar e prosseguir para os romaneios.
                   </p>
@@ -389,10 +418,10 @@ export default function NewRoute() {
                     size="lg"
                     onClick={handleCreateRoute}
                     disabled={isCreating}
-                    className="min-w-[200px]"
+                    className="h-14 min-w-[240px] bg-gradient-to-r from-cta to-warning text-lg font-semibold shadow-glow-cta hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
                   >
                     {isCreating ? 'Criando...' : 'Criar Rota e Continuar'}
-                    <ArrowRight className="ml-2 h-4 w-4" />
+                    <ArrowRight className="ml-3 h-5 w-5" />
                   </Button>
                 </div>
               </div>
@@ -404,8 +433,10 @@ export default function NewRoute() {
         <div className="flex justify-between">
           <Button
             variant="outline"
+            size="lg"
             onClick={handleBack}
             disabled={currentStep === 'orders'}
+            className="h-12 px-6"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Voltar
@@ -413,7 +444,7 @@ export default function NewRoute() {
 
           {/* Show Continue button for steps that don't have internal confirm */}
           {currentStep !== 'distribution' && currentStep !== 'fleet' && (
-            <Button onClick={handleNext} disabled={!canProceed()}>
+            <Button size="lg" onClick={handleNext} disabled={!canProceed()} className="h-12 px-8">
               Continuar
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
@@ -421,7 +452,7 @@ export default function NewRoute() {
           
           {/* For fleet step when already confirmed, show continue button */}
           {currentStep === 'fleet' && fleetConfirmed && (
-            <Button onClick={handleNext}>
+            <Button size="lg" onClick={handleNext} className="h-12 px-8">
               Continuar
               <ArrowRight className="ml-2 h-4 w-4" />
             </Button>
