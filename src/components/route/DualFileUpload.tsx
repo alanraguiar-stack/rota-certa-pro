@@ -115,25 +115,125 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   const file1InputRef = useRef<HTMLInputElement>(null);
   const file2InputRef = useRef<HTMLInputElement>(null);
   
-  // Processar arquivo com MOTOR INTELIGENTE como primeira opção
+  // Processar arquivo detectando formato ANTES de escolher o parser
   const processFile = async (
     file: File,
     setUploadState: React.Dispatch<React.SetStateAction<UploadState>>
   ): Promise<{ type: string; data: any } | null> => {
     
-    // PRIMEIRO: Tentar o Motor Inteligente para arquivos Excel
+    // PRIMEIRO: Para arquivos Excel, verificar se é formato ADV hierárquico
     if (isExcelFile(file)) {
       setUploadState({
         file,
         status: 'processing',
-        message: 'Analisando planilha com motor inteligente...',
+        message: 'Detectando formato da planilha...',
         data: null,
       });
       
       try {
-        console.log('[DualFileUpload] Usando Motor Inteligente para:', file.name);
+        // Ler dados brutos primeiro para detectar formato
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rawRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
         
-        // Usar o novo motor inteligente
+        console.log('[DualFileUpload] Analisando arquivo:', file.name, '- Linhas:', rawRows.length);
+        
+        // =========================================================================
+        // PRIORIDADE 1: Detectar formato ADV hierárquico (Detalhe das Vendas)
+        // Se detectar padrões de Cliente:/Venda Nº:, usar parser especializado
+        // =========================================================================
+        if (isADVExcelFormat(rawRows)) {
+          console.log('[DualFileUpload] ✅ Formato ADV hierárquico detectado - usando parser especializado');
+          
+          setUploadState({
+            file,
+            status: 'processing',
+            message: 'Processando Detalhe das Vendas...',
+            data: null,
+          });
+          
+          const advOrders = parseADVDetailExcel(rawRows);
+          
+          if (advOrders.length > 0) {
+            // Calcular estatísticas corretas: pedidos únicos e total de itens
+            const uniqueOrderIds = new Set(advOrders.map(o => o.pedido_id));
+            const totalItems = advOrders.reduce((sum, o) => sum + (o.items?.length || 1), 0);
+            const totalWeight = advOrders.reduce((sum, o) => sum + o.weight_kg, 0);
+            
+            console.log('[DualFileUpload] ADV resultado:', {
+              pedidosUnicos: uniqueOrderIds.size,
+              totalItens: totalItems,
+              pesoTotal: totalWeight,
+            });
+            
+            setUploadState({
+              file,
+              status: 'success',
+              message: `${advOrders.length} pedidos | ${totalItems} itens | ${formatWeightIntl(totalWeight)}`,
+              data: advOrders,
+              detectedType: 'adv',
+            });
+            
+            toast({
+              title: '📦 Detalhe das Vendas detectado!',
+              description: `${advOrders.length} pedidos com ${totalItems} itens`,
+            });
+            
+            return { type: 'adv', data: advOrders };
+          }
+        }
+        
+        // =========================================================================
+        // PRIORIDADE 2: Detectar formato Itinerário (Relatório Geral)
+        // =========================================================================
+        const firstRowHeaders = rawRows[0]?.map(c => String(c ?? '')) || [];
+        if (isItinerarioExcelFormat(firstRowHeaders)) {
+          console.log('[DualFileUpload] ✅ Formato Itinerário detectado - usando parser especializado');
+          
+          setUploadState({
+            file,
+            status: 'processing',
+            message: 'Processando Relatório Geral de Vendas...',
+            data: null,
+          });
+          
+          const itinerarioRecords = parseItinerarioExcel(rawRows);
+          
+          if (itinerarioRecords.length > 0) {
+            const totalWeight = itinerarioRecords.reduce((sum, r) => sum + r.weight_kg, 0);
+            
+            setUploadState({
+              file,
+              status: 'success',
+              message: `${itinerarioRecords.length} vendas | ${formatWeightIntl(totalWeight)}`,
+              data: itinerarioRecords,
+              detectedType: 'itinerario',
+            });
+            
+            toast({
+              title: '📍 Relatório Geral detectado!',
+              description: `${itinerarioRecords.length} vendas com endereços (${formatWeightIntl(totalWeight)})`,
+            });
+            
+            return { type: 'itinerario', data: itinerarioRecords };
+          }
+        }
+        
+        // =========================================================================
+        // PRIORIDADE 3: Fallback para Motor Inteligente (formatos genéricos)
+        // =========================================================================
+        console.log('[DualFileUpload] Usando Motor Inteligente como fallback para:', file.name);
+        
+        setUploadState({
+          file,
+          status: 'processing',
+          message: 'Analisando planilha com motor inteligente...',
+          data: null,
+        });
+        
+        // Usar o motor inteligente
         const { analysis, orders: extractedOrders } = await analyzeSpreadsheet(file);
         
         // Verificar se conseguiu extrair dados
@@ -459,15 +559,23 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
     file2Upload.status === 'success' ||
     mergedOrders !== null;
   
-  // Estatísticas
-  const getFileSummary = (upload: UploadState): { count: number; label: string } | null => {
+  // Estatísticas com terminologia correta
+  const getFileSummary = (upload: UploadState): { count: number; label: string; extra?: string } | null => {
     if (upload.status !== 'success' || !upload.data) return null;
     
     if (upload.detectedType === 'itinerario') {
-      return { count: upload.data.length, label: 'endereços' };
+      // Relatório Geral: mostrar "vendas" (cada venda = 1 destino de entrega)
+      return { count: upload.data.length, label: 'vendas' };
     }
     if (upload.detectedType === 'adv') {
-      return { count: upload.data.length, label: 'pedidos' };
+      // Detalhe das Vendas: mostrar pedidos + contagem de itens
+      const orders = upload.data as ParsedOrder[];
+      const totalItems = orders.reduce((sum, o) => sum + (o.items?.length || 1), 0);
+      return { 
+        count: orders.length, 
+        label: 'pedidos',
+        extra: totalItems !== orders.length ? `${totalItems} itens` : undefined 
+      };
     }
     if (upload.detectedType === 'excel' || upload.detectedType === 'generic') {
       return { count: upload.data.validRows || upload.data.orders?.length || 0, label: 'pedidos' };

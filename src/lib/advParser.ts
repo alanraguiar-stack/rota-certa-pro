@@ -481,32 +481,80 @@ function formatCEP(cep: string): string {
 }
 
 /**
+ * Normaliza nome do cliente para comparação
+ * Remove acentos, espaços extras, converte para minúsculas
+ */
+function normalizeClientNameForMatch(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/\s+/g, ' ')            // Espaços múltiplos -> único
+    .replace(/[^\w\s]/g, '')         // Remove pontuação
+    .trim();
+}
+
+/**
  * Cruza dados do Itinerário (endereços) com o Relatório ADV (itens detalhados)
- * A chave de cruzamento é o número da venda (pedido_id / venda_id)
+ * 
+ * ESTRATÉGIA DE CRUZAMENTO (2 níveis):
+ * 1. Primeiro tenta por venda_id/pedido_id (correspondência exata)
+ * 2. Fallback por nome do cliente normalizado (para casos onde ID não bate)
  */
 export function mergeItinerarioWithADV(
   itinerario: ItinerarioRecord[],
   advOrders: ParsedOrder[]
 ): ParsedOrder[] {
+  console.log('[Merge] ═══════════════════════════════════════════════');
   console.log('[Merge] Iniciando cruzamento de dados');
   console.log('[Merge] Itinerário:', itinerario.length, 'registros');
   console.log('[Merge] ADV:', advOrders.length, 'pedidos');
   
-  // Criar mapa de itinerário por venda_id para busca rápida
-  const itinerarioMap = new Map<string, ItinerarioRecord>();
+  // MAPA 1: Por venda_id (correspondência primária)
+  const itinerarioByIdMap = new Map<string, ItinerarioRecord>();
   for (const record of itinerario) {
-    itinerarioMap.set(record.venda_id, record);
+    itinerarioByIdMap.set(record.venda_id, record);
   }
   
-  let matchedCount = 0;
+  // MAPA 2: Por nome do cliente normalizado (fallback)
+  const itinerarioByClientMap = new Map<string, ItinerarioRecord>();
+  for (const record of itinerario) {
+    const normalizedName = normalizeClientNameForMatch(record.client_name);
+    // Só adiciona se não houver duplicatas (primeiro ganha)
+    if (!itinerarioByClientMap.has(normalizedName)) {
+      itinerarioByClientMap.set(normalizedName, record);
+    }
+  }
+  
+  console.log('[Merge] Mapa por ID:', itinerarioByIdMap.size, 'entradas');
+  console.log('[Merge] Mapa por Cliente:', itinerarioByClientMap.size, 'entradas');
+  
+  let matchedById = 0;
+  let matchedByClient = 0;
   let unmatchedCount = 0;
   
   const mergedOrders = advOrders.map(order => {
-    // Buscar endereço pelo número da venda
-    const enderecoData = itinerarioMap.get(order.pedido_id || '');
+    // NÍVEL 1: Buscar por venda_id (pedido_id)
+    let enderecoData = itinerarioByIdMap.get(order.pedido_id || '');
+    let matchType = 'id';
+    
+    // NÍVEL 2: Fallback por nome do cliente normalizado
+    if (!enderecoData && order.client_name) {
+      const normalizedClientName = normalizeClientNameForMatch(order.client_name);
+      enderecoData = itinerarioByClientMap.get(normalizedClientName);
+      matchType = 'client';
+      
+      if (enderecoData) {
+        console.log('[Merge] Fallback por cliente:', order.client_name, '->', enderecoData.venda_id);
+      }
+    }
     
     if (enderecoData) {
-      matchedCount++;
+      if (matchType === 'id') {
+        matchedById++;
+      } else {
+        matchedByClient++;
+      }
       
       // Construir endereço completo
       const addressParts = [
@@ -522,18 +570,20 @@ export function mergeItinerarioWithADV(
       
       const fullAddress = addressParts.join(', ');
       
-      console.log('[Merge] Match:', order.pedido_id, '->', fullAddress.substring(0, 50));
+      console.log('[Merge] ✅ Match (' + matchType + '):', order.pedido_id || order.client_name?.substring(0, 20), '->', fullAddress.substring(0, 40));
       
       return {
         ...order,
         address: fullAddress,
+        // Atualizar peso do itinerário (fonte oficial)
+        weight_kg: enderecoData.weight_kg > 0 ? enderecoData.weight_kg : order.weight_kg,
         isValid: true,
         error: undefined,
       };
     }
     
     unmatchedCount++;
-    console.log('[Merge] Sem match:', order.pedido_id, order.client_name?.substring(0, 20));
+    console.log('[Merge] ❌ Sem match:', order.pedido_id, '|', order.client_name?.substring(0, 25));
     
     // Mantém o pedido sem endereço
     return {
@@ -543,7 +593,13 @@ export function mergeItinerarioWithADV(
     };
   });
   
-  console.log('[Merge] Resultado:', matchedCount, 'cruzados,', unmatchedCount, 'sem endereço');
+  console.log('[Merge] ═══════════════════════════════════════════════');
+  console.log('[Merge] RESULTADO:');
+  console.log('[Merge]   Cruzados por ID:', matchedById);
+  console.log('[Merge]   Cruzados por Cliente:', matchedByClient);
+  console.log('[Merge]   Total cruzados:', matchedById + matchedByClient);
+  console.log('[Merge]   Sem match:', unmatchedCount);
+  console.log('[Merge] ═══════════════════════════════════════════════');
   
   return mergedOrders;
 }
@@ -732,19 +788,62 @@ export function isItinerarioExcelFormat(headers: string[]): boolean {
 /**
  * Detecta se Excel é formato de Detalhe das Vendas MB (ADV hierárquico)
  * Padrões: linhas com "Cliente:", "Venda Nº:", e colunas Qtde./Descrição
+ * 
+ * IMPORTANTE: Esta função detecta formatos hierárquicos que NÃO devem ser
+ * processados pelo motor inteligente linha-por-linha.
  */
 export function isADVExcelFormat(rows: unknown[][]): boolean {
-  const text = rows.map(r => r.map(c => String(c ?? '')).join(' ')).join('\n');
+  // Analisar apenas as primeiras 50 linhas para performance
+  const sampleRows = rows.slice(0, 50);
+  const text = sampleRows.map(r => r.map(c => String(c ?? '')).join(' ')).join('\n');
   
-  const hasCliente = /cliente\s*:/i.test(text);
-  const hasVenda = /venda\s*n[º°]?\s*:/i.test(text);
+  // Padrões de estrutura hierárquica
+  const hasClienteMarker = /cliente\s*:/i.test(text);
+  const hasVendaMarker = /venda\s*n[º°]?\s*:/i.test(text);
+  
+  // Padrões de tabela de itens
   const hasQtde = /qtde\.?/i.test(text) || /quantidade/i.test(text);
   const hasDescricao = /descri[çc][ãa]o/i.test(text);
+  const hasProduto = /produto/i.test(text);
+  const hasCodigo = /c[óo]digo/i.test(text);
   
-  console.log('[ADV Excel] Detecção:', { hasCliente, hasVenda, hasQtde, hasDescricao });
+  // Padrões adicionais de detalhe de vendas
+  const hasNFe = /nfe?\s*n[º°]?\s*:/i.test(text);
+  const hasData = /data\s*:/i.test(text);
   
-  // Precisa ter Cliente + Venda + (Qtde ou Descrição)
-  return hasCliente && hasVenda && (hasQtde || hasDescricao);
+  // Contar quantas linhas têm marcadores hierárquicos
+  let clienteMarkerCount = 0;
+  let vendaMarkerCount = 0;
+  for (const row of sampleRows) {
+    const rowText = row.map(c => String(c ?? '')).join(' ');
+    if (/cliente\s*:/i.test(rowText)) clienteMarkerCount++;
+    if (/venda\s*n[º°]?\s*:/i.test(rowText)) vendaMarkerCount++;
+  }
+  
+  console.log('[ADV Excel] Detecção de formato hierárquico:', { 
+    hasClienteMarker, 
+    hasVendaMarker, 
+    hasQtde, 
+    hasDescricao,
+    hasProduto,
+    hasCodigo,
+    hasNFe,
+    hasData,
+    clienteMarkerCount,
+    vendaMarkerCount
+  });
+  
+  // DETECÇÃO PRINCIPAL: Cliente + Venda + (Qtde ou Descrição ou Produto)
+  const isHierarchical = hasClienteMarker && hasVendaMarker && (hasQtde || hasDescricao || hasProduto);
+  
+  // DETECÇÃO ALTERNATIVA: Múltiplos marcadores de cliente/venda indicam estrutura hierárquica
+  const hasMultipleMarkers = clienteMarkerCount >= 2 || vendaMarkerCount >= 2;
+  
+  const isADV = isHierarchical || (hasMultipleMarkers && (hasQtde || hasDescricao));
+  
+  console.log('[ADV Excel] Resultado:', isADV ? '✅ É formato ADV hierárquico' : '❌ Não é ADV');
+  
+  return isADV;
 }
 
 /**
