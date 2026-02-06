@@ -39,8 +39,7 @@ const secondaryMenuItems = [
 export function AppSidebar() {
   const { signOut, user } = useAuth();
   const navigate = useNavigate();
-  const { state, setOpen } = useSidebar();
-  const isCollapsed = state === 'collapsed';
+  const { state } = useSidebar();
   const [isHovering, setIsHovering] = useState(false);
 
   const handleSignOut = async () => {
@@ -48,22 +47,22 @@ export function AppSidebar() {
     navigate('/login', { replace: true });
   };
 
-  // Expand on hover when collapsed
+  // Se o sidebar foi manualmente expandido (via trigger), mostrar
+  // Se não, mostrar apenas durante hover
+  const isManuallyExpanded = state === 'expanded';
+  const showExpanded = isManuallyExpanded || isHovering;
+
   const handleMouseEnter = () => {
-    if (isCollapsed) {
+    if (!isManuallyExpanded) {
       setIsHovering(true);
-      setOpen(true);
     }
   };
 
   const handleMouseLeave = () => {
-    if (isHovering) {
+    if (!isManuallyExpanded) {
       setIsHovering(false);
-      setOpen(false);
     }
   };
-
-  const showExpanded = !isCollapsed || isHovering;
 
   return (
     <TooltipProvider delayDuration={0}>
