@@ -115,7 +115,7 @@ export function AppSidebar() {
                             )}
                             activeClassName="bg-sidebar-accent text-sidebar-primary font-semibold before:absolute before:left-0 before:top-1/2 before:h-8 before:-translate-y-1/2 before:w-1 before:rounded-r-full before:bg-sidebar-primary"
                           >
-                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors group-hover:bg-sidebar-accent/60">
                               <item.icon className="h-5 w-5 shrink-0" />
                             </div>
                             {showExpanded && (
@@ -162,7 +162,7 @@ export function AppSidebar() {
                             )}
                             activeClassName="bg-sidebar-accent text-sidebar-primary font-semibold"
                           >
-                            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors group-hover:bg-sidebar-accent/60">
                               <item.icon className="h-5 w-5 shrink-0" />
                             </div>
                             {showExpanded && (
@@ -192,7 +192,7 @@ export function AppSidebar() {
                             "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
                           )}
                         >
-                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors group-hover:bg-sidebar-accent/60">
                             <HelpCircle className="h-5 w-5 shrink-0" />
                           </div>
                           {showExpanded && (
