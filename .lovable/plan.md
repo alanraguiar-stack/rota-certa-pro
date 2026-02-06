@@ -1,116 +1,71 @@
 
-# Plano: Corrigir Cruzamento de Dados entre Relatório Geral e Detalhe das Vendas
+# Plano: Corrigir Destaque Persistente no Menu da Sidebar
 
 ## Problema Identificado
 
-O sistema está processando o arquivo "Detalhe das Vendas MB.xlsx" incorretamente:
-- **Atual:** O Motor Inteligente trata cada linha como um pedido separado → 171 "pedidos"
-- **Correto:** O parser hierárquico ADV deveria agrupar linhas por número da venda → 73 pedidos com 171 itens
+Quando o usuário passa o mouse sobre a sidebar e depois move para fora, os ícones/itens do menu permanecem visualmente "marcados" (com destaque). Isso acontece por dois motivos:
 
-O cruzamento falha porque:
-- O Relatório Geral tem 73 registros com `venda_id` correto (ex: "276017")
-- O Detalhe está gerando IDs como `"CLIENTE::linha"` em vez do número da venda
-- A função `mergeItinerarioWithADV` não consegue encontrar correspondência
+1. **Estado do Tooltip**: O componente `Tooltip` do Radix UI adiciona `data-state="open"` ao trigger quando está visível. Os estilos do `SidebarMenuButton` incluem `data-[state=open]:hover:bg-sidebar-accent` que pode manter o destaque
+2. **Background fixo nos ícones**: Cada ícone tem `bg-sidebar-accent/50` aplicado permanentemente, criando confusão visual sobre qual está ativo
 
-## Solução em 4 Partes
+## Solução
 
-### 1. Priorizar Parser Hierárquico para Detalhe das Vendas
+### 1. Remover Background Fixo dos Ícones
 
-Modificar `DualFileUpload.tsx` para detectar o formato ADV ANTES de usar o Motor Inteligente:
+Modificar os containers dos ícones em `AppSidebar.tsx` para não terem fundo por padrão, apenas no hover:
 
-```typescript
-// Se detectar padrões hierárquicos (Cliente:, Venda Nº:), usar parseADVDetailExcel
-if (isADVExcelFormat(rows)) {
-  const advOrders = parseADVDetailExcel(rows);
-  // Isso agrupa itens por venda = 73 pedidos, não 171
-}
+**Antes:**
+```tsx
+<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent">
 ```
 
-### 2. Melhorar Detecção de Formato ADV
-
-O arquivo "Detalhe das Vendas MB.xlsx" pode ter um formato ligeiramente diferente. Atualizar `isADVExcelFormat()` para detectar padrões adicionais como:
-- Linhas com "Produto" ou "Descrição"
-- Estrutura hierárquica com linhas de cliente/venda intercaladas
-
-### 3. Implementar Cruzamento por Nome do Cliente (Fallback)
-
-Atualizar `mergeItinerarioWithADV()` para:
-1. **Primeira tentativa:** Cruzar por `venda_id`/`pedido_id`
-2. **Segunda tentativa:** Cruzar por nome do cliente (normalizado)
-
-```typescript
-// Criar mapa adicional por nome do cliente
-const clienteMap = new Map<string, ItinerarioRecord>();
-for (const record of itinerario) {
-  const normalizedName = normalizeClientName(record.client_name);
-  clienteMap.set(normalizedName, record);
-}
-
-// No cruzamento, tentar por ID primeiro, depois por nome
-let enderecoData = itinerarioMap.get(order.pedido_id);
-if (!enderecoData) {
-  enderecoData = clienteMap.get(normalizeClientName(order.client_name));
-}
+**Depois:**
+```tsx
+<div className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors group-hover:bg-sidebar-accent/50">
 ```
 
-### 4. Corrigir Labels na UI
+### 2. Simplificar Estrutura do Menu
 
-Atualizar `getFileSummary()` para mostrar terminologia correta:
-- Relatório Geral: "73 vendas" (vendas = pedidos com endereço)
-- Detalhe das Vendas: "171 itens em 73 pedidos" (itens ≠ pedidos)
+Remover a estrutura aninhada de Tooltip dentro de SidebarMenuButton, usando a prop `tooltip` nativa do SidebarMenuButton quando disponível.
+
+### 3. Garantir que Estilos de Hover Resetem Corretamente
+
+Adicionar transições CSS mais explícitas e garantir que o estado visual dependa apenas de `:hover` e da rota ativa (via `activeClassName`).
 
 ## Arquivos a Modificar
 
-1. **`src/components/route/DualFileUpload.tsx`**
-   - Adicionar detecção de formato ADV antes do Motor Inteligente
-   - Corrigir labels de exibição ("itens" vs "pedidos")
-   - Calcular e exibir número correto de pedidos únicos
+### `src/components/layout/AppSidebar.tsx`
 
-2. **`src/lib/advParser.ts`**
-   - Melhorar `isADVExcelFormat()` para detectar mais padrões
-   - Melhorar `parseADVDetailExcel()` para extrair `pedido_id` corretamente
-   - Atualizar `mergeItinerarioWithADV()` com fallback por nome do cliente
-   - Adicionar normalização de nomes para comparação
-
-3. **`src/lib/spreadsheet/intelligentReader.ts`**
-   - Adicionar detecção de formato hierárquico para evitar processamento incorreto
-   - Redirecionar para parser ADV quando detectar padrões de Cliente:/Venda Nº:
+1. Remover `bg-sidebar-accent/50` dos containers de ícone (manter apenas no hover)
+2. Simplificar a estrutura do Tooltip para evitar estados persistentes
+3. Remover classes redundantes de hover no NavLink
 
 ## Detalhes Técnicos
 
-### Normalização de Nome para Cruzamento
+### Mudanças nos Itens do Menu Principal (mainMenuItems)
 
-```typescript
-function normalizeClientName(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-    .replace(/\s+/g, ' ')            // Espaços únicos
-    .trim();
-}
+```tsx
+// Container do ícone - remover background fixo
+<div className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors group-hover:bg-sidebar-accent/60">
+  <item.icon className="h-5 w-5 shrink-0" />
+</div>
 ```
 
-### Estrutura Esperada Após Correção
+### Mudanças nos Itens Secundários
 
-```text
-Relatório Geral:
-  - 73 registros com venda_id + endereço + peso
+Aplicar a mesma lógica para manter consistência visual.
 
-Detalhe das Vendas:
-  - 73 pedidos (agrupados por venda_id)
-  - Cada pedido contém N itens
-  - Total: 171 itens
+### Mudanças no Botão de Ajuda
 
-Cruzamento:
-  - Match por venda_id → 73 pedidos cruzados
-  - Fallback por cliente → captura casos onde ID não bate
-```
+Aplicar a mesma lógica.
+
+### Mudanças no Botão Sair
+
+Manter o estilo atual pois já está correto (sem background fixo).
 
 ## Resultado Esperado
 
-Após as correções:
-- ✅ "73 vendas | 13,05 t" no Relatório Geral
-- ✅ "73 pedidos | 171 itens" no Detalhe das Vendas
-- ✅ "Cruzamento concluído: 73 pedidos cruzados com sucesso"
-- ✅ Peso total mantido (~13 toneladas)
+- Ícones aparecem sem fundo quando não estão sendo "hovered"
+- Ao passar o mouse, o fundo aparece suavemente
+- Ao tirar o mouse, o fundo desaparece imediatamente
+- Apenas o item da rota ativa permanece destacado (Dashboard quando em `/`)
