@@ -1,71 +1,121 @@
 
-# Plano: Corrigir Destaque Persistente no Menu da Sidebar
+# Plano: Corrigir Sidebar para Colapsar Corretamente ao Remover o Mouse
 
 ## Problema Identificado
 
-Quando o usuário passa o mouse sobre a sidebar e depois move para fora, os ícones/itens do menu permanecem visualmente "marcados" (com destaque). Isso acontece por dois motivos:
+Quando o usuário move o mouse para fora da sidebar, os nomes dos itens (Dashboard, Roteirização, etc.) continuam aparecendo em vez de sumir. Isso acontece por causa de um problema na lógica de estados:
 
-1. **Estado do Tooltip**: O componente `Tooltip` do Radix UI adiciona `data-state="open"` ao trigger quando está visível. Os estilos do `SidebarMenuButton` incluem `data-[state=open]:hover:bg-sidebar-accent` que pode manter o destaque
-2. **Background fixo nos ícones**: Cada ícone tem `bg-sidebar-accent/50` aplicado permanentemente, criando confusão visual sobre qual está ativo
+1. A sidebar começa colapsada (`defaultOpen={false}`)
+2. Ao passar o mouse, `setOpen(true)` muda o `state` para `'expanded'`
+3. Isso faz `isCollapsed = false`
+4. O `handleMouseLeave` verifica `if (isHovering)`, mas há uma condição de corrida onde o estado pode não atualizar corretamente
+
+## Causa Raiz
+
+A lógica atual mistura dois conceitos:
+- **Estado do Sidebar** (controlado pelo `SidebarProvider`): `open/collapsed`
+- **Estado local de hover** (`isHovering`)
+
+Quando `setOpen(true)` é chamado, o `state` muda para `'expanded'`, e a variável `showExpanded` depende de `!isCollapsed`, que agora é `true`. Mas quando o mouse sai, há um delay ou o estado não reseta corretamente.
 
 ## Solução
 
-### 1. Remover Background Fixo dos Ícones
+Simplificar a lógica para usar APENAS o estado local de hover para controlar a exibição, sem depender do `state` do sidebar:
 
-Modificar os containers dos ícones em `AppSidebar.tsx` para não terem fundo por padrão, apenas no hover:
-
-**Antes:**
-```tsx
-<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-accent/50 transition-colors group-hover:bg-sidebar-accent">
-```
-
-**Depois:**
-```tsx
-<div className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors group-hover:bg-sidebar-accent/50">
-```
-
-### 2. Simplificar Estrutura do Menu
-
-Remover a estrutura aninhada de Tooltip dentro de SidebarMenuButton, usando a prop `tooltip` nativa do SidebarMenuButton quando disponível.
-
-### 3. Garantir que Estilos de Hover Resetem Corretamente
-
-Adicionar transições CSS mais explícitas e garantir que o estado visual dependa apenas de `:hover` e da rota ativa (via `activeClassName`).
+1. Remover a dependência de `isCollapsed` do cálculo de `showExpanded`
+2. Usar apenas `isHovering` como fonte de verdade para expansão visual
+3. Manter o sidebar sempre no modo `icon` (colapsado) e controlar visualmente via CSS
 
 ## Arquivos a Modificar
 
 ### `src/components/layout/AppSidebar.tsx`
 
-1. Remover `bg-sidebar-accent/50` dos containers de ícone (manter apenas no hover)
-2. Simplificar a estrutura do Tooltip para evitar estados persistentes
-3. Remover classes redundantes de hover no NavLink
+1. Simplificar a lógica de hover para não depender do `state` do sidebar
+2. Usar apenas `isHovering` para controlar `showExpanded`
+3. Remover chamadas a `setOpen()` que causam efeitos colaterais
+
+```tsx
+// Antes - problemático
+const handleMouseEnter = () => {
+  if (isCollapsed) {
+    setIsHovering(true);
+    setOpen(true);  // Isso muda o state global
+  }
+};
+
+const handleMouseLeave = () => {
+  if (isHovering) {
+    setIsHovering(false);
+    setOpen(false);
+  }
+};
+
+const showExpanded = !isCollapsed || isHovering;  // Depende de isCollapsed
+```
+
+```tsx
+// Depois - simplificado
+const handleMouseEnter = () => {
+  setIsHovering(true);
+};
+
+const handleMouseLeave = () => {
+  setIsHovering(false);
+};
+
+// Sempre mostrar expandido quando hovering, independente do state global
+const showExpanded = isHovering;
+```
 
 ## Detalhes Técnicos
 
-### Mudanças nos Itens do Menu Principal (mainMenuItems)
+### Mudanças Específicas
+
+1. **Remover lógica condicional no handleMouseEnter/Leave**
+   - Não verificar `isCollapsed` - sempre reagir ao hover
+   - Não chamar `setOpen()` - deixar o sidebar gerenciar seu próprio estado
+
+2. **Simplificar `showExpanded`**
+   - Usar apenas `isHovering` como fonte de verdade
+   - Quando hover = true → mostrar nomes
+   - Quando hover = false → esconder nomes
+
+3. **Manter compatibilidade com SidebarTrigger**
+   - O botão de menu no header ainda deve funcionar para expandir/colapsar manualmente
+   - Adicionar lógica para respeitar quando o usuário clica no trigger
+
+### Lógica Final Proposta
 
 ```tsx
-// Container do ícone - remover background fixo
-<div className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors group-hover:bg-sidebar-accent/60">
-  <item.icon className="h-5 w-5 shrink-0" />
-</div>
+const { state } = useSidebar();
+const [isHovering, setIsHovering] = useState(false);
+
+// Se o sidebar foi manualmente expandido (via trigger), mostrar
+// Se não, mostrar apenas durante hover
+const isManuallyExpanded = state === 'expanded';
+const showExpanded = isManuallyExpanded || isHovering;
+
+const handleMouseEnter = () => {
+  if (!isManuallyExpanded) {
+    setIsHovering(true);
+  }
+};
+
+const handleMouseLeave = () => {
+  if (!isManuallyExpanded) {
+    setIsHovering(false);
+  }
+};
 ```
 
-### Mudanças nos Itens Secundários
-
-Aplicar a mesma lógica para manter consistência visual.
-
-### Mudanças no Botão de Ajuda
-
-Aplicar a mesma lógica.
-
-### Mudanças no Botão Sair
-
-Manter o estilo atual pois já está correto (sem background fixo).
+Isso garante que:
+- Hover funciona para expandir temporariamente
+- Quando mouse sai, colapsa imediatamente
+- Se usuário clicar no trigger, sidebar fica expandida até clicar novamente
 
 ## Resultado Esperado
 
-- Ícones aparecem sem fundo quando não estão sendo "hovered"
-- Ao passar o mouse, o fundo aparece suavemente
-- Ao tirar o mouse, o fundo desaparece imediatamente
-- Apenas o item da rota ativa permanece destacado (Dashboard quando em `/`)
+- Passar mouse sobre sidebar → nomes aparecem
+- Tirar mouse → nomes desaparecem imediatamente
+- Clicar no botão de menu → sidebar expande/colapsa permanentemente
+- Dashboard (rota ativa) permanece destacada
