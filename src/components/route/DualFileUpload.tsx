@@ -79,6 +79,7 @@ interface MergeSummary {
   total: number;
   matched: number;
   unmatched: number;
+  unmatchedOrders: { client_name: string; pedido_id: string }[];
 }
 
 // Usar formatWeight local para consistência, mas disponibilizar o inteligente também
@@ -483,6 +484,9 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         total: merged.length,
         matched: matchedCount,
         unmatched: unmatchedCount,
+        unmatchedOrders: merged
+          .filter(o => !o.isValid)
+          .map(o => ({ client_name: o.client_name, pedido_id: o.pedido_id || '' })),
       });
       
       toast({
@@ -793,10 +797,24 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         )}>
           <Link2 className="h-4 w-4" />
           <AlertDescription>
-            <strong>Cruzamento concluído:</strong>{' '}
-            <span className="text-success font-medium">{mergeSummary.matched} pedidos</span> cruzados com sucesso
-            {mergeSummary.unmatched > 0 && (
-              <>, <span className="text-warning font-medium">{mergeSummary.unmatched} pedidos</span> sem endereço correspondente</>
+            <div>
+              <strong>Cruzamento concluído:</strong>{' '}
+              <span className="text-success font-medium">{mergeSummary.matched} pedidos</span> cruzados com sucesso
+              {mergeSummary.unmatched > 0 && (
+                <>, <span className="text-warning font-medium">{mergeSummary.unmatched} pedidos</span> sem endereço correspondente</>
+              )}
+            </div>
+            {mergeSummary.unmatchedOrders.length > 0 && (
+              <div className="mt-3 text-sm text-muted-foreground">
+                <strong className="text-foreground">Pedidos sem correspondência:</strong>
+                <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                  {mergeSummary.unmatchedOrders.map((o, i) => (
+                    <li key={i}>
+                      {o.client_name} {o.pedido_id && <span className="text-muted-foreground">(Venda: {o.pedido_id})</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </AlertDescription>
         </Alert>
