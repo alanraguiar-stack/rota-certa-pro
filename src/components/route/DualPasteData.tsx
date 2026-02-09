@@ -39,6 +39,7 @@ interface MergeSummary {
   total: number;
   matched: number;
   unmatched: number;
+  unmatchedOrders: { client_name: string; pedido_id: string }[];
 }
 
 // Detectar tipo de dados colados
@@ -310,7 +311,23 @@ function parseADVData(text: string): { orders: ParsedOrder[]; vendaIds: Set<stri
   return { orders, vendaIds };
 }
 
-// Cruzar itinerário com ADV
+// Normalizar venda_id para comparação
+function normalizeVendaId(id: string): string {
+  return id.replace(/\D/g, '').replace(/^0+/, '') || '0';
+}
+
+// Normalizar nome para comparação
+function normalizeClientNameForMatch(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/[^\w\s]/g, '')
+    .trim();
+}
+
+// Cruzar itinerário com ADV (3 níveis de matching)
 function mergeItinerarioWithADV(
   itinerarioRecords: any[], 
   advOrders: ParsedOrder[]
@@ -318,16 +335,54 @@ function mergeItinerarioWithADV(
   const merged: ParsedOrder[] = [];
   const advMap = new Map<string, ParsedOrder>();
   
-  // Indexar ADV por pedido_id
+  // Indexar ADV por pedido_id NORMALIZADO
   advOrders.forEach(order => {
     if (order.pedido_id) {
-      advMap.set(order.pedido_id, order);
+      advMap.set(normalizeVendaId(order.pedido_id), order);
     }
   });
   
+  // Mapa por nome normalizado para fallback
+  const advByClientMap = new Map<string, ParsedOrder>();
+  advOrders.forEach(order => {
+    if (order.client_name) {
+      const norm = normalizeClientNameForMatch(order.client_name);
+      if (!advByClientMap.has(norm)) {
+        advByClientMap.set(norm, order);
+      }
+    }
+  });
+  
+  const usedAdvIds = new Set<string>();
+  
   // Cruzar com itinerário
   itinerarioRecords.forEach(record => {
-    const advOrder = advMap.get(record.pedido_id);
+    const normalizedId = normalizeVendaId(record.pedido_id || '');
+    let advOrder = advMap.get(normalizedId);
+    
+    // Nível 2: fallback por nome exato
+    if (!advOrder && record.client_name) {
+      const normName = normalizeClientNameForMatch(record.client_name);
+      advOrder = advByClientMap.get(normName);
+    }
+    
+    // Nível 3: fallback por nome parcial
+    if (!advOrder && record.client_name) {
+      const normName = normalizeClientNameForMatch(record.client_name);
+      if (normName.length >= 5) {
+        for (const [key, order] of advByClientMap) {
+          if (usedAdvIds.has(normalizeVendaId(order.pedido_id || ''))) continue;
+          if (key.includes(normName) || normName.includes(key)) {
+            advOrder = order;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (advOrder) {
+      usedAdvIds.add(normalizeVendaId(advOrder.pedido_id || ''));
+    }
     
     merged.push({
       pedido_id: record.pedido_id,
@@ -339,7 +394,9 @@ function mergeItinerarioWithADV(
     });
     
     // Remover do mapa para saber quais sobraram
-    advMap.delete(record.pedido_id);
+    if (advOrder) {
+      advMap.delete(normalizeVendaId(advOrder.pedido_id || ''));
+    }
   });
   
   // Adicionar pedidos ADV que não tiveram match
@@ -548,6 +605,9 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
         total: merged.length,
         matched: matchedCount,
         unmatched: unmatchedCount,
+        unmatchedOrders: merged
+          .filter(o => !o.isValid)
+          .map(o => ({ client_name: o.client_name, pedido_id: o.pedido_id || '' })),
       });
       
       toast({
@@ -871,9 +931,11 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       
       {/* Merge Summary */}
       {mergeSummary && (
-        <Alert className="bg-primary/5 border-primary/30">
+        <Alert className={cn(
+          mergeSummary.unmatched > 0 ? 'border-warning bg-warning/5' : 'bg-primary/5 border-primary/30'
+        )}>
           <Link2 className="h-4 w-4" />
-          <AlertDescription className="flex items-center justify-between">
+          <AlertDescription>
             <div>
               <strong>Cruzamento concluído:</strong>{' '}
               <Badge variant="default" className="ml-2">{mergeSummary.matched} cruzados</Badge>
@@ -881,6 +943,18 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
                 <Badge variant="outline" className="ml-2">{mergeSummary.unmatched} sem match</Badge>
               )}
             </div>
+            {mergeSummary.unmatchedOrders.length > 0 && (
+              <div className="mt-3 text-sm text-muted-foreground">
+                <strong className="text-foreground">Pedidos sem correspondência:</strong>
+                <ul className="list-disc ml-5 mt-1 space-y-0.5">
+                  {mergeSummary.unmatchedOrders.map((o, i) => (
+                    <li key={i}>
+                      {o.client_name} {o.pedido_id && <span className="text-muted-foreground">(Venda: {o.pedido_id})</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </AlertDescription>
         </Alert>
       )}

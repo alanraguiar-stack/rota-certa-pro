@@ -495,11 +495,20 @@ function normalizeClientNameForMatch(name: string): string {
 }
 
 /**
+ * Normaliza venda_id para comparação
+ * Remove caracteres não numéricos e zeros à esquerda
+ */
+function normalizeVendaId(id: string): string {
+  return id.replace(/\D/g, '').replace(/^0+/, '') || '0';
+}
+
+/**
  * Cruza dados do Itinerário (endereços) com o Relatório ADV (itens detalhados)
  * 
- * ESTRATÉGIA DE CRUZAMENTO (2 níveis):
- * 1. Primeiro tenta por venda_id/pedido_id (correspondência exata)
- * 2. Fallback por nome do cliente normalizado (para casos onde ID não bate)
+ * ESTRATÉGIA DE CRUZAMENTO (3 níveis):
+ * 1. Primeiro tenta por venda_id normalizado (sem zeros à esquerda)
+ * 2. Fallback por nome do cliente normalizado (correspondência exata)
+ * 3. Fallback por nome parcial do cliente (contém/está contido)
  */
 export function mergeItinerarioWithADV(
   itinerario: ItinerarioRecord[],
@@ -510,10 +519,11 @@ export function mergeItinerarioWithADV(
   console.log('[Merge] Itinerário:', itinerario.length, 'registros');
   console.log('[Merge] ADV:', advOrders.length, 'pedidos');
   
-  // MAPA 1: Por venda_id (correspondência primária)
+  // MAPA 1: Por venda_id NORMALIZADO (sem zeros à esquerda, só dígitos)
   const itinerarioByIdMap = new Map<string, ItinerarioRecord>();
   for (const record of itinerario) {
-    itinerarioByIdMap.set(record.venda_id, record);
+    const normalizedId = normalizeVendaId(record.venda_id);
+    itinerarioByIdMap.set(normalizedId, record);
   }
   
   // MAPA 2: Por nome do cliente normalizado (fallback)
@@ -526,19 +536,24 @@ export function mergeItinerarioWithADV(
     }
   }
   
-  console.log('[Merge] Mapa por ID:', itinerarioByIdMap.size, 'entradas');
+  console.log('[Merge] Mapa por ID normalizado:', itinerarioByIdMap.size, 'entradas');
   console.log('[Merge] Mapa por Cliente:', itinerarioByClientMap.size, 'entradas');
   
   let matchedById = 0;
   let matchedByClient = 0;
+  let matchedByPartialClient = 0;
   let unmatchedCount = 0;
   
+  // Track used itinerario records for partial matching (avoid double-match)
+  const usedItinerarioIds = new Set<string>();
+  
   const mergedOrders = advOrders.map(order => {
-    // NÍVEL 1: Buscar por venda_id (pedido_id)
-    let enderecoData = itinerarioByIdMap.get(order.pedido_id || '');
+    // NÍVEL 1: Buscar por venda_id NORMALIZADO
+    const normalizedOrderId = normalizeVendaId(order.pedido_id || '');
+    let enderecoData = itinerarioByIdMap.get(normalizedOrderId);
     let matchType = 'id';
     
-    // NÍVEL 2: Fallback por nome do cliente normalizado
+    // NÍVEL 2: Fallback por nome do cliente normalizado (exato)
     if (!enderecoData && order.client_name) {
       const normalizedClientName = normalizeClientNameForMatch(order.client_name);
       enderecoData = itinerarioByClientMap.get(normalizedClientName);
@@ -549,12 +564,32 @@ export function mergeItinerarioWithADV(
       }
     }
     
+    // NÍVEL 3: Busca parcial por nome do cliente (contém/está contido)
+    if (!enderecoData && order.client_name) {
+      const normName = normalizeClientNameForMatch(order.client_name);
+      if (normName.length >= 5) { // Só busca parcial se nome tem tamanho razoável
+        for (const [key, record] of itinerarioByClientMap) {
+          if (usedItinerarioIds.has(record.venda_id)) continue;
+          if (key.includes(normName) || normName.includes(key)) {
+            enderecoData = record;
+            matchType = 'partial_client';
+            console.log('[Merge] Fallback parcial:', order.client_name, '->', record.client_name);
+            break;
+          }
+        }
+      }
+    }
+    
     if (enderecoData) {
       if (matchType === 'id') {
         matchedById++;
+      } else if (matchType === 'partial_client') {
+        matchedByPartialClient++;
       } else {
         matchedByClient++;
       }
+      
+      usedItinerarioIds.add(enderecoData.venda_id);
       
       // Construir endereço completo
       const addressParts = [
@@ -597,7 +632,8 @@ export function mergeItinerarioWithADV(
   console.log('[Merge] RESULTADO:');
   console.log('[Merge]   Cruzados por ID:', matchedById);
   console.log('[Merge]   Cruzados por Cliente:', matchedByClient);
-  console.log('[Merge]   Total cruzados:', matchedById + matchedByClient);
+  console.log('[Merge]   Cruzados por Nome Parcial:', matchedByPartialClient);
+  console.log('[Merge]   Total cruzados:', matchedById + matchedByClient + matchedByPartialClient);
   console.log('[Merge]   Sem match:', unmatchedCount);
   console.log('[Merge] ═══════════════════════════════════════════════');
   
