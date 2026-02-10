@@ -73,6 +73,11 @@ function OrderCard({
   onMoveDown,
   isFirst,
   isLast,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  isDragTarget,
 }: { 
   order: Order; 
   sequence: number;
@@ -83,6 +88,11 @@ function OrderCard({
   onMoveDown: () => void;
   isFirst: boolean;
   isLast: boolean;
+  onDragStart?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+  onDragEnd?: () => void;
+  isDragTarget?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
@@ -90,15 +100,35 @@ function OrderCard({
   const hasItems = orderItems.length > 0;
   
   return (
-    <div className={cn(
-      "rounded-lg border bg-card transition-all",
-      isLocked ? "opacity-75" : "hover:shadow-md"
-    )}>
+    <div 
+      className={cn(
+        "rounded-lg border bg-card transition-all",
+        isLocked ? "opacity-75" : "hover:shadow-md",
+        isDragTarget && "border-primary border-2 shadow-lg",
+        !isLocked && "cursor-grab active:cursor-grabbing"
+      )}
+      draggable={!isLocked}
+      onDragStart={(e) => {
+        if (isLocked) return;
+        e.dataTransfer.effectAllowed = 'move';
+        onDragStart?.();
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        onDragOver?.(e);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop?.(e);
+      }}
+      onDragEnd={onDragEnd}
+    >
       <div className="flex items-center gap-3 p-3">
         {/* Sequence Number & Drag Handle */}
         <div className="flex items-center gap-1">
           {!isLocked && (
-            <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab" />
+            <GripVertical className="h-4 w-4 text-muted-foreground" />
           )}
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm">
             {sequence}
@@ -224,6 +254,8 @@ function TruckTab({
   isProcessing?: boolean;
 }) {
   const { toast } = useToast();
+  const [draggedOrderId, setDraggedOrderId] = useState<string | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
   
   const handleMoveToTruck = useCallback(async (orderId: string, toTruckId: string) => {
     try {
@@ -257,6 +289,23 @@ function TruckTab({
       });
     }
   }, [truckData, onReorder, toast]);
+
+  const handleDragDrop = useCallback(async (targetIndex: number) => {
+    if (draggedOrderId === null) return;
+    const sourceIndex = truckData.orders.findIndex(o => o.id === draggedOrderId);
+    if (sourceIndex === -1 || sourceIndex === targetIndex) return;
+    
+    const newSequence = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex;
+    
+    try {
+      await onReorder(truckData.routeTruckId, draggedOrderId, newSequence + 1);
+    } catch (error) {
+      toast({
+        title: 'Erro ao reordenar',
+        variant: 'destructive',
+      });
+    }
+  }, [draggedOrderId, truckData, onReorder, toast]);
   
   const handleLockToggle = useCallback(async () => {
     try {
@@ -287,7 +336,7 @@ function TruckTab({
     return otherTrucks.map(t => ({
       id: t.routeTruckId,
       plate: t.truck.plate,
-      canFit: t.occupancyPercent < 95, // Simplified check
+      canFit: t.occupancyPercent < 95,
     }));
   }, [otherTrucks]);
   
@@ -320,7 +369,6 @@ function TruckTab({
         </div>
         
         <div className="flex items-center gap-4">
-          {/* Stats */}
           <div className="flex gap-4 text-center">
             <div>
               <p className="text-xl font-bold">{truckData.orders.length}</p>
@@ -341,7 +389,6 @@ function TruckTab({
             </div>
           </div>
           
-          {/* Lock/Unlock Button */}
           <Button
             variant={truckData.isLocked ? "outline" : "default"}
             onClick={handleLockToggle}
@@ -390,7 +437,7 @@ function TruckTab({
       {/* Orders List */}
       <div className="space-y-2">
         <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
-          Sequência de Entregas
+          Sequência de Entregas {!truckData.isLocked && '(arraste para reordenar)'}
         </h4>
         
         {truckData.orders.length === 0 ? (
@@ -412,6 +459,22 @@ function TruckTab({
                 onMoveDown={() => handleReorder(order.id, 'down')}
                 isFirst={idx === 0}
                 isLast={idx === truckData.orders.length - 1}
+                onDragStart={() => setDraggedOrderId(order.id)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDropTargetIndex(idx);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDragDrop(idx);
+                  setDraggedOrderId(null);
+                  setDropTargetIndex(null);
+                }}
+                onDragEnd={() => {
+                  setDraggedOrderId(null);
+                  setDropTargetIndex(null);
+                }}
+                isDragTarget={dropTargetIndex === idx && draggedOrderId !== order.id}
               />
             ))}
           </div>

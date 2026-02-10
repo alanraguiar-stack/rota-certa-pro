@@ -8,7 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useRouteDetails } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
-import { useGeocoding } from '@/hooks/useGeocoding';
+
 import { Truck as TruckType, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -19,8 +19,6 @@ import { RouteWorkflowStepper, getActiveStep, RouteWorkflowStep } from '@/compon
 import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
-import { GeocodingProgress } from '@/components/route/GeocodingProgress';
-import { CollapsibleAddressFixer } from '@/components/route/CollapsibleAddressFixer';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { LoadConsolidationView } from '@/components/route/LoadConsolidationView';
 import { SideBySideManifests } from '@/components/route/SideBySideManifests';
@@ -64,8 +62,6 @@ export default function RouteDetails() {
     distributeOrders, 
     reorderDeliveries, 
     updateDepartureTimes, 
-    updateOrderAddress, 
-    setManualCoords,
     moveOrderToTruck,
     reorderSingleDelivery,
     lockTruckRoute,
@@ -73,14 +69,14 @@ export default function RouteDetails() {
     refetch 
   } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
-  const { progress: geocodingProgress, geocodeOrders, retryGeocode, resetProgress: resetGeocodingProgress } = useGeocoding();
+  
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
   const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
   const [showMap, setShowMap] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
-  const [isGeocoding, setIsGeocoding] = useState(false);
+  
   
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
@@ -89,11 +85,6 @@ export default function RouteDetails() {
   // Track if fleet was pre-configured in wizard
   const [fleetFromWizard, setFleetFromWizard] = useState(false);
   
-  // State for manual map location selection
-  const [selectingLocationFor, setSelectingLocationFor] = useState<{
-    orderId: string;
-    clientName: string;
-  } | null>(null);
 
   // Get current workflow step
   const hasTrucks = (route?.route_trucks?.length ?? 0) > 0;
@@ -138,11 +129,6 @@ export default function RouteDetails() {
         })),
         {
           onSuccess: () => {
-            // Start geocoding after orders are added
-            setTimeout(() => {
-              startGeocoding();
-            }, 500);
-            
             // Auto-assign trucks if fleet was configured in wizard
             if (selectedTruckIdsFromWizard && selectedTruckIdsFromWizard.length > 0 && fleetAlreadyConfigured) {
               setTimeout(async () => {
@@ -166,48 +152,7 @@ export default function RouteDetails() {
     }
   }, [location.state, hasAddedPendingOrders, route, addOrders, navigate, location.pathname]);
 
-  // Function to start geocoding
-  const startGeocoding = async () => {
-    if (!route || isGeocoding) return;
-    
-    // Get order IDs that need geocoding
-    const orderIdsToGeocode = route.orders
-      .filter(o => !o.geocoding_status || o.geocoding_status === 'pending')
-      .map(o => o.id);
-    
-    if (orderIdsToGeocode.length === 0) return;
-    
-    setIsGeocoding(true);
-    
-    try {
-      const result = await geocodeOrders(orderIdsToGeocode);
-      
-      if (result.success > 0) {
-        toast({
-          title: 'Geocodificação concluída',
-          description: `${result.success} endereços localizados${result.failed > 0 ? `, ${result.failed} não encontrados` : ''}`,
-        });
-        refetch();
-      }
-    } catch (error) {
-      console.error('Geocoding error:', error);
-    } finally {
-      setIsGeocoding(false);
-    }
-  };
 
-  // Check for pending geocoding when route loads
-  useEffect(() => {
-    if (route && route.orders.length > 0 && !isGeocoding) {
-      const needsGeocoding = route.orders.some(
-        o => !o.geocoding_status || o.geocoding_status === 'pending'
-      );
-      
-      if (needsGeocoding && geocodingProgress.status === 'idle') {
-        startGeocoding();
-      }
-    }
-  }, [route?.orders]);
 
   const formatWeight = (weight: number) => {
     if (weight >= 1000) {
@@ -310,36 +255,6 @@ export default function RouteDetails() {
     });
   };
 
-  // Handlers for failed address fixer
-  const handleRetryGeocode = async (orderId: string): Promise<boolean> => {
-    const success = await retryGeocode(orderId);
-    await refetch();
-    return success;
-  };
-
-  const handleUpdateAddress = async (orderId: string, newAddress: string): Promise<boolean> => {
-    try {
-      await updateOrderAddress.mutateAsync({ orderId, newAddress });
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const handleSetManualCoords = async (orderId: string, lat: number, lng: number): Promise<void> => {
-    await setManualCoords.mutateAsync({ orderId, lat, lng });
-    await refetch();
-  };
-
-  // Handle "continue anyway" for failed geocoding - non-blocking
-  const handleContinueWithFailedAddresses = () => {
-    toast({
-      title: 'Continuando com endereços informados',
-      description: 'Os endereços não localizados serão usados como informado. A roteirização usará aproximações.',
-    });
-    // Just dismiss the warning - the flow continues naturally
-  };
-
   // Handlers for TruckRouteEditor
   const handleOrderMoveToTruck = useCallback(async (
     orderId: string, 
@@ -389,28 +304,6 @@ export default function RouteDetails() {
     });
   }, [optimizeRoutes, routingStrategy, refetch, toast]);
 
-  // Handlers for manual map selection
-  const handleStartMapSelection = (orderId: string, clientName: string) => {
-    setSelectingLocationFor({ orderId, clientName });
-    // Automatically show the map when user wants to select location
-    setShowMap(true);
-  };
-
-  const handleCancelMapSelection = () => {
-    setSelectingLocationFor(null);
-  };
-
-  const handleManualLocationSelect = async (lat: number, lng: number) => {
-    if (!selectingLocationFor) return;
-    
-    await handleSetManualCoords(selectingLocationFor.orderId, lat, lng);
-    setSelectingLocationFor(null);
-    
-    toast({
-      title: 'Localização definida',
-      description: `Coordenadas manuais salvas para ${selectingLocationFor.clientName}`,
-    });
-  };
 
   if (isLoading) {
     return (
@@ -449,10 +342,6 @@ export default function RouteDetails() {
     occupancyPercent: rt.occupancy_percent,
   }));
 
-  // Check if there are failed geocoding addresses
-  const hasFailedAddresses = route.orders.some(
-    o => o.geocoding_status === 'not_found' || o.geocoding_status === 'error'
-  );
 
   return (
     <AppLayout>
@@ -529,32 +418,6 @@ export default function RouteDetails() {
               </div>
             </CardContent>
           </Card>
-        )}
-
-        {/* Geocoding Progress */}
-        {(geocodingProgress.status === 'processing' || geocodingProgress.status === 'complete') && (
-          <GeocodingProgress
-            current={geocodingProgress.current}
-            total={geocodingProgress.total}
-            currentAddress={geocodingProgress.currentAddress}
-            status={geocodingProgress.status}
-            successCount={geocodingProgress.successCount}
-            failedCount={geocodingProgress.failedCount}
-          />
-        )}
-
-        {/* Failed Address Fixer - COLLAPSIBLE (takes less space) */}
-        {hasFailedAddresses && (
-          <CollapsibleAddressFixer
-            orders={route.orders}
-            onRetryGeocode={handleRetryGeocode}
-            onUpdateAddress={handleUpdateAddress}
-            onSetManualCoords={handleSetManualCoords}
-            onStartMapSelection={handleStartMapSelection}
-            onContinueAnyway={handleContinueWithFailedAddresses}
-            selectingOnMapFor={selectingLocationFor?.orderId}
-            isProcessing={geocodingProgress.status === 'processing'}
-          />
         )}
 
         {/* ============================================ */}
@@ -784,15 +647,12 @@ export default function RouteDetails() {
         {activeStep === 'delivery_manifest' && (
           <>
             {/* Map Visualization - Compact */}
-            {(showMap || selectingLocationFor) && (
-              <Card className={selectingLocationFor ? "ring-2 ring-primary" : ""}>
+            {showMap && (
+              <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-lg">
                     <Map className="h-5 w-5" />
-                    {selectingLocationFor 
-                      ? `Selecione: ${selectingLocationFor.clientName}`
-                      : 'Mapa das Rotas'
-                    }
+                    Mapa das Rotas
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -806,12 +666,8 @@ export default function RouteDetails() {
                         }))
                       : []
                     }
-                    editable={!selectingLocationFor}
+                    editable={true}
                     onOrderReorder={handleOrderReorder}
-                    isSelectingLocation={!!selectingLocationFor}
-                    selectingForClient={selectingLocationFor?.clientName}
-                    onManualLocationSelect={handleManualLocationSelect}
-                    onCancelSelection={handleCancelMapSelection}
                   />
                 </CardContent>
               </Card>

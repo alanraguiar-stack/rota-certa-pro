@@ -12,10 +12,6 @@ import {
   Check, 
   AlertTriangle, 
   Info,
-  Brain,
-  Calculator,
-  ChevronDown,
-  ChevronUp,
   Scale,
   Target
 } from 'lucide-react';
@@ -61,7 +57,6 @@ export function IntelligentFleetPanel({
   isConfirming,
   disabled = false,
 }: IntelligentFleetPanelProps) {
-  const [showReasoning, setShowReasoning] = useState(true);
   const [showAllTrucks, setShowAllTrucks] = useState(false);
 
   // Análise inteligente da frota
@@ -174,73 +169,6 @@ export function IntelligentFleetPanel({
           </CardContent>
         </Card>
       </div>
-
-      {/* Painel de Raciocínio Inteligente */}
-      <Card className="border-primary/30 bg-gradient-to-br from-primary/5 to-transparent">
-        <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Brain className="h-5 w-5 text-primary" />
-              Raciocínio do Sistema
-            </CardTitle>
-            <Button 
-              variant="ghost" 
-              size="sm"
-              onClick={() => setShowReasoning(!showReasoning)}
-            >
-              {showReasoning ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </Button>
-          </div>
-        </CardHeader>
-        {showReasoning && (
-          <CardContent className="space-y-3">
-            {/* Passos do raciocínio */}
-            <div className="space-y-2 text-sm">
-              {fleetAnalysis.reasoning.map((step, index) => (
-                <div 
-                  key={index} 
-                  className={cn(
-                    "flex items-start gap-2 p-2 rounded-md",
-                    step.startsWith('✓') && "bg-success/10 text-success-foreground",
-                    step.startsWith('✗') && "bg-destructive/10 text-destructive-foreground",
-                    step.startsWith('⚠️') && "bg-warning/10 text-warning-foreground",
-                    step.startsWith('+') && "bg-primary/10"
-                  )}
-                >
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {String(index + 1).padStart(2, '0')}
-                  </span>
-                  <span>{step}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Recomendação */}
-            {fleetAnalysis.recommendedTrucks.length > 0 && (
-              <div className="mt-4 p-3 rounded-lg border border-primary/30 bg-primary/5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    <span className="font-medium">Recomendação:</span>
-                    <span>
-                      {fleetAnalysis.recommendedTrucks.length} caminhão(ões) - {' '}
-                      {fleetAnalysis.recommendedTrucks.map(t => t.plate).join(', ')}
-                    </span>
-                  </div>
-                  <Button 
-                    size="sm" 
-                    variant="outline"
-                    onClick={handleApplyRecommendation}
-                    disabled={disabled}
-                  >
-                    Aplicar
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        )}
-      </Card>
 
       {/* Status da Seleção */}
       <Card className={cn(
