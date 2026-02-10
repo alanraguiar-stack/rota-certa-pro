@@ -14,7 +14,8 @@ import { useTheme } from '@/hooks/useTheme';
 import { useUserRole, useUserManagement, AppRole } from '@/hooks/useUserRole';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package } from 'lucide-react';
+import { ProductUnitsImporter } from '@/components/route/ProductUnitsImporter';
 
 interface UserProfile {
   id: string;
@@ -163,10 +164,14 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="account" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2 lg:grid-cols-3">
+          <TabsList className="grid w-full grid-cols-3 lg:grid-cols-4">
             <TabsTrigger value="account" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Conta
+            </TabsTrigger>
+            <TabsTrigger value="products" className="flex items-center gap-2">
+              <Package className="h-4 w-4" />
+              Produtos
             </TabsTrigger>
             <TabsTrigger value="appearance" className="flex items-center gap-2">
               {isDark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
@@ -256,6 +261,11 @@ export default function Settings() {
                 </Button>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Products Tab */}
+          <TabsContent value="products" className="space-y-4">
+            <ProductUnitsImporter />
           </TabsContent>
 
           {/* Appearance Tab */}

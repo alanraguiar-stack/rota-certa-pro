@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
+import { useProductUnits } from '@/hooks/useProductUnits';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -23,33 +24,39 @@ interface LoadingManifestProps {
 interface ConsolidatedProduct {
   product: string;
   totalWeight: number;
+  totalQuantity: number;
+  unitType: string;
   orderCount: number;
 }
 
 /**
- * Consolidate products from orders - now uses order_items when available
+ * Consolidate products from orders with unit type awareness
  */
-function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
-  const productMap = new Map<string, { weight: number; count: number }>();
+function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
+  const productMap = new Map<string, { weight: number; quantity: number; count: number; unitType: string }>();
   
   orders.forEach(order => {
-    // If order has items, use them for detailed consolidation
     if (order.items && order.items.length > 0) {
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
-        const existing = productMap.get(productName) || { weight: 0, count: 0 };
+        const unitType = getUnitForProduct(productName);
+        const existing = productMap.get(productName) || { weight: 0, quantity: 0, count: 0, unitType };
         productMap.set(productName, {
           weight: existing.weight + Number(item.weight_kg),
+          quantity: existing.quantity + (item.quantity || 1),
           count: existing.count + 1,
+          unitType,
         });
       });
     } else {
-      // Fallback: usar client_name + peso total do pedido quando não há itens detalhados
       const label = order.product_description || `Pedido ${order.client_name}`;
-      const existing = productMap.get(label) || { weight: 0, count: 0 };
+      const unitType = getUnitForProduct(label);
+      const existing = productMap.get(label) || { weight: 0, quantity: 0, count: 0, unitType };
       productMap.set(label, {
         weight: existing.weight + Number(order.weight_kg),
+        quantity: existing.quantity + 1,
         count: existing.count + 1,
+        unitType,
       });
     }
   });
@@ -58,6 +65,8 @@ function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
     .map(([product, data]) => ({
       product,
       totalWeight: data.weight,
+      totalQuantity: data.quantity,
+      unitType: data.unitType,
       orderCount: data.count,
     }))
     .sort((a, b) => b.totalWeight - a.totalWeight);
@@ -76,7 +85,8 @@ function generateLoadingManifestPDF(
   truck: TruckType,
   orders: Order[],
   totalWeight: number,
-  occupancyPercent: number
+  occupancyPercent: number,
+  getUnitForProduct: (name: string) => string
 ): jsPDF {
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -122,30 +132,35 @@ function generateLoadingManifestPDF(
   doc.setFont('helvetica', 'normal');
   doc.text(String(orders.length), 180, 52);
   
-  // Consolidated Products Table (main content - no client details in PDF)
+  // Consolidated Products Table
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
   doc.text('PRODUTOS PARA SEPARACAO', 20, 80);
   
-  const consolidatedProducts = consolidateProducts(orders);
+  const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
+  const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
   
   autoTable(doc, {
     startY: 85,
-    head: [['#', 'Produto', 'Peso Total']],
+    head: [['#', 'Produto', 'Qtde', 'Unidade', 'Peso Total']],
     body: consolidatedProducts.map((p, idx) => [
       String(idx + 1),
       p.product,
-      formatWeight(p.totalWeight),
+      isWeightUnit(p.unitType) ? '-' : String(p.totalQuantity),
+      p.unitType,
+      isWeightUnit(p.unitType) ? formatWeight(p.totalWeight) : '-',
     ]),
-    foot: [['', 'TOTAL', formatWeight(totalWeight)]],
+    foot: [['', 'TOTAL', '', '', formatWeight(totalWeight)]],
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 11 },
     footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
     styles: { fontSize: 10 },
     columnStyles: {
-      0: { cellWidth: 15, halign: 'center' },
+      0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 40, halign: 'right' },
+      2: { cellWidth: 20, halign: 'center' },
+      3: { cellWidth: 25, halign: 'center' },
+      4: { cellWidth: 30, halign: 'right' },
     },
   });
   
@@ -192,6 +207,7 @@ function generateLoadingManifestPDF(
 
 export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProps) {
   const [selectedTruckIndex, setSelectedTruckIndex] = useState(0);
+  const { getUnitForProduct } = useProductUnits();
   
   const selectedTruck = trucks[selectedTruckIndex];
   
@@ -204,7 +220,8 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
       selectedTruck.truck,
       selectedTruck.orders,
       selectedTruck.totalWeight,
-      selectedTruck.occupancyPercent
+      selectedTruck.occupancyPercent,
+      getUnitForProduct
     );
     
     doc.save(`romaneio-carga-${selectedTruck.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
@@ -219,7 +236,8 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
       selectedTruck.truck,
       selectedTruck.orders,
       selectedTruck.totalWeight,
-      selectedTruck.occupancyPercent
+      selectedTruck.occupancyPercent,
+      getUnitForProduct
     );
     
     doc.autoPrint();
@@ -235,7 +253,8 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
           truckData.truck,
           truckData.orders,
           truckData.totalWeight,
-          truckData.occupancyPercent
+          truckData.occupancyPercent,
+          getUnitForProduct
         );
         doc.save(`romaneio-carga-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
       }, index * 500);
@@ -253,8 +272,10 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
     );
   }
   
+  const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
+  
   const consolidatedProducts = selectedTruck 
-    ? consolidateProducts(selectedTruck.orders) 
+    ? consolidateProducts(selectedTruck.orders, getUnitForProduct) 
     : [];
   
   return (
@@ -366,11 +387,20 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
                     <div className="flex items-center gap-3">
                       <Package className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">{product.product}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {product.orderCount} pedido{product.orderCount > 1 ? 's' : ''}
+                      <Badge variant="outline" className="text-xs">
+                        {product.unitType}
                       </Badge>
                     </div>
-                    <span className="font-bold">{formatWeight(product.totalWeight)}</span>
+                    <div className="flex items-center gap-4">
+                      {!isWeightUnit(product.unitType) && (
+                        <span className="text-sm font-medium">
+                          {product.totalQuantity} {product.unitType}
+                        </span>
+                      )}
+                      {isWeightUnit(product.unitType) && (
+                        <span className="font-bold">{formatWeight(product.totalWeight)}</span>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
