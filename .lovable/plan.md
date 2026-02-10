@@ -1,102 +1,143 @@
 
+# Plano de Implementacao: 4 Melhorias no Fluxo Logistico
 
-# Plano: Melhorar Cruzamento de Pedidos e Exibir Falhas
+## 1. Remover "Raciocinio do Sistema" do Painel de Frota
 
-## Investigacao Realizada
+**Arquivo:** `src/components/route/IntelligentFleetPanel.tsx`
 
-Analisei o fluxo completo de cruzamento em `src/lib/advParser.ts`. A funcao `mergeItinerarioWithADV` usa duas estrategias:
+Remover o bloco entre linhas 178-243 (card "Raciocinio do Sistema" com os passos numerados e recomendacao). Manter as 3 metricas principais (Peso Total, Caminhoes, Ocupacao), o status da selecao, a lista de caminhoes e o botao de confirmar.
 
-1. **Nivel 1 - Por venda_id**: Compara `itinerarioRecord.venda_id` com `advOrder.pedido_id` (correspondencia exata de string)
-2. **Nivel 2 - Por nome do cliente**: Normaliza nomes (minusculas, sem acentos, sem pontuacao) e compara
+Tambem remover imports nao utilizados (`Brain`, `Calculator`, `Sparkles` se nao usado em outro lugar) e estados (`showReasoning`).
 
-### Possiveis Causas dos 2 Pedidos Nao Cruzados
+---
 
-1. **Formatacao do venda_id**: O itinerario extrai `vendaId` direto da celula (`row[columnMap.venda]?.trim()`), enquanto o ADV extrai via regex (`/venda\s*n[º°]?\s*:\s*(\d+)/i`). Se o itinerario tiver o ID como "0276017" (com zero a esquerda) e o ADV extrair "276017", nao bate.
-2. **Nomes de cliente com caracteres especiais**: A normalizacao remove acentos e pontuacao, mas nao trata abreviacoes ou sufixos diferentes (ex: "JOAO DA SILVA LTDA" vs "JOAO DA SILVA - ME").
-3. **Clientes duplicados no itinerario**: O mapa por cliente usa "primeiro ganha" - se dois registros tem o mesmo nome normalizado, o segundo e ignorado.
+## 2. Remover Geocodificacao e Correcao de Enderecos
 
-## Solucao em 2 Partes
+**Arquivo:** `src/pages/RouteDetails.tsx`
 
-### Parte 1: Melhorar o Matching (para reduzir falhas)
+Remocoes especificas:
+- **Imports** (linhas 11, 22-23): Remover `useGeocoding`, `GeocodingProgress`, `CollapsibleAddressFixer`
+- **Hook** (linha 76): Remover chamada `useGeocoding()`
+- **Estado** (linha 83): Remover `isGeocoding`
+- **Estado** (linhas 93-96): Remover `selectingLocationFor`
+- **Funcao** (linhas 170-197): Remover `startGeocoding`
+- **useEffect** (linhas 200-210): Remover verificacao de geocodificacao pendente
+- **Chamada** (linhas 142-144): Remover `setTimeout(() => startGeocoding())` no onSuccess do addOrders
+- **Handlers** (linhas 314-341): Remover `handleRetryGeocode`, `handleUpdateAddress`, `handleSetManualCoords`, `handleContinueWithFailedAddresses`
+- **Handlers** (linhas 393-413): Remover `handleStartMapSelection`, `handleCancelMapSelection`, `handleManualLocationSelect`
+- **JSX** (linhas 534-558): Remover blocos `GeocodingProgress` e `CollapsibleAddressFixer`
+- **Variavel** (linhas 453-455): Remover `hasFailedAddresses`
 
-**Arquivo: `src/lib/advParser.ts`**
+---
 
-1. **Normalizar venda_id antes de comparar**: Remover zeros a esquerda, espacos e caracteres nao numericos de ambos os lados
-2. **Adicionar Nivel 3 de matching**: Busca parcial por nome do cliente (contem/comeca com)
-3. **Tratar clientes duplicados no mapa**: Se ha multiplos registros com mesmo nome, tentar desambiguar pelo peso
+## 3. Implementar Drag-and-Drop no TruckRouteEditor
 
-```tsx
-// Normalizar venda_id
-function normalizeVendaId(id: string): string {
-  return id.replace(/\D/g, '').replace(/^0+/, '') || '0';
-}
+**Arquivo:** `src/components/route/TruckRouteEditor.tsx`
 
-// No merge, usar IDs normalizados
-const itinerarioByIdMap = new Map<string, ItinerarioRecord>();
-for (const record of itinerario) {
-  itinerarioByIdMap.set(normalizeVendaId(record.venda_id), record);
-}
+Usar drag-and-drop nativo do HTML5 (sem bibliotecas adicionais):
 
-// No lookup
-let enderecoData = itinerarioByIdMap.get(normalizeVendaId(order.pedido_id || ''));
+### Mudancas no `TruckTab` (linha 209):
+- Adicionar estados: `draggedOrderId` e `dropTargetIndex`
+- Criar handlers: `handleDragStart`, `handleDragOver`, `handleDragEnd`, `handleDrop`
 
-// NIVEL 3: Busca parcial por nome
-if (!enderecoData && order.client_name) {
-  const normName = normalizeClientNameForMatch(order.client_name);
-  for (const [key, record] of itinerarioByClientMap) {
-    if (key.includes(normName) || normName.includes(key)) {
-      enderecoData = record;
-      matchType = 'partial_client';
-      break;
-    }
-  }
+### Mudancas no `OrderCard` (linha 66):
+- Adicionar props: `onDragStart`, `onDragOver`, `onDrop`, `onDragEnd`, `isDragTarget`
+- No div raiz do card: `draggable={!isLocked}`, bind dos eventos de drag
+- Feedback visual: borda azul e sombra quando `isDragTarget === true`
+
+### Fluxo:
+1. Usuario clica e arrasta pelo `GripVertical` ou pelo card inteiro
+2. Enquanto arrasta, uma linha azul aparece entre os cards indicando posicao de drop
+3. Ao soltar, chama `onReorder(truckId, orderId, newSequence)`
+4. Botoes de seta (ChevronUp/Down) continuam funcionando como alternativa
+
+---
+
+## 4. Unidades de Medida no Romaneio de Carga
+
+### 4.1 Nova tabela no banco de dados
+
+```sql
+CREATE TABLE public.product_units (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  product_name TEXT NOT NULL,
+  unit_type TEXT NOT NULL DEFAULT 'kg',
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_product_units_user ON product_units(user_id);
+
+ALTER TABLE product_units ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users manage own product units"
+  ON product_units FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+```
+
+### 4.2 Novo hook: `src/hooks/useProductUnits.ts`
+
+- Busca `product_units` do banco para o usuario logado
+- Funcao `getUnitForProduct(productName)`: faz matching normalizado (sem acentos, case-insensitive) entre o nome do item e a tabela
+- Funcao `importProductUnits(data)`: insere em batch na tabela
+- Cache em memoria (React Query)
+
+### 4.3 Novo componente: `src/components/route/ProductUnitsImporter.tsx`
+
+- Upload de arquivo Excel/CSV usando a lib `xlsx` (ja instalada)
+- Espera 2 colunas: Nome do Produto e Unidade de Medida
+- Preview em tabela dos dados lidos
+- Botao "Salvar" que persiste na tabela `product_units`
+- Valida unidades aceitas: kg, g, fardo, unidade, caixa, pacote, litro, garrafa
+
+### 4.4 Atualizar `src/pages/Settings.tsx`
+
+- Adicionar nova tab "Produtos" com icone Package
+- Dentro da tab, renderizar `ProductUnitsImporter`
+- Exibir tabela dos produtos ja cadastrados com opcao de deletar
+
+### 4.5 Atualizar `src/components/route/LoadingManifest.tsx`
+
+A interface `ConsolidatedProduct` ganha novos campos:
+
+```typescript
+interface ConsolidatedProduct {
+  product: string;
+  totalWeight: number;
+  totalQuantity: number;
+  unitType: string; // 'kg', 'g', 'fardo', 'unidade', etc.
+  orderCount: number;
 }
 ```
 
-### Parte 2: Exibir Pedidos Nao Cruzados (se ainda houver)
+A funcao `consolidateProducts` recebe um mapa de unidades:
+- Se unidade = 'kg' ou 'g': consolida por peso (soma `weight_kg`)
+- Se unidade = 'fardo', 'unidade', 'caixa', etc.: consolida por quantidade (soma `quantity`)
+- Produtos sem correspondencia na tabela sao tratados como peso (comportamento atual)
 
-**Arquivo: `src/components/route/DualFileUpload.tsx`**
+Na UI e no PDF, a tabela mostra:
 
-Abaixo do card de resumo do cruzamento, listar os pedidos que nao encontraram correspondencia:
-
-```tsx
-{mergeSummary && mergeSummary.unmatched > 0 && mergedOrders && (
-  <div className="ml-6 mt-2 text-sm text-muted-foreground">
-    <strong>Pedidos sem correspondencia:</strong>
-    <ul className="list-disc ml-4 mt-1">
-      {mergedOrders.filter(o => !o.isValid).map((o, i) => (
-        <li key={i}>
-          {o.client_name} (Venda: {o.pedido_id})
-        </li>
-      ))}
-    </ul>
-  </div>
-)}
+```
+| # | Produto                    | Qtde | Unidade | Peso     |
+|---|----------------------------|------|---------|----------|
+| 1 | QUEIJO PRATO ESPLANADA 3KG | 5    | kg      | 15,00kg  |
+| 2 | REFRIGERANTE TUBAINA 2 LT  | 12   | fardo   | -        |
 ```
 
-### Parte 3: Adicionar `unmatchedOrders` ao MergeSummary
+O `LoadingManifest` component precisara receber o mapa de unidades como prop ou buscar internamente via hook.
 
-Salvar a lista de pedidos nao cruzados no estado para facilitar a exibicao:
+---
 
-```tsx
-interface MergeSummary {
-  total: number;
-  matched: number;
-  unmatched: number;
-  unmatchedOrders: { client_name: string; pedido_id: string }[];
-}
-```
+## Resumo de Arquivos
 
-## Arquivos a Modificar
-
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/lib/advParser.ts` | Adicionar `normalizeVendaId`, nivel 3 de matching por nome parcial |
-| `src/components/route/DualFileUpload.tsx` | Expandir `MergeSummary`, exibir lista de pedidos nao cruzados |
-| `src/components/route/DualPasteData.tsx` | Mesmas mudancas de UI para consistencia |
-
-## Resultado Esperado
-
-- Matching mais robusto que deve resolver a maioria dos casos de "2 pedidos sem correspondencia"
-- Se ainda houver falhas, os nomes dos clientes e numeros de venda aparecem abaixo do card de cruzamento para diagnostico rapido
-
+| Arquivo | Acao |
+|---------|------|
+| `src/components/route/IntelligentFleetPanel.tsx` | Remover card de raciocinio |
+| `src/pages/RouteDetails.tsx` | Remover geocodificacao e handlers relacionados |
+| `src/components/route/TruckRouteEditor.tsx` | Implementar drag-and-drop HTML5 |
+| `src/components/route/LoadingManifest.tsx` | Atualizar consolidacao com unidades |
+| `src/hooks/useProductUnits.ts` | Novo - hook para tabela de unidades |
+| `src/components/route/ProductUnitsImporter.tsx` | Novo - importador de planilha |
+| `src/pages/Settings.tsx` | Adicionar tab de produtos |
+| Migracao SQL | Criar tabela `product_units` |
