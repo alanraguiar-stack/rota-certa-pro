@@ -9,7 +9,7 @@ export interface ProductUnit {
   unit_type: string;
 }
 
-const VALID_UNITS = ['kg', 'g', 'fardo', 'unidade', 'caixa', 'pacote', 'litro', 'garrafa'];
+const VALID_UNITS = ['kg', 'g', 'fardo', 'unidade', 'caixa', 'pacote', 'litro', 'garrafa', 'peca', 'saco', 'display'];
 
 function normalize(str: string): string {
   return str
