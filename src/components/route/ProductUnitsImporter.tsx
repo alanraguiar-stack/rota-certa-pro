@@ -8,6 +8,25 @@ import { useProductUnits } from '@/hooks/useProductUnits';
 import { useToast } from '@/hooks/use-toast';
 import * as XLSX from 'xlsx';
 
+const ABBREVIATION_MAP: Record<string, string> = {
+  'un': 'unidade',
+  'cx': 'caixa',
+  'fd': 'fardo',
+  'kg': 'kg',
+  'pc': 'peca',
+  'sc': 'saco',
+  'dp': 'display',
+  'pct': 'pacote',
+  'lt': 'litro',
+  'gf': 'garrafa',
+  'g': 'g',
+};
+
+function resolveUnit(raw: string): string {
+  const normalized = raw.toLowerCase().trim();
+  return ABBREVIATION_MAP[normalized] || normalized;
+}
+
 interface ParsedRow {
   product_name: string;
   unit_type: string;
@@ -32,18 +51,27 @@ export function ProductUnitsImporter() {
         const sheet = workbook.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
 
+        const keys = rows.length > 0 ? Object.keys(rows[0]) : [];
+        
+        // Auto-detect column order: if first column has short values matching known abbreviations, it's Unit|Product
+        const isInverted = rows.slice(0, 10).filter(row => {
+          const val = String(row[keys[0]] || '').trim().toLowerCase();
+          return val.length <= 3 && val in ABBREVIATION_MAP;
+        }).length >= Math.min(5, rows.length);
+
         const parsed: ParsedRow[] = rows
           .map(row => {
-            const keys = Object.keys(row);
+            const col1 = String(row[keys[0]] || '').trim();
+            const col2 = String(row[keys[1]] || '').trim();
             return {
-              product_name: String(row[keys[0]] || '').trim(),
-              unit_type: String(row[keys[1]] || 'kg').trim().toLowerCase(),
+              product_name: isInverted ? col2 : col1,
+              unit_type: resolveUnit(isInverted ? col1 : (col2 || 'kg')),
             };
           })
           .filter(r => r.product_name.length > 0);
 
         setPreview(parsed);
-        toast({ title: `${parsed.length} produtos encontrados na planilha` });
+        toast({ title: `${parsed.length} produtos encontrados na planilha${isInverted ? ' (colunas invertidas detectadas)' : ''}` });
       } catch {
         toast({ title: 'Erro ao ler arquivo', variant: 'destructive' });
       }
