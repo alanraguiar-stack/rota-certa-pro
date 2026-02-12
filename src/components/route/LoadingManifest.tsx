@@ -240,8 +240,19 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
       getUnitForProduct
     );
     
-    doc.autoPrint();
-    window.open(doc.output('bloburl'), '_blank');
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    iframe.onload = () => {
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+        URL.revokeObjectURL(url);
+      }, 1000);
+    };
   };
   
   const handleDownloadAll = () => {

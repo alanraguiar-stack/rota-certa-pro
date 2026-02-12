@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
-import { Upload, FileSpreadsheet, Trash2, Package } from 'lucide-react';
+import { Upload, FileSpreadsheet, Trash2, Package, Download } from 'lucide-react';
+import defaultSpreadsheet from '@/assets/unidade_de_medida.xlsx?url';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -91,6 +92,42 @@ export function ProductUnitsImporter() {
     });
   };
 
+  const handleImportDefault = useCallback(async () => {
+    setIsImporting(true);
+    try {
+      const response = await fetch(defaultSpreadsheet);
+      const arrayBuffer = await response.arrayBuffer();
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet);
+
+      const keys = rows.length > 0 ? Object.keys(rows[0]) : [];
+
+      const isInverted = rows.slice(0, 10).filter(row => {
+        const val = String(row[keys[0]] || '').trim().toLowerCase();
+        return val.length <= 3 && val in ABBREVIATION_MAP;
+      }).length >= Math.min(5, rows.length);
+
+      const parsed: ParsedRow[] = rows
+        .map(row => {
+          const col1 = String(row[keys[0]] || '').trim();
+          const col2 = String(row[keys[1]] || '').trim();
+          return {
+            product_name: isInverted ? col2 : col1,
+            unit_type: resolveUnit(isInverted ? col1 : (col2 || 'kg')),
+          };
+        })
+        .filter(r => r.product_name.length > 0);
+
+      const result = await importProductUnits(parsed);
+      toast({ title: `${result.success} produtos importados da planilha padrão` });
+    } catch {
+      toast({ title: 'Erro ao importar planilha padrão', variant: 'destructive' });
+    }
+    setIsImporting(false);
+  }, [importProductUnits, toast]);
+
   const handleDelete = async (id: string) => {
     await deleteUnit(id);
     toast({ title: 'Produto removido' });
@@ -121,6 +158,12 @@ export function ProductUnitsImporter() {
               onChange={handleFileUpload}
             />
           </label>
+          <div className="flex justify-center mt-3">
+            <Button variant="outline" onClick={handleImportDefault} disabled={isImporting} className="gap-2">
+              <Download className="h-4 w-4" />
+              {isImporting ? 'Importando...' : 'Importar Planilha Padrão (364 produtos)'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

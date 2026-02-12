@@ -288,8 +288,19 @@ export function downloadManifestPDF(data: ManifestData): void {
  */
 export function printManifestPDF(data: ManifestData): void {
   const doc = generateManifestPDF(data);
-  const pdfUrl = doc.output('bloburl');
-  window.open(pdfUrl as unknown as string, '_blank');
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    iframe.contentWindow?.print();
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+      URL.revokeObjectURL(url);
+    }, 1000);
+  };
 }
 
 /**
