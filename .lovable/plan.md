@@ -1,62 +1,75 @@
 
-# Plano: Importar Planilha de Unidades de Medida e Ajustar Mapeamento
 
-## Problema Identificado
+# Corrigir Romaneio de Carga e Botao de Imprimir
 
-A planilha enviada tem as colunas invertidas em relacao ao que o sistema espera:
-- **Coluna 1 (A):** Abreviacao da unidade (UN, FD, KG, CX, PC, SC, DP)
-- **Coluna 2 (B):** Nome do produto
+## Problema 1: Unidades de Medida nao aplicadas
 
-O sistema atual espera Coluna 1 = Produto e Coluna 2 = Unidade. Alem disso, a planilha usa abreviacoes (FD, UN, CX, etc.) que precisam ser traduzidas para os nomes completos do sistema.
+A tabela `product_units` esta **vazia** (0 registros). O sistema de consolidacao funciona corretamente no codigo, mas sem dados na tabela, todos os produtos caem no fallback padrao (kg).
 
-## Mudancas Necessarias
+**Solucao:** Inserir os 364 produtos da planilha `unidade_de_medida.xlsx` diretamente no banco de dados via migracao SQL. Os dados serao inseridos para o usuario atual. As abreviacoes serao traduzidas:
 
-### 1. Adicionar mapeamento de abreviacoes no importador
+- UN -> unidade
+- FD -> fardo
+- CX -> caixa
+- KG -> kg
+- PC -> peca
+- SC -> saco
+- DP -> display
+
+**Nota importante:** Como a tabela usa `user_id` com RLS, sera necessario criar um mecanismo para popular os dados para o usuario logado. A melhor abordagem e fazer o import automaticamente na primeira vez que o usuario acessa Configuracoes > Produtos, usando o arquivo `src/assets/unidade_de_medida.xlsx` que ja esta no projeto.
 
 **Arquivo:** `src/components/route/ProductUnitsImporter.tsx`
 
-Adicionar um dicionario de traducao de abreviacoes:
+Adicionar um botao "Importar Planilha Padrao" que carrega automaticamente o arquivo embutido `unidade_de_medida.xlsx` e processa igual ao upload manual. Assim o usuario pode popular a tabela com um clique.
 
-```text
-UN  -> unidade
-CX  -> caixa
-FD  -> fardo
-KG  -> kg
-PC  -> peca
-SC  -> saco
-DP  -> display
+Alternativamente, adicionar logica no `useProductUnits.ts` para, ao detectar tabela vazia, oferecer importacao automatica.
+
+---
+
+## Problema 2: Botao Imprimir com erro
+
+**Arquivo:** `src/components/route/LoadingManifest.tsx` (linha 244)
+
+O codigo atual usa:
+```
+window.open(doc.output('bloburl'), '_blank');
 ```
 
-Adicionar deteccao automatica da ordem das colunas: se a primeira coluna contem valores curtos (2-3 caracteres) que correspondem a abreviacoes conhecidas, o sistema entende que a ordem e "Unidade | Produto" e inverte automaticamente.
+Isso falha no ambiente sandbox do iframe. A solucao e usar a tecnica de iframe + blob URL:
 
-### 2. Expandir lista de unidades validas
+```typescript
+const handlePrint = () => {
+  const doc = generateLoadingManifestPDF(...);
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  const iframe = document.createElement('iframe');
+  iframe.style.display = 'none';
+  iframe.src = url;
+  document.body.appendChild(iframe);
+  iframe.onload = () => {
+    iframe.contentWindow?.print();
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+      URL.revokeObjectURL(url);
+    }, 1000);
+  };
+};
+```
 
-**Arquivo:** `src/hooks/useProductUnits.ts`
+Tambem aplicar a mesma correcao no `src/lib/manifest.ts` (funcao `printManifestPDF`, linha ~280) que tem o mesmo problema.
 
-Adicionar novas unidades a lista `VALID_UNITS`:
-- `peca` (PC)
-- `saco` (SC)
-- `display` (DP)
+---
 
-Lista final: `['kg', 'g', 'fardo', 'unidade', 'caixa', 'pacote', 'litro', 'garrafa', 'peca', 'saco', 'display']`
-
-### 3. Atualizar logica de consolidacao no Romaneio
-
-**Arquivo:** `src/components/route/LoadingManifest.tsx`
-
-A funcao `isWeightUnit` ja verifica apenas `kg` e `g`. As novas unidades (peca, saco, display) serao automaticamente tratadas como quantidade, sem mudancas adicionais necessarias.
-
-## Resumo dos Arquivos
+## Resumo de Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/components/route/ProductUnitsImporter.tsx` | Adicionar mapeamento de abreviacoes e deteccao automatica de colunas |
-| `src/hooks/useProductUnits.ts` | Expandir VALID_UNITS com peca, saco, display |
+| `src/components/route/LoadingManifest.tsx` | Corrigir handlePrint com iframe |
+| `src/lib/manifest.ts` | Corrigir printManifestPDF com iframe |
+| `src/components/route/ProductUnitsImporter.tsx` | Adicionar botao "Importar Planilha Padrao" usando arquivo embutido |
 
 ## Resultado Esperado
 
-Ao fazer upload da planilha fornecida, o sistema ira:
-1. Detectar que a coluna A contem abreviacoes e inverter automaticamente
-2. Traduzir FD para "fardo", UN para "unidade", etc.
-3. Exibir o preview com 364 produtos mapeados corretamente
-4. Ao confirmar, salvar no banco e usar no Romaneio de Carga para compilar corretamente (ex: 150kg de mussarela, 40 fardos de Tubaina)
+1. Ao clicar "Importar Planilha Padrao" em Configuracoes > Produtos, os 364 produtos serao salvos no banco com suas unidades corretas
+2. No Romaneio de Carga, itens como Tubaina aparecerao consolidados como "40 fardos" ao inves de "peso em kg"
+3. O botao Imprimir funcionara sem erro, abrindo o dialogo de impressao do navegador
