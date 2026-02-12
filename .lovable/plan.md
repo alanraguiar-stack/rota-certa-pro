@@ -1,62 +1,82 @@
 
+# Plano: Aprendizado com Roteiros Historicos e Regionalizacao por Cidade
 
-# Corrigir Romaneio de Carga e Botao de Imprimir
+## Contexto
 
-## Problema 1: Unidades de Medida nao aplicadas
+Os arquivos enviados (CYR10.02.26.xls e DHS10.02.26.xls) sao roteiros reais feitos por um analista humano. Cada arquivo representa um caminhao (CYR, DHS) com suas entregas ja sequenciadas. A estrutura contem: Ordem, Venda, Cliente, Fantasia, CEP, Endereco, Numero, Bairro, Cidade, UF.
 
-A tabela `product_units` esta **vazia** (0 registros). O sistema de consolidacao funciona corretamente no codigo, mas sem dados na tabela, todos os produtos caem no fallback padrao (kg).
-
-**Solucao:** Inserir os 364 produtos da planilha `unidade_de_medida.xlsx` diretamente no banco de dados via migracao SQL. Os dados serao inseridos para o usuario atual. As abreviacoes serao traduzidas:
-
-- UN -> unidade
-- FD -> fardo
-- CX -> caixa
-- KG -> kg
-- PC -> peca
-- SC -> saco
-- DP -> display
-
-**Nota importante:** Como a tabela usa `user_id` com RLS, sera necessario criar um mecanismo para popular os dados para o usuario logado. A melhor abordagem e fazer o import automaticamente na primeira vez que o usuario acessa Configuracoes > Produtos, usando o arquivo `src/assets/unidade_de_medida.xlsx` que ja esta no projeto.
-
-**Arquivo:** `src/components/route/ProductUnitsImporter.tsx`
-
-Adicionar um botao "Importar Planilha Padrao" que carrega automaticamente o arquivo embutido `unidade_de_medida.xlsx` e processa igual ao upload manual. Assim o usuario pode popular a tabela com um clique.
-
-Alternativamente, adicionar logica no `useProductUnits.ts` para, ao detectar tabela vazia, oferecer importacao automatica.
+O objetivo e duplo:
+1. **Aprender** com roteiros passados para melhorar a composicao automatica
+2. **Regionalizar** os caminhoes por cidade, sem misturar cidades diferentes no mesmo veiculo
 
 ---
 
-## Problema 2: Botao Imprimir com erro
+## Parte 1: Regionalizacao por Cidade (Prioridade Alta)
 
-**Arquivo:** `src/components/route/LoadingManifest.tsx` (linha 244)
+### Problema Atual
+O motor de auto-roteamento (`autoRouterEngine.ts`) agrupa pedidos por **angulo geometrico** a partir do CD, ignorando completamente a cidade. Isso pode colocar entregas de Barueri, Jandira e Osasco no mesmo caminhao.
 
-O codigo atual usa:
+### Solucao
+Alterar o algoritmo de clustering para usar **cidade como criterio primario** de agrupamento:
+
+1. Extrair a cidade de cada pedido usando `parseAddress()` (campo `city` do `GeocodedAddress`)
+2. Agrupar pedidos por cidade primeiro
+3. Atribuir cada grupo-cidade a um caminhao, respeitando capacidade
+4. Dentro de cada cidade, aplicar a otimizacao de rota existente (nearest neighbor, etc.)
+
+Se uma cidade tiver mais pedidos do que cabe em um caminhao, dividir essa cidade em sub-clusters geograficos.
+
+**Arquivo:** `src/lib/autoRouterEngine.ts`
+- Nova funcao `clusterOrdersByCity()` que substitui `clusterOrdersBySector()`
+- A funcao agrupa por cidade, depois distribui os grupos para os caminhoes disponibles
+
+**Arquivo:** `src/lib/geocoding.ts`
+- Melhorar o parser de cidade para lidar com enderecos que vem do formato do ERP (campos separados: Rua, Numero, Bairro, Cidade)
+
+**Arquivo:** `src/types/index.ts`
+- Adicionar campo opcional `city` ao `ParsedOrder` para que a cidade ja venha identificada desde o parsing
+
+---
+
+## Parte 2: Importar Roteiros Historicos para Aprendizado
+
+### Objetivo
+Criar uma tabela de historico de roteiros no banco de dados onde o sistema armazena como o analista humano agrupou e sequenciou entregas. Esses dados servem como referencia para futuras composicoes.
+
+### Nova Tabela: `route_history_patterns`
+
+```text
+id              uuid (PK)
+user_id         uuid (FK)
+truck_label     text        -- Ex: "CYR", "DHS"
+route_date      date        -- Data do roteiro
+sequence_order  integer     -- Ordem da entrega
+sale_number     text        -- Numero da venda
+client_name     text        -- Nome do cliente
+address         text        -- Endereco completo
+neighborhood    text        -- Bairro
+city            text        -- Cidade
+state           text        -- UF
+created_at      timestamp
 ```
-window.open(doc.output('bloburl'), '_blank');
-```
 
-Isso falha no ambiente sandbox do iframe. A solucao e usar a tecnica de iframe + blob URL:
+### Nova funcionalidade: Upload de Roteiros
 
-```typescript
-const handlePrint = () => {
-  const doc = generateLoadingManifestPDF(...);
-  const blob = doc.output('blob');
-  const url = URL.createObjectURL(blob);
-  const iframe = document.createElement('iframe');
-  iframe.style.display = 'none';
-  iframe.src = url;
-  document.body.appendChild(iframe);
-  iframe.onload = () => {
-    iframe.contentWindow?.print();
-    setTimeout(() => {
-      document.body.removeChild(iframe);
-      URL.revokeObjectURL(url);
-    }, 1000);
-  };
-};
-```
+**Arquivo:** `src/components/route/RouteHistoryImporter.tsx` (novo)
+- Componente para upload de arquivos .xls no formato "Entregas" do ERP
+- Parser que le o XML-Excel e extrai: Ordem, Venda, Cliente, CEP, Endereco, Numero, Bairro, Cidade, UF
+- Detecta o identificador do caminhao pelo nome do arquivo (ex: "CYR" de "CYR10.02.26.xls")
+- Salva no banco com RLS por user_id
 
-Tambem aplicar a mesma correcao no `src/lib/manifest.ts` (funcao `printManifestPDF`, linha ~280) que tem o mesmo problema.
+**Arquivo:** `src/pages/Settings.tsx`
+- Nova aba "Historico" para acessar o importador de roteiros
+
+### Como o sistema usa o historico
+
+**Arquivo:** `src/lib/autoRouterEngine.ts`
+- Antes de compor rotas, consultar `route_history_patterns` para ver quais cidades costumam ir juntas no mesmo caminhao
+- Se historicamente Barueri e Jandira iam juntas no caminhao CYR, o sistema aprende esse padrao e sugere a mesma combinacao
+- O peso do historico influencia o score de clustering, mas nao impede ajustes manuais
 
 ---
 
@@ -64,12 +84,24 @@ Tambem aplicar a mesma correcao no `src/lib/manifest.ts` (funcao `printManifestP
 
 | Arquivo | Acao |
 |---------|------|
-| `src/components/route/LoadingManifest.tsx` | Corrigir handlePrint com iframe |
-| `src/lib/manifest.ts` | Corrigir printManifestPDF com iframe |
-| `src/components/route/ProductUnitsImporter.tsx` | Adicionar botao "Importar Planilha Padrao" usando arquivo embutido |
+| `src/lib/autoRouterEngine.ts` | Substituir clustering por angulo por clustering por cidade |
+| `src/lib/geocoding.ts` | Melhorar extracao de cidade dos enderecos |
+| `src/types/index.ts` | Adicionar campo `city` ao `ParsedOrder` |
+| `src/components/route/RouteHistoryImporter.tsx` | Novo: importador de roteiros historicos |
+| `src/pages/Settings.tsx` | Adicionar aba "Historico" |
+| Migracao SQL | Criar tabela `route_history_patterns` com RLS |
+
+---
+
+## Ordem de Implementacao
+
+1. Regionalizacao por cidade no motor de roteamento (impacto imediato)
+2. Criacao da tabela de historico no banco
+3. Importador de roteiros historicos
+4. Integracao do historico no algoritmo de composicao
 
 ## Resultado Esperado
 
-1. Ao clicar "Importar Planilha Padrao" em Configuracoes > Produtos, os 364 produtos serao salvos no banco com suas unidades corretas
-2. No Romaneio de Carga, itens como Tubaina aparecerao consolidados como "40 fardos" ao inves de "peso em kg"
-3. O botao Imprimir funcionara sem erro, abrindo o dialogo de impressao do navegador
+- Ao roteirizar, cada caminhao recebera entregas de uma cidade (ou cidades proximas se a carga permitir)
+- O usuario podera carregar roteiros antigos feitos pelo analista para que o sistema aprenda os padroes
+- Com o tempo, o sistema sugere composicoes cada vez mais proximas do que o analista humano faria
