@@ -28,32 +28,53 @@ export interface DistanceResult {
 export function parseAddress(address: string): GeocodedAddress {
   const normalized = address.trim().toLowerCase();
   
-  // Extract street name (first part before comma or number)
-  const streetMatch = normalized.match(/^((?:av\.?|r\.?|rua|avenida|alameda|al\.?|travessa|tv\.?|praça|pç\.?)\s*[^,\d]+)/i);
-  const street = streetMatch ? streetMatch[1].trim() : '';
+  // Check if address is in ERP comma-separated format: "Rua, Numero, Bairro, Cidade, UF"
+  const parts = address.split(',').map(p => p.trim());
   
-  // Extract number
-  const numberMatch = normalized.match(/,?\s*(\d+)/);
-  const number = numberMatch ? numberMatch[1] : '';
+  let street = '';
+  let number = '';
+  let neighborhood = '';
+  let city = '';
+  let state = '';
+  let zipCode = '';
+
+  if (parts.length >= 4) {
+    // ERP format: Endereco, Numero, Bairro, Cidade, UF
+    street = parts[0].toLowerCase();
+    number = parts[1] || '';
+    neighborhood = parts[2] || '';
+    
+    // Last part may be UF (2 letters)
+    const lastPart = parts[parts.length - 1].trim();
+    if (/^[a-z]{2}$/i.test(lastPart)) {
+      state = lastPart.toUpperCase();
+      city = parts[parts.length - 2]?.trim() || '';
+    } else {
+      city = parts[parts.length - 1]?.trim() || '';
+    }
+  } else {
+    // Legacy format parsing
+    const streetMatch = normalized.match(/^((?:av\.?|r\.?|rua|avenida|alameda|al\.?|travessa|tv\.?|praça|pç\.?)\s*[^,\d]+)/i);
+    street = streetMatch ? streetMatch[1].trim() : '';
+    
+    const numberMatch = normalized.match(/,?\s*(\d+)/);
+    number = numberMatch ? numberMatch[1] : '';
+    
+    const neighborhoodMatch = normalized.match(/(?:,\s*|\s+-\s*)([^,-]+?)(?:\s*-\s*[a-z]{2}\s*,?\s*\d{5}|\s*-\s*[a-z]+\s*-\s*[a-z]{2}|$)/i);
+    neighborhood = neighborhoodMatch ? neighborhoodMatch[1].trim() : '';
+    
+    const cityMatch = normalized.match(/(?:\s+-\s*|,\s*)([a-záàâãéèêíïóôõöúçñ\s]+)(?:\s*-\s*[a-z]{2})/i);
+    city = cityMatch ? cityMatch[1].trim() : '';
+    
+    const stateMatch = normalized.match(/-\s*([a-z]{2})(?:\s*,?\s*\d{5}|$)/i);
+    state = stateMatch ? stateMatch[1].toUpperCase() : '';
+  }
   
-  // Extract neighborhood (usually after the number, before city)
-  const neighborhoodMatch = normalized.match(/(?:,\s*|\s+-\s*)([^,-]+?)(?:\s*-\s*[a-z]{2}\s*,?\s*\d{5}|\s*-\s*[a-z]+\s*-\s*[a-z]{2}|$)/i);
-  const neighborhood = neighborhoodMatch ? neighborhoodMatch[1].trim() : '';
-  
-  // Extract city
-  const cityMatch = normalized.match(/(?:\s+-\s*|,\s*)([a-záàâãéèêíïóôõöúçñ\s]+)(?:\s*-\s*[a-z]{2})/i);
-  const city = cityMatch ? cityMatch[1].trim() : '';
-  
-  // Extract state
-  const stateMatch = normalized.match(/-\s*([a-z]{2})(?:\s*,?\s*\d{5}|$)/i);
-  const state = stateMatch ? stateMatch[1].toUpperCase() : '';
-  
-  // Extract ZIP code
+  // Extract ZIP code from full address
   const zipMatch = normalized.match(/(\d{5}-?\d{3})/);
-  const zipCode = zipMatch ? zipMatch[1].replace('-', '') : '';
+  zipCode = zipMatch ? zipMatch[1].replace('-', '') : '';
   
   // Generate estimated coordinates based on address components
-  // This is a simplified approach - in production use real geocoding
   const coords = estimateCoordinates(street, neighborhood, city, zipCode);
   
   return {
