@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Upload, FileSpreadsheet, Trash2, History, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -58,10 +58,11 @@ export function RouteHistoryImporter() {
     setLoaded(true);
   }, [user]);
 
-  // Load on first render
-  if (!loaded && user) {
-    loadPatterns();
-  }
+  useEffect(() => {
+    if (!loaded && user) {
+      loadPatterns();
+    }
+  }, [user, loaded, loadPatterns]);
 
   const extractTruckLabel = (filename: string): string => {
     // Extract truck identifier from filename like "CYR10.02.26.xls" -> "CYR"
