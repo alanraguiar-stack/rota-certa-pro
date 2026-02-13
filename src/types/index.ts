@@ -215,6 +215,7 @@ export interface ParsedOrder {
   weight_kg: number; // Total weight (sum of items)
   product_description?: string; // Legacy single product field
   items: ParsedOrderItem[]; // Multiple items
+  city?: string; // City extracted from address for regionalization
   isValid: boolean;
   error?: string;
 }

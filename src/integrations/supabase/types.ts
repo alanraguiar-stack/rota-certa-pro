@@ -258,6 +258,51 @@ export type Database = {
         }
         Relationships: []
       }
+      route_history_patterns: {
+        Row: {
+          address: string | null
+          city: string | null
+          client_name: string | null
+          created_at: string
+          id: string
+          neighborhood: string | null
+          route_date: string | null
+          sale_number: string | null
+          sequence_order: number | null
+          state: string | null
+          truck_label: string
+          user_id: string
+        }
+        Insert: {
+          address?: string | null
+          city?: string | null
+          client_name?: string | null
+          created_at?: string
+          id?: string
+          neighborhood?: string | null
+          route_date?: string | null
+          sale_number?: string | null
+          sequence_order?: number | null
+          state?: string | null
+          truck_label: string
+          user_id: string
+        }
+        Update: {
+          address?: string | null
+          city?: string | null
+          client_name?: string | null
+          created_at?: string
+          id?: string
+          neighborhood?: string | null
+          route_date?: string | null
+          sale_number?: string | null
+          sequence_order?: number | null
+          state?: string | null
+          truck_label?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       route_trucks: {
         Row: {
           created_at: string

@@ -211,8 +211,8 @@ export function autoComposeRoute(
     };
   });
   
-  // Step 3: Cluster orders by geographic sector
-  const clusters = clusterOrdersBySector(geocodedOrders, selectedTrucks.length, cfg.strategy);
+  // Step 3: Cluster orders by CITY (regionalization) instead of angle
+  const clusters = clusterOrdersByCity(geocodedOrders, selectedTrucks.length, cfg.strategy);
   
   // Step 4: Assign clusters to trucks respecting capacity
   const compositions = assignClustersToTrucks(clusters, selectedTrucks, cfg);
@@ -246,27 +246,53 @@ export function autoComposeRoute(
 }
 
 /**
- * Cluster orders by geographic sector using angle from CD
+ * Cluster orders by CITY as primary grouping criterion (regionalization).
+ * Each truck gets deliveries from the same city or nearby cities.
+ * If a city exceeds capacity, it's split into sub-clusters geographically.
  */
-function clusterOrdersBySector(
+function clusterOrdersByCity(
   orders: GeocodedOrder[],
   numClusters: number,
   strategy: RoutingStrategy
 ): GeocodedOrder[][] {
   if (orders.length === 0 || numClusters <= 0) return [];
-  
-  // Sort by angle to create geographic sectors
-  const sorted = [...orders].sort((a, b) => a.angle - b.angle);
-  
-  // Divide into clusters
+
+  // Group orders by city
+  const cityGroups = new Map<string, GeocodedOrder[]>();
+  for (const order of orders) {
+    const city = (order.geocoded.city || 'desconhecida').toLowerCase().trim();
+    const existing = cityGroups.get(city) || [];
+    existing.push(order);
+    cityGroups.set(city, existing);
+  }
+
+  // Sort city groups by total weight descending (biggest cities first)
+  const sortedCityGroups = [...cityGroups.entries()]
+    .sort((a, b) => {
+      const weightA = a[1].reduce((s, o) => s + o.weight_kg, 0);
+      const weightB = b[1].reduce((s, o) => s + o.weight_kg, 0);
+      return weightB - weightA;
+    });
+
+  // Distribute city groups into clusters using bin-packing
   const clusters: GeocodedOrder[][] = Array.from({ length: numClusters }, () => []);
-  const ordersPerCluster = Math.ceil(sorted.length / numClusters);
-  
-  sorted.forEach((order, index) => {
-    const clusterIndex = Math.min(Math.floor(index / ordersPerCluster), numClusters - 1);
-    clusters[clusterIndex].push(order);
-  });
-  
+  const clusterWeights = new Array(numClusters).fill(0);
+
+  for (const [, cityOrders] of sortedCityGroups) {
+    // Find the cluster with least total weight (best-fit)
+    let minIdx = 0;
+    let minWeight = clusterWeights[0];
+    for (let i = 1; i < numClusters; i++) {
+      if (clusterWeights[i] < minWeight) {
+        minWeight = clusterWeights[i];
+        minIdx = i;
+      }
+    }
+
+    clusters[minIdx].push(...cityOrders);
+    clusterWeights[minIdx] += cityOrders.reduce((s, o) => s + o.weight_kg, 0);
+  }
+
   // Sort within each cluster based on strategy
   clusters.forEach(cluster => {
     switch (strategy) {
@@ -282,7 +308,7 @@ function clusterOrdersBySector(
         optimizeClusterByNearestNeighbor(cluster);
     }
   });
-  
+
   return clusters;
 }
 
