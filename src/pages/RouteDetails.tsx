@@ -24,6 +24,8 @@ import { LoadConsolidationView } from '@/components/route/LoadConsolidationView'
 import { SideBySideManifests } from '@/components/route/SideBySideManifests';
 import { TruckManifestCards } from '@/components/route/TruckManifestCards';
 import { TruckRouteEditor } from '@/components/route/TruckRouteEditor';
+import { DriverAssignment } from '@/components/route/DriverAssignment';
+import { ExecutionTracker } from '@/components/route/ExecutionTracker';
 
 // Helper function to get strategy label
 function getStrategyLabel(strategy: RoutingStrategy): string {
@@ -711,6 +713,23 @@ export default function RouteDetails() {
               }))}
             />
           </>
+        )}
+
+        {/* Driver Assignment - shown when route is distributed/completed */}
+        {(activeStep === 'delivery_manifest' || route.status === 'distributed' || route.status === 'completed') && route.route_trucks.length > 0 && (
+          <DriverAssignment
+            routeTrucks={route.route_trucks}
+            routeId={route.id}
+            onAssigned={() => refetch()}
+          />
+        )}
+
+        {/* Execution Tracker - shown when route has driver assignments */}
+        {route.route_trucks.length > 0 && (
+          <ExecutionTracker
+            routeTrucks={route.route_trucks}
+            routeName={route.name}
+          />
         )}
 
         {/* All Orders List */}

@@ -11,6 +11,8 @@ import NewRoute from "./pages/NewRoute";
 import RouteDetails from "./pages/RouteDetails";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
+import DriverDashboard from "./pages/DriverDashboard";
+import DeliveryConfirmation from "./pages/DeliveryConfirmation";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -30,6 +32,8 @@ const App = () => (
             <Route path="/rota/:id" element={<RouteDetails />} />
             <Route path="/historico" element={<History />} />
             <Route path="/configuracoes" element={<Settings />} />
+            <Route path="/motorista" element={<DriverDashboard />} />
+            <Route path="/motorista/entrega/:id" element={<DeliveryConfirmation />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
