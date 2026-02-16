@@ -41,6 +41,95 @@ export type Database = {
         }
         Relationships: []
       }
+      delivery_executions: {
+        Row: {
+          created_at: string
+          delivered_at: string | null
+          driver_assignment_id: string
+          id: string
+          observations: string | null
+          order_id: string
+          photo_url: string | null
+          signature_url: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          delivered_at?: string | null
+          driver_assignment_id: string
+          id?: string
+          observations?: string | null
+          order_id: string
+          photo_url?: string | null
+          signature_url?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          delivered_at?: string | null
+          driver_assignment_id?: string
+          id?: string
+          observations?: string | null
+          order_id?: string
+          photo_url?: string | null
+          signature_url?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "delivery_executions_driver_assignment_id_fkey"
+            columns: ["driver_assignment_id"]
+            isOneToOne: false
+            referencedRelation: "driver_assignments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "delivery_executions_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      driver_assignments: {
+        Row: {
+          created_at: string
+          driver_user_id: string
+          finished_at: string | null
+          id: string
+          route_truck_id: string
+          started_at: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          driver_user_id: string
+          finished_at?: string | null
+          id?: string
+          route_truck_id: string
+          started_at?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          driver_user_id?: string
+          finished_at?: string | null
+          id?: string
+          route_truck_id?: string
+          started_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "driver_assignments_route_truck_id_fkey"
+            columns: ["route_truck_id"]
+            isOneToOne: true
+            referencedRelation: "route_trucks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       geocoding_cache: {
         Row: {
           address_hash: string
@@ -492,7 +581,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "admin" | "operacional"
+      app_role: "admin" | "operacional" | "motorista"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -620,7 +709,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "operacional"],
+      app_role: ["admin", "operacional", "motorista"],
     },
   },
 } as const

@@ -1,16 +1,21 @@
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Truck, Route, History, LogOut, Settings, HelpCircle, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Truck, Route, History, LogOut, Settings, HelpCircle, ChevronRight, Navigation } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserRole } from '@/hooks/useUserRole';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 
-const mainMenuItems = [
+const adminMenuItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },
   { title: 'Roteirização', url: '/nova-rota', icon: Route },
   { title: 'Frota', url: '/frota', icon: Truck },
   { title: 'Histórico', url: '/historico', icon: History },
+];
+
+const driverMenuItems = [
+  { title: 'Minhas Rotas', url: '/motorista', icon: Navigation },
 ];
 
 const secondaryMenuItems = [
@@ -19,7 +24,9 @@ const secondaryMenuItems = [
 
 export function AppSidebar() {
   const { signOut, user } = useAuth();
+  const { isMotorista } = useUserRole();
   const navigate = useNavigate();
+  const mainMenuItems = isMotorista ? driverMenuItems : adminMenuItems;
 
   const handleSignOut = async () => {
     await signOut();

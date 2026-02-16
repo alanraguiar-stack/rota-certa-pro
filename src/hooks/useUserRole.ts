@@ -2,13 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 
-export type AppRole = 'admin' | 'operacional';
+export type AppRole = 'admin' | 'operacional' | 'motorista';
 
 interface UserRoleState {
   role: AppRole | null;
   loading: boolean;
   isAdmin: boolean;
   isOperacional: boolean;
+  isMotorista: boolean;
 }
 
 export function useUserRole(): UserRoleState {
@@ -54,6 +55,7 @@ export function useUserRole(): UserRoleState {
     loading,
     isAdmin: role === 'admin',
     isOperacional: role === 'operacional',
+    isMotorista: role === 'motorista',
   };
 }
 
