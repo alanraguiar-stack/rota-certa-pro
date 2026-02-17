@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Upload, FileSpreadsheet, Trash2, History, AlertCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Trash2, History, AlertCircle, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,7 @@ interface HistoryImport {
   truck_label: string;
   route_date: string | null;
   rows: ParsedHistoryRow[];
+  filename: string;
 }
 
 interface StoredPattern {
@@ -38,7 +39,7 @@ interface StoredPattern {
 export function RouteHistoryImporter() {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [preview, setPreview] = useState<HistoryImport | null>(null);
+  const [previews, setPreviews] = useState<HistoryImport[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [patterns, setPatterns] = useState<StoredPattern[]>([]);
   const [loadingPatterns, setLoadingPatterns] = useState(false);
@@ -65,121 +66,176 @@ export function RouteHistoryImporter() {
   }, [user, loaded, loadPatterns]);
 
   const extractTruckLabel = (filename: string): string => {
-    // Extract truck identifier from filename like "CYR10.02.26.xls" -> "CYR"
     const match = filename.match(/^([A-Z]{2,5})/i);
     return match ? match[1].toUpperCase() : 'UNKNOWN';
   };
 
   const extractRouteDate = (filename: string): string | null => {
-    // Extract date from filename like "CYR10.02.26.xls" -> "2026-02-10"
-    const match = filename.match(/(\d{2})\.(\d{2})\.(\d{2})/);
-    if (!match) return null;
-    const [, dd, mm, yy] = match;
-    const year = parseInt(yy) > 50 ? `19${yy}` : `20${yy}`;
-    return `${year}-${mm}-${dd}`;
+    // Try DD.MM.YY first
+    const match3 = filename.match(/(\d{2})\.(\d{2})\.(\d{2})/);
+    if (match3) {
+      const [, dd, mm, yy] = match3;
+      const year = parseInt(yy) > 50 ? `19${yy}` : `20${yy}`;
+      return `${year}-${mm}-${dd}`;
+    }
+    // Try DD.MM (no year, assume current year)
+    const match2 = filename.match(/(\d{2})\.(\d{2})/);
+    if (match2) {
+      const [, dd, mm] = match2;
+      const year = new Date().getFullYear();
+      return `${year}-${mm}-${dd}`;
+    }
+    return null;
   };
 
-  const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const extractDateFromColumn = (rawRows: any[][], headers: string[], headerIdx: number): string | null => {
+    const fechIdx = headers.findIndex(h => h.includes('fechamento'));
+    if (fechIdx < 0) return null;
+    for (let i = headerIdx + 1; i < Math.min(headerIdx + 5, rawRows.length); i++) {
+      const val = String(rawRows[i]?.[fechIdx] || '').trim();
+      // DD/MM/YYYY
+      const m = val.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+      // Excel serial date
+      if (/^\d{5}$/.test(val)) {
+        const d = XLSX.SSF.parse_date_code(parseInt(val));
+        if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+      }
+    }
+    return null;
+  };
+
+  const parseFile = (file: File): Promise<HistoryImport | null> => {
+    return new Promise((resolve) => {
+      const truckLabel = extractTruckLabel(file.name);
+      let routeDate = extractRouteDate(file.name);
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = evt.target?.result;
+          const workbook = XLSX.read(data, { type: 'binary' });
+          const sheetName = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+          const rawRows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
+
+          let headerIdx = -1;
+          for (let i = 0; i < Math.min(20, rawRows.length); i++) {
+            const row = rawRows[i];
+            if (row && row.some(cell => String(cell || '').trim().toLowerCase() === 'ordem')) {
+              headerIdx = i;
+              break;
+            }
+          }
+
+          if (headerIdx === -1) {
+            resolve(null);
+            return;
+          }
+
+          const headers = rawRows[headerIdx].map(h => String(h || '').trim().toLowerCase());
+
+          // Fallback: extract date from "Fechamento" column
+          if (!routeDate) {
+            routeDate = extractDateFromColumn(rawRows, headers, headerIdx);
+          }
+
+          const colIdx = {
+            ordem: headers.indexOf('ordem'),
+            venda: headers.indexOf('venda'),
+            cliente: headers.indexOf('cliente'),
+            fantasia: headers.indexOf('fantasia'),
+            cep: headers.indexOf('cep'),
+            endereco: headers.indexOf('endereço') !== -1 ? headers.indexOf('endereço') : headers.indexOf('endereco'),
+            numero: headers.indexOf('número') !== -1 ? headers.indexOf('número') : headers.indexOf('numero'),
+            bairro: headers.indexOf('bairro'),
+            cidade: headers.indexOf('cidade'),
+            uf: headers.indexOf('uf'),
+          };
+
+          const rows: ParsedHistoryRow[] = [];
+          for (let i = headerIdx + 1; i < rawRows.length; i++) {
+            const row = rawRows[i];
+            if (!row || row.length === 0) continue;
+
+            const venda = colIdx.venda >= 0 ? String(row[colIdx.venda] || '').trim() : '';
+            const cliente = colIdx.cliente >= 0 ? String(row[colIdx.cliente] || '').trim() : '';
+
+            if (!cliente && !venda) continue;
+            if (cliente.toLowerCase().includes('total')) continue;
+
+            const ordem = colIdx.ordem >= 0 ? String(row[colIdx.ordem] || '').trim() : '';
+            const endereco = colIdx.endereco >= 0 ? String(row[colIdx.endereco] || '').trim() : '';
+            const numero = colIdx.numero >= 0 ? String(row[colIdx.numero] || '').trim() : '';
+            const bairro = colIdx.bairro >= 0 ? String(row[colIdx.bairro] || '').trim() : '';
+            const cidade = colIdx.cidade >= 0 ? String(row[colIdx.cidade] || '').trim() : '';
+            const uf = colIdx.uf >= 0 ? String(row[colIdx.uf] || '').trim() : '';
+
+            const fullAddress = [endereco, numero, bairro, cidade, uf].filter(Boolean).join(', ');
+
+            rows.push({
+              sequence_order: parseInt(ordem) || rows.length + 1,
+              sale_number: venda,
+              client_name: cliente,
+              address: fullAddress,
+              neighborhood: bairro,
+              city: cidade,
+              state: uf,
+            });
+          }
+
+          if (rows.length === 0) {
+            resolve(null);
+            return;
+          }
+
+          resolve({ truck_label: truckLabel, route_date: routeDate, rows, filename: file.name });
+        } catch {
+          resolve(null);
+        }
+      };
+      reader.readAsBinaryString(file);
+    });
+  };
+
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const file = files[0];
-    const truckLabel = extractTruckLabel(file.name);
-    const routeDate = extractRouteDate(file.name);
+    const results: HistoryImport[] = [];
+    const errors: string[] = [];
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const data = evt.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rawRows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
-
-        // Find the header row with "Ordem", "Venda", etc.
-        let headerIdx = -1;
-        for (let i = 0; i < Math.min(20, rawRows.length); i++) {
-          const row = rawRows[i];
-          if (row && row.some(cell => String(cell || '').trim().toLowerCase() === 'ordem')) {
-            headerIdx = i;
-            break;
-          }
-        }
-
-        if (headerIdx === -1) {
-          toast({ title: 'Formato não reconhecido. Esperado: planilha "Entregas" do ERP.', variant: 'destructive' });
-          return;
-        }
-
-        const headers = rawRows[headerIdx].map(h => String(h || '').trim().toLowerCase());
-        const colIdx = {
-          ordem: headers.indexOf('ordem'),
-          venda: headers.indexOf('venda'),
-          cliente: headers.indexOf('cliente'),
-          fantasia: headers.indexOf('fantasia'),
-          cep: headers.indexOf('cep'),
-          endereco: headers.indexOf('endereço') !== -1 ? headers.indexOf('endereço') : headers.indexOf('endereco'),
-          numero: headers.indexOf('número') !== -1 ? headers.indexOf('número') : headers.indexOf('numero'),
-          bairro: headers.indexOf('bairro'),
-          cidade: headers.indexOf('cidade'),
-          uf: headers.indexOf('uf'),
-        };
-
-        const rows: ParsedHistoryRow[] = [];
-        for (let i = headerIdx + 1; i < rawRows.length; i++) {
-          const row = rawRows[i];
-          if (!row || row.length === 0) continue;
-
-          const ordem = colIdx.ordem >= 0 ? String(row[colIdx.ordem] || '').trim() : '';
-          const venda = colIdx.venda >= 0 ? String(row[colIdx.venda] || '').trim() : '';
-          const cliente = colIdx.cliente >= 0 ? String(row[colIdx.cliente] || '').trim() : '';
-          const cidade = colIdx.cidade >= 0 ? String(row[colIdx.cidade] || '').trim() : '';
-
-          // Skip empty rows and totals
-          if (!cliente && !venda) continue;
-          if (cliente.toLowerCase().includes('total')) continue;
-
-          const endereco = colIdx.endereco >= 0 ? String(row[colIdx.endereco] || '').trim() : '';
-          const numero = colIdx.numero >= 0 ? String(row[colIdx.numero] || '').trim() : '';
-          const bairro = colIdx.bairro >= 0 ? String(row[colIdx.bairro] || '').trim() : '';
-          const uf = colIdx.uf >= 0 ? String(row[colIdx.uf] || '').trim() : '';
-
-          const fullAddress = [endereco, numero, bairro, cidade, uf].filter(Boolean).join(', ');
-
-          rows.push({
-            sequence_order: parseInt(ordem) || rows.length + 1,
-            sale_number: venda,
-            client_name: cliente,
-            address: fullAddress,
-            neighborhood: bairro,
-            city: cidade,
-            state: uf,
-          });
-        }
-
-        if (rows.length === 0) {
-          toast({ title: 'Nenhuma entrega encontrada no arquivo', variant: 'destructive' });
-          return;
-        }
-
-        setPreview({ truck_label: truckLabel, route_date: routeDate, rows });
-        toast({ title: `${rows.length} entregas de ${truckLabel} encontradas` });
-      } catch {
-        toast({ title: 'Erro ao ler arquivo', variant: 'destructive' });
+    for (const file of Array.from(files)) {
+      const result = await parseFile(file);
+      if (result) {
+        results.push(result);
+      } else {
+        errors.push(file.name);
       }
-    };
-    reader.readAsBinaryString(file);
+    }
+
+    if (errors.length > 0) {
+      toast({ title: `Formato não reconhecido: ${errors.join(', ')}`, variant: 'destructive' });
+    }
+    if (results.length > 0) {
+      setPreviews(prev => [...prev, ...results]);
+      const total = results.reduce((s, r) => s + r.rows.length, 0);
+      toast({ title: `${total} entregas encontradas em ${results.length} arquivo(s)` });
+    }
+
     e.target.value = '';
   }, [toast]);
 
-  const handleImport = async () => {
-    if (!preview || !user) return;
+  const handleImportOne = async (index: number) => {
+    if (!user) return;
+    const item = previews[index];
+    if (!item) return;
     setIsImporting(true);
 
-    const records = preview.rows.map(row => ({
+    const records = item.rows.map(row => ({
       user_id: user.id,
-      truck_label: preview.truck_label,
-      route_date: preview.route_date,
+      truck_label: item.truck_label,
+      route_date: item.route_date,
       sequence_order: row.sequence_order,
       sale_number: row.sale_number,
       client_name: row.client_name,
@@ -189,18 +245,49 @@ export function RouteHistoryImporter() {
       state: row.state,
     }));
 
-    const { error } = await supabase
-      .from('route_history_patterns')
-      .insert(records);
-
+    const { error } = await supabase.from('route_history_patterns').insert(records);
     if (error) {
-      toast({ title: 'Erro ao salvar histórico', description: error.message, variant: 'destructive' });
+      toast({ title: 'Erro ao salvar', description: error.message, variant: 'destructive' });
     } else {
-      toast({ title: `${records.length} entregas de ${preview.truck_label} salvas no histórico` });
-      setPreview(null);
+      toast({ title: `${records.length} entregas de ${item.truck_label} salvas` });
+      setPreviews(prev => prev.filter((_, i) => i !== index));
       loadPatterns();
     }
     setIsImporting(false);
+  };
+
+  const handleImportAll = async () => {
+    if (!user || previews.length === 0) return;
+    setIsImporting(true);
+
+    const allRecords = previews.flatMap(item =>
+      item.rows.map(row => ({
+        user_id: user.id,
+        truck_label: item.truck_label,
+        route_date: item.route_date,
+        sequence_order: row.sequence_order,
+        sale_number: row.sale_number,
+        client_name: row.client_name,
+        address: row.address,
+        neighborhood: row.neighborhood,
+        city: row.city,
+        state: row.state,
+      }))
+    );
+
+    const { error } = await supabase.from('route_history_patterns').insert(allRecords);
+    if (error) {
+      toast({ title: 'Erro ao salvar', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: `${allRecords.length} entregas de ${previews.length} roteiro(s) salvas` });
+      setPreviews([]);
+      loadPatterns();
+    }
+    setIsImporting(false);
+  };
+
+  const removePreview = (index: number) => {
+    setPreviews(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleDeleteByTruck = async (truckLabel: string, routeDate: string | null) => {
@@ -224,7 +311,6 @@ export function RouteHistoryImporter() {
     }
   };
 
-  // Group stored patterns by truck+date
   const groupedPatterns = patterns.reduce<Record<string, { truckLabel: string; routeDate: string | null; count: number; cities: string[] }>>((acc, p) => {
     const key = `${p.truck_label}_${p.route_date || 'sem_data'}`;
     if (!acc[key]) {
@@ -247,17 +333,17 @@ export function RouteHistoryImporter() {
             Importar Roteiro do Analista
           </CardTitle>
           <CardDescription>
-            Envie arquivos .xls de roteiros feitos manualmente. O sistema aprende os padrões de agrupamento por cidade e caminhão.
-            O nome do arquivo deve conter o identificador do caminhão (ex: CYR10.02.26.xls).
+            Envie um ou mais arquivos .xls/.xlsx de roteiros feitos manualmente. O sistema aprende os padrões de agrupamento por cidade e caminhão.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <label className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed p-8 cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
             <Upload className="h-8 w-8 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Clique para selecionar arquivo de roteiro (.xls)</span>
+            <span className="text-sm text-muted-foreground">Clique para selecionar arquivos de roteiro (.xls, .xlsx)</span>
             <input
               type="file"
               accept=".xls,.xlsx"
+              multiple
               className="hidden"
               onChange={handleFileUpload}
             />
@@ -265,52 +351,65 @@ export function RouteHistoryImporter() {
         </CardContent>
       </Card>
 
-      {/* Preview */}
-      {preview && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileSpreadsheet className="h-4 w-4" />
-              Roteiro: {preview.truck_label} {preview.route_date ? `(${preview.route_date})` : ''}
-            </CardTitle>
-            <CardDescription>{preview.rows.length} entregas encontradas</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2 mb-2">
-              {[...new Set(preview.rows.map(r => r.city).filter(Boolean))].map(city => (
-                <Badge key={city} variant="secondary">{city}</Badge>
-              ))}
-            </div>
-            <div className="max-h-[300px] overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[60px]">Seq</TableHead>
-                    <TableHead>Cliente</TableHead>
-                    <TableHead>Cidade</TableHead>
-                    <TableHead>Bairro</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {preview.rows.map((row, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell>{row.sequence_order}</TableCell>
-                      <TableCell className="font-medium">{row.client_name}</TableCell>
-                      <TableCell>{row.city}</TableCell>
-                      <TableCell className="text-muted-foreground">{row.neighborhood}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={handleImport} disabled={isImporting}>
-                {isImporting ? 'Salvando...' : `Salvar ${preview.rows.length} entregas`}
+      {/* Previews */}
+      {previews.length > 0 && (
+        <div className="space-y-4">
+          {previews.length > 1 && (
+            <div className="flex justify-end">
+              <Button onClick={handleImportAll} disabled={isImporting}>
+                {isImporting ? 'Salvando...' : `Salvar Todos (${previews.reduce((s, p) => s + p.rows.length, 0)} entregas)`}
               </Button>
-              <Button variant="outline" onClick={() => setPreview(null)}>Cancelar</Button>
             </div>
-          </CardContent>
-        </Card>
+          )}
+          {previews.map((preview, idx) => (
+            <Card key={`${preview.filename}-${idx}`}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FileSpreadsheet className="h-4 w-4" />
+                    {preview.truck_label} {preview.route_date ? `(${preview.route_date})` : '(sem data)'}
+                  </CardTitle>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => removePreview(idx)}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <CardDescription>{preview.filename} — {preview.rows.length} entregas</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {[...new Set(preview.rows.map(r => r.city).filter(Boolean))].map(city => (
+                    <Badge key={city} variant="secondary">{city}</Badge>
+                  ))}
+                </div>
+                <div className="max-h-[200px] overflow-y-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[60px]">Seq</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Cidade</TableHead>
+                        <TableHead>Bairro</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {preview.rows.map((row, rowIdx) => (
+                        <TableRow key={rowIdx}>
+                          <TableCell>{row.sequence_order}</TableCell>
+                          <TableCell className="font-medium">{row.client_name}</TableCell>
+                          <TableCell>{row.city}</TableCell>
+                          <TableCell className="text-muted-foreground">{row.neighborhood}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                <Button size="sm" onClick={() => handleImportOne(idx)} disabled={isImporting}>
+                  Salvar {preview.rows.length} entregas
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       )}
 
       {/* Stored Patterns */}
