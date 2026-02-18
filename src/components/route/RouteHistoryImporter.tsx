@@ -1,12 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
-import { Upload, FileSpreadsheet, Trash2, History, AlertCircle, X } from 'lucide-react';
+import { Upload, FileSpreadsheet, Trash2, History, AlertCircle, X, ClipboardPaste } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { parsePDFFile } from '@/lib/pdfParser';
 import * as XLSX from 'xlsx';
 
 interface ParsedHistoryRow {
@@ -36,6 +40,197 @@ interface StoredPattern {
   created_at: string;
 }
 
+// ── Shared helpers ──
+
+const extractTruckLabel = (filename: string): string => {
+  const match = filename.match(/^([A-Z]{2,5})/i);
+  return match ? match[1].toUpperCase() : 'UNKNOWN';
+};
+
+const extractRouteDate = (filename: string): string | null => {
+  const match3 = filename.match(/(\d{2})\.(\d{2})\.(\d{2})/);
+  if (match3) {
+    const [, dd, mm, yy] = match3;
+    const year = parseInt(yy) > 50 ? `19${yy}` : `20${yy}`;
+    return `${year}-${mm}-${dd}`;
+  }
+  const match2 = filename.match(/(\d{2})\.(\d{2})/);
+  if (match2) {
+    const [, dd, mm] = match2;
+    const year = new Date().getFullYear();
+    return `${year}-${mm}-${dd}`;
+  }
+  return null;
+};
+
+const extractDateFromColumn = (rawRows: any[][], headers: string[], headerIdx: number): string | null => {
+  const fechIdx = headers.findIndex(h => h.includes('fechamento'));
+  if (fechIdx < 0) return null;
+  for (let i = headerIdx + 1; i < Math.min(headerIdx + 5, rawRows.length); i++) {
+    const val = String(rawRows[i]?.[fechIdx] || '').trim();
+    const m = val.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    if (/^\d{5}$/.test(val)) {
+      const d = XLSX.SSF.parse_date_code(parseInt(val));
+      if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+    }
+  }
+  return null;
+};
+
+/**
+ * Shared mapping function: takes raw 2D string array and produces HistoryImport.
+ * Used by Excel, CSV, PDF, and paste parsers.
+ */
+function mapRowsToHistoryImport(
+  rawRows: any[][],
+  truckLabel: string,
+  routeDate: string | null,
+  filename: string
+): HistoryImport | null {
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(20, rawRows.length); i++) {
+    const row = rawRows[i];
+    if (row && row.some(cell => String(cell || '').trim().toLowerCase() === 'ordem')) {
+      headerIdx = i;
+      break;
+    }
+  }
+
+  if (headerIdx === -1) return null;
+
+  const headers = rawRows[headerIdx].map((h: any) => String(h || '').trim().toLowerCase());
+
+  // Fallback date from "Fechamento" column
+  if (!routeDate) {
+    routeDate = extractDateFromColumn(rawRows, headers, headerIdx);
+  }
+
+  const colIdx = {
+    ordem: headers.indexOf('ordem'),
+    venda: headers.indexOf('venda'),
+    cliente: headers.indexOf('cliente'),
+    fantasia: headers.indexOf('fantasia'),
+    cep: headers.indexOf('cep'),
+    endereco: headers.indexOf('endereço') !== -1 ? headers.indexOf('endereço') : headers.indexOf('endereco'),
+    numero: headers.indexOf('número') !== -1 ? headers.indexOf('número') : headers.indexOf('numero'),
+    bairro: headers.indexOf('bairro'),
+    cidade: headers.indexOf('cidade'),
+    uf: headers.indexOf('uf'),
+  };
+
+  const rows: ParsedHistoryRow[] = [];
+  for (let i = headerIdx + 1; i < rawRows.length; i++) {
+    const row = rawRows[i];
+    if (!row || row.length === 0) continue;
+
+    const venda = colIdx.venda >= 0 ? String(row[colIdx.venda] || '').trim() : '';
+    const cliente = colIdx.cliente >= 0 ? String(row[colIdx.cliente] || '').trim() : '';
+
+    if (!cliente && !venda) continue;
+    if (cliente.toLowerCase().includes('total')) continue;
+
+    const ordem = colIdx.ordem >= 0 ? String(row[colIdx.ordem] || '').trim() : '';
+    const endereco = colIdx.endereco >= 0 ? String(row[colIdx.endereco] || '').trim() : '';
+    const numero = colIdx.numero >= 0 ? String(row[colIdx.numero] || '').trim() : '';
+    const bairro = colIdx.bairro >= 0 ? String(row[colIdx.bairro] || '').trim() : '';
+    const cidade = colIdx.cidade >= 0 ? String(row[colIdx.cidade] || '').trim() : '';
+    const uf = colIdx.uf >= 0 ? String(row[colIdx.uf] || '').trim() : '';
+
+    const fullAddress = [endereco, numero, bairro, cidade, uf].filter(Boolean).join(', ');
+
+    rows.push({
+      sequence_order: parseInt(ordem) || rows.length + 1,
+      sale_number: venda,
+      client_name: cliente,
+      address: fullAddress,
+      neighborhood: bairro,
+      city: cidade,
+      state: uf,
+    });
+  }
+
+  if (rows.length === 0) return null;
+
+  return { truck_label: truckLabel, route_date: routeDate, rows, filename };
+}
+
+// ── Format-specific parsers ──
+
+function parseExcelFile(file: File): Promise<HistoryImport | null> {
+  return new Promise((resolve) => {
+    const truckLabel = extractTruckLabel(file.name);
+    const routeDate = extractRouteDate(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = evt.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        const rawRows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
+        resolve(mapRowsToHistoryImport(rawRows, truckLabel, routeDate, file.name));
+      } catch {
+        resolve(null);
+      }
+    };
+    reader.readAsBinaryString(file);
+  });
+}
+
+async function parseCSVFile(file: File): Promise<HistoryImport | null> {
+  try {
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).filter(l => l.trim());
+    if (lines.length === 0) return null;
+
+    // Auto-detect separator
+    const firstLine = lines[0];
+    const sep = (firstLine.split(';').length > firstLine.split(',').length) ? ';' : ',';
+
+    const rawRows = lines.map(line => line.split(sep));
+    const truckLabel = extractTruckLabel(file.name);
+    const routeDate = extractRouteDate(file.name);
+    return mapRowsToHistoryImport(rawRows, truckLabel, routeDate, file.name);
+  } catch {
+    return null;
+  }
+}
+
+async function parsePDFHistoryFile(file: File): Promise<HistoryImport | null> {
+  try {
+    const result = await parsePDFFile(file);
+    if (!result.rows || result.rows.length < 2) return null;
+    const truckLabel = extractTruckLabel(file.name);
+    const routeDate = extractRouteDate(file.name);
+    return mapRowsToHistoryImport(result.rows, truckLabel, routeDate, file.name);
+  } catch {
+    return null;
+  }
+}
+
+function parseFromText(text: string, truckLabel: string): HistoryImport | null {
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length === 0) return null;
+
+  const firstLine = lines[0];
+  let sep = '\t';
+  if (firstLine.split(';').length > firstLine.split('\t').length) sep = ';';
+
+  const rawRows = lines.map(line => line.split(sep));
+  return mapRowsToHistoryImport(rawRows, truckLabel || 'UNKNOWN', null, 'texto-colado');
+}
+
+async function parseFile(file: File): Promise<HistoryImport | null> {
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  if (ext === 'csv') return parseCSVFile(file);
+  if (ext === 'pdf') return parsePDFHistoryFile(file);
+  // Default: Excel
+  return parseExcelFile(file);
+}
+
+// ── Component ──
+
 export function RouteHistoryImporter() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -44,6 +239,10 @@ export function RouteHistoryImporter() {
   const [patterns, setPatterns] = useState<StoredPattern[]>([]);
   const [loadingPatterns, setLoadingPatterns] = useState(false);
   const [loaded, setLoaded] = useState(false);
+
+  // Paste state
+  const [pasteText, setPasteText] = useState('');
+  const [pasteTruck, setPasteTruck] = useState('');
 
   const loadPatterns = useCallback(async () => {
     if (!user) return;
@@ -64,139 +263,6 @@ export function RouteHistoryImporter() {
       loadPatterns();
     }
   }, [user, loaded, loadPatterns]);
-
-  const extractTruckLabel = (filename: string): string => {
-    const match = filename.match(/^([A-Z]{2,5})/i);
-    return match ? match[1].toUpperCase() : 'UNKNOWN';
-  };
-
-  const extractRouteDate = (filename: string): string | null => {
-    // Try DD.MM.YY first
-    const match3 = filename.match(/(\d{2})\.(\d{2})\.(\d{2})/);
-    if (match3) {
-      const [, dd, mm, yy] = match3;
-      const year = parseInt(yy) > 50 ? `19${yy}` : `20${yy}`;
-      return `${year}-${mm}-${dd}`;
-    }
-    // Try DD.MM (no year, assume current year)
-    const match2 = filename.match(/(\d{2})\.(\d{2})/);
-    if (match2) {
-      const [, dd, mm] = match2;
-      const year = new Date().getFullYear();
-      return `${year}-${mm}-${dd}`;
-    }
-    return null;
-  };
-
-  const extractDateFromColumn = (rawRows: any[][], headers: string[], headerIdx: number): string | null => {
-    const fechIdx = headers.findIndex(h => h.includes('fechamento'));
-    if (fechIdx < 0) return null;
-    for (let i = headerIdx + 1; i < Math.min(headerIdx + 5, rawRows.length); i++) {
-      const val = String(rawRows[i]?.[fechIdx] || '').trim();
-      // DD/MM/YYYY
-      const m = val.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-      // Excel serial date
-      if (/^\d{5}$/.test(val)) {
-        const d = XLSX.SSF.parse_date_code(parseInt(val));
-        if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
-      }
-    }
-    return null;
-  };
-
-  const parseFile = (file: File): Promise<HistoryImport | null> => {
-    return new Promise((resolve) => {
-      const truckLabel = extractTruckLabel(file.name);
-      let routeDate = extractRouteDate(file.name);
-
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const data = evt.target?.result;
-          const workbook = XLSX.read(data, { type: 'binary' });
-          const sheetName = workbook.SheetNames[0];
-          const sheet = workbook.Sheets[sheetName];
-          const rawRows = XLSX.utils.sheet_to_json<string[]>(sheet, { header: 1 });
-
-          let headerIdx = -1;
-          for (let i = 0; i < Math.min(20, rawRows.length); i++) {
-            const row = rawRows[i];
-            if (row && row.some(cell => String(cell || '').trim().toLowerCase() === 'ordem')) {
-              headerIdx = i;
-              break;
-            }
-          }
-
-          if (headerIdx === -1) {
-            resolve(null);
-            return;
-          }
-
-          const headers = rawRows[headerIdx].map(h => String(h || '').trim().toLowerCase());
-
-          // Fallback: extract date from "Fechamento" column
-          if (!routeDate) {
-            routeDate = extractDateFromColumn(rawRows, headers, headerIdx);
-          }
-
-          const colIdx = {
-            ordem: headers.indexOf('ordem'),
-            venda: headers.indexOf('venda'),
-            cliente: headers.indexOf('cliente'),
-            fantasia: headers.indexOf('fantasia'),
-            cep: headers.indexOf('cep'),
-            endereco: headers.indexOf('endereço') !== -1 ? headers.indexOf('endereço') : headers.indexOf('endereco'),
-            numero: headers.indexOf('número') !== -1 ? headers.indexOf('número') : headers.indexOf('numero'),
-            bairro: headers.indexOf('bairro'),
-            cidade: headers.indexOf('cidade'),
-            uf: headers.indexOf('uf'),
-          };
-
-          const rows: ParsedHistoryRow[] = [];
-          for (let i = headerIdx + 1; i < rawRows.length; i++) {
-            const row = rawRows[i];
-            if (!row || row.length === 0) continue;
-
-            const venda = colIdx.venda >= 0 ? String(row[colIdx.venda] || '').trim() : '';
-            const cliente = colIdx.cliente >= 0 ? String(row[colIdx.cliente] || '').trim() : '';
-
-            if (!cliente && !venda) continue;
-            if (cliente.toLowerCase().includes('total')) continue;
-
-            const ordem = colIdx.ordem >= 0 ? String(row[colIdx.ordem] || '').trim() : '';
-            const endereco = colIdx.endereco >= 0 ? String(row[colIdx.endereco] || '').trim() : '';
-            const numero = colIdx.numero >= 0 ? String(row[colIdx.numero] || '').trim() : '';
-            const bairro = colIdx.bairro >= 0 ? String(row[colIdx.bairro] || '').trim() : '';
-            const cidade = colIdx.cidade >= 0 ? String(row[colIdx.cidade] || '').trim() : '';
-            const uf = colIdx.uf >= 0 ? String(row[colIdx.uf] || '').trim() : '';
-
-            const fullAddress = [endereco, numero, bairro, cidade, uf].filter(Boolean).join(', ');
-
-            rows.push({
-              sequence_order: parseInt(ordem) || rows.length + 1,
-              sale_number: venda,
-              client_name: cliente,
-              address: fullAddress,
-              neighborhood: bairro,
-              city: cidade,
-              state: uf,
-            });
-          }
-
-          if (rows.length === 0) {
-            resolve(null);
-            return;
-          }
-
-          resolve({ truck_label: truckLabel, route_date: routeDate, rows, filename: file.name });
-        } catch {
-          resolve(null);
-        }
-      };
-      reader.readAsBinaryString(file);
-    });
-  };
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -225,6 +291,22 @@ export function RouteHistoryImporter() {
 
     e.target.value = '';
   }, [toast]);
+
+  const handlePasteProcess = useCallback(() => {
+    if (!pasteText.trim()) {
+      toast({ title: 'Cole os dados no campo de texto', variant: 'destructive' });
+      return;
+    }
+    const result = parseFromText(pasteText, pasteTruck);
+    if (result) {
+      setPreviews(prev => [...prev, result]);
+      toast({ title: `${result.rows.length} entregas encontradas no texto colado` });
+      setPasteText('');
+      setPasteTruck('');
+    } else {
+      toast({ title: 'Não foi possível identificar dados no texto colado', variant: 'destructive' });
+    }
+  }, [pasteText, pasteTruck, toast]);
 
   const handleImportOne = async (index: number) => {
     if (!user) return;
@@ -333,21 +415,57 @@ export function RouteHistoryImporter() {
             Importar Roteiro do Analista
           </CardTitle>
           <CardDescription>
-            Envie um ou mais arquivos .xls/.xlsx de roteiros feitos manualmente. O sistema aprende os padrões de agrupamento por cidade e caminhão.
+            Envie arquivos de roteiros feitos manualmente. O sistema aprende os padrões de agrupamento por cidade e caminhão.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* File upload */}
           <label className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed p-8 cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors">
             <Upload className="h-8 w-8 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Clique para selecionar arquivos de roteiro (.xls, .xlsx)</span>
+            <span className="text-sm text-muted-foreground">
+              Clique para selecionar arquivos (.xls, .xlsx, .csv, .pdf)
+            </span>
             <input
               type="file"
-              accept=".xls,.xlsx"
+              accept=".xls,.xlsx,.csv,.pdf"
               multiple
               className="hidden"
               onChange={handleFileUpload}
             />
           </label>
+
+          {/* Separator */}
+          <div className="relative">
+            <Separator />
+            <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-3 text-xs text-muted-foreground">
+              ou cole dados tabulares
+            </span>
+          </div>
+
+          {/* Paste area */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <ClipboardPaste className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Colar Dados</span>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Rótulo do caminhão (ex: CYR)"
+                value={pasteTruck}
+                onChange={e => setPasteTruck(e.target.value.toUpperCase())}
+                className="w-48"
+              />
+              <Button variant="outline" size="sm" onClick={handlePasteProcess} disabled={!pasteText.trim()}>
+                Processar Texto
+              </Button>
+            </div>
+            <Textarea
+              placeholder="Cole aqui os dados copiados de uma planilha, e-mail ou outro sistema (separados por tab ou ponto-e-vírgula)"
+              value={pasteText}
+              onChange={e => setPasteText(e.target.value)}
+              rows={5}
+            />
+          </div>
         </CardContent>
       </Card>
 
