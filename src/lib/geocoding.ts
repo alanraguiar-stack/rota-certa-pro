@@ -9,8 +9,6 @@ export interface GeocodedAddress {
   city: string;
   state: string;
   zipCode: string;
-  // Simplified coordinates based on address parsing
-  // In production, would use real geocoding API
   estimatedLat: number;
   estimatedLng: number;
 }
@@ -18,8 +16,81 @@ export interface GeocodedAddress {
 export interface DistanceResult {
   fromId: string;
   toId: string;
-  distance: number; // in km
+  distance: number;
   estimatedMinutes: number;
+}
+
+/**
+ * Real coordinates for cities in the São Paulo metropolitan area.
+ * Used to ensure addresses in the same city cluster together geographically.
+ */
+export const CITY_COORDINATES: Record<string, { lat: number; lng: number }> = {
+  'barueri': { lat: -23.5115, lng: -46.8754 },
+  'osasco': { lat: -23.5325, lng: -46.7917 },
+  'carapicuiba': { lat: -23.5235, lng: -46.8356 },
+  'jandira': { lat: -23.5278, lng: -46.9024 },
+  'itapevi': { lat: -23.5488, lng: -46.9327 },
+  'cotia': { lat: -23.6038, lng: -46.9191 },
+  'santana de parnaiba': { lat: -23.4443, lng: -46.9173 },
+  'pirapora do bom jesus': { lat: -23.3926, lng: -46.9992 },
+  'cajamar': { lat: -23.3561, lng: -46.8771 },
+  'caieiras': { lat: -23.3643, lng: -46.7403 },
+  'franco da rocha': { lat: -23.3286, lng: -46.7263 },
+  'francisco morato': { lat: -23.2819, lng: -46.7434 },
+  'embu das artes': { lat: -23.6490, lng: -46.8522 },
+  'embu': { lat: -23.6490, lng: -46.8522 },
+  'embu-guacu': { lat: -23.8316, lng: -46.8117 },
+  'taboao da serra': { lat: -23.6019, lng: -46.7582 },
+  'sao paulo': { lat: -23.5505, lng: -46.6339 },
+  'guarulhos': { lat: -23.4543, lng: -46.5337 },
+  'sao bernardo do campo': { lat: -23.6936, lng: -46.5650 },
+  'santo andre': { lat: -23.6737, lng: -46.5432 },
+  'sao caetano do sul': { lat: -23.6229, lng: -46.5548 },
+  'diadema': { lat: -23.6861, lng: -46.6228 },
+  'maua': { lat: -23.6679, lng: -46.4613 },
+  'mogi das cruzes': { lat: -23.5226, lng: -46.1854 },
+  'suzano': { lat: -23.5424, lng: -46.3108 },
+  'itaquaquecetuba': { lat: -23.4860, lng: -46.3486 },
+  'ferraz de vasconcelos': { lat: -23.5412, lng: -46.3708 },
+  'poa': { lat: -23.5286, lng: -46.3448 },
+  'aruja': { lat: -23.3963, lng: -46.3220 },
+  'mairipora': { lat: -23.3187, lng: -46.5872 },
+  'vargem grande paulista': { lat: -23.6000, lng: -47.0267 },
+  'itapecerica da serra': { lat: -23.7172, lng: -46.8494 },
+  'ribeirao pires': { lat: -23.7113, lng: -46.3993 },
+  'rio grande da serra': { lat: -23.7439, lng: -46.3975 },
+  'alphaville': { lat: -23.4850, lng: -46.8491 },
+  'tambore': { lat: -23.4980, lng: -46.8420 },
+};
+
+/**
+ * Normalize a city name for lookup in CITY_COORDINATES
+ */
+export function normalizeCityName(city: string): string {
+  return city
+    .toLowerCase()
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Get real coordinates for a city center, or null if not found
+ */
+export function getCityCoordinates(cityName: string): { lat: number; lng: number } | null {
+  const normalized = normalizeCityName(cityName);
+  return CITY_COORDINATES[normalized] || null;
+}
+
+/**
+ * Get the distance from a city to the CD (Barueri)
+ */
+export function getCityDistanceFromCD(cityName: string): number {
+  const coords = getCityCoordinates(cityName);
+  if (!coords) return 999; // unknown cities go to the end
+  const cd = getDistributionCenterCoords();
+  return calculateDistance(cd.lat, cd.lng, coords.lat, coords.lng);
 }
 
 /**
@@ -28,7 +99,6 @@ export interface DistanceResult {
 export function parseAddress(address: string): GeocodedAddress {
   const normalized = address.trim().toLowerCase();
   
-  // Check if address is in ERP comma-separated format: "Rua, Numero, Bairro, Cidade, UF"
   const parts = address.split(',').map(p => p.trim());
   
   let street = '';
@@ -39,12 +109,10 @@ export function parseAddress(address: string): GeocodedAddress {
   let zipCode = '';
 
   if (parts.length >= 4) {
-    // ERP format: Endereco, Numero, Bairro, Cidade, UF
     street = parts[0].toLowerCase();
     number = parts[1] || '';
     neighborhood = parts[2] || '';
     
-    // Last part may be UF (2 letters)
     const lastPart = parts[parts.length - 1].trim();
     if (/^[a-z]{2}$/i.test(lastPart)) {
       state = lastPart.toUpperCase();
@@ -53,7 +121,6 @@ export function parseAddress(address: string): GeocodedAddress {
       city = parts[parts.length - 1]?.trim() || '';
     }
   } else {
-    // Legacy format parsing
     const streetMatch = normalized.match(/^((?:av\.?|r\.?|rua|avenida|alameda|al\.?|travessa|tv\.?|praça|pç\.?)\s*[^,\d]+)/i);
     street = streetMatch ? streetMatch[1].trim() : '';
     
@@ -70,11 +137,10 @@ export function parseAddress(address: string): GeocodedAddress {
     state = stateMatch ? stateMatch[1].toUpperCase() : '';
   }
   
-  // Extract ZIP code from full address
   const zipMatch = normalized.match(/(\d{5}-?\d{3})/);
   zipCode = zipMatch ? zipMatch[1].replace('-', '') : '';
   
-  // Generate estimated coordinates based on address components
+  // Generate coordinates using REAL city center + micro-offsets
   const coords = estimateCoordinates(street, neighborhood, city, zipCode);
   
   return {
@@ -92,8 +158,9 @@ export function parseAddress(address: string): GeocodedAddress {
 }
 
 /**
- * Estimate coordinates based on address components
- * This uses a deterministic hash to generate consistent coordinates within a city region
+ * Estimate coordinates using REAL city coordinates as base,
+ * with micro-offsets for neighborhood/CEP within the city.
+ * This ensures same-city addresses cluster together.
  */
 function estimateCoordinates(
   street: string, 
@@ -101,25 +168,34 @@ function estimateCoordinates(
   city: string,
   zipCode: string
 ): { lat: number; lng: number } {
-  // Base coordinates for Barueri region (CD location)
-  const baseLat = -23.5115;
-  const baseLng = -46.8754;
+  // Try to get real city coordinates
+  const cityCoords = city ? getCityCoordinates(city) : null;
   
-  // Generate hash from address components for consistent results
-  const addressHash = hashString(`${street}${neighborhood}${city}${zipCode}`);
+  // Use real city center or fall back to CD location
+  const baseLat = cityCoords?.lat ?? -23.5115;
+  const baseLng = cityCoords?.lng ?? -46.8754;
   
-  // Use hash to create offset within ~20km radius
-  const latOffset = ((addressHash % 1000) / 1000) * 0.2 - 0.1; // ~±11km
-  const lngOffset = (((addressHash >> 10) % 1000) / 1000) * 0.2 - 0.1;
+  // Generate micro-offsets WITHIN the city (~2km radius max)
+  // This keeps all addresses in the same city close together
+  const neighborhoodHash = hashString(neighborhood || '');
+  const streetHash = hashString(street || '');
+  const zipHash = zipCode ? hashString(zipCode.substring(0, 5)) : 0;
   
-  // Adjust based on neighborhood/zip for clustering
-  const neighborhoodHash = hashString(neighborhood);
-  const neighborhoodLatOffset = ((neighborhoodHash % 100) / 100) * 0.05;
-  const neighborhoodLngOffset = (((neighborhoodHash >> 5) % 100) / 100) * 0.05;
+  // CEP-based offset (addresses with same CEP prefix are very close)
+  const zipLatOffset = ((zipHash % 100) / 100) * 0.015 - 0.0075; // ~±0.8km
+  const zipLngOffset = (((zipHash >> 5) % 100) / 100) * 0.015 - 0.0075;
+  
+  // Neighborhood offset (smaller, within CEP region)
+  const neighLatOffset = ((neighborhoodHash % 50) / 50) * 0.008 - 0.004; // ~±0.4km
+  const neighLngOffset = (((neighborhoodHash >> 5) % 50) / 50) * 0.008 - 0.004;
+  
+  // Street micro-offset (very small)
+  const streetLatOffset = ((streetHash % 20) / 20) * 0.003 - 0.0015; // ~±0.15km
+  const streetLngOffset = (((streetHash >> 5) % 20) / 20) * 0.003 - 0.0015;
   
   return {
-    lat: baseLat + latOffset + neighborhoodLatOffset,
-    lng: baseLng + lngOffset + neighborhoodLngOffset,
+    lat: baseLat + zipLatOffset + neighLatOffset + streetLatOffset,
+    lng: baseLng + zipLngOffset + neighLngOffset + streetLngOffset,
   };
 }
 
@@ -131,21 +207,18 @@ function hashString(str: string): number {
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
+    hash = hash & hash;
   }
   return Math.abs(hash);
 }
 
 /**
- * Calculate estimated distance between two points using Haversine formula
+ * Calculate distance between two points using Haversine formula
  */
 export function calculateDistance(
-  lat1: number, 
-  lng1: number, 
-  lat2: number, 
-  lng2: number
+  lat1: number, lng1: number, lat2: number, lng2: number
 ): number {
-  const R = 6371; // Earth's radius in km
+  const R = 6371;
   const dLat = toRad(lat2 - lat1);
   const dLng = toRad(lng2 - lng1);
   
@@ -155,107 +228,66 @@ export function calculateDistance(
     Math.sin(dLng / 2) * Math.sin(dLng / 2);
   
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  
-  // Apply urban factor (1.4x for city driving vs straight line)
-  return R * c * 1.4;
+  return R * c * 1.4; // urban factor
 }
 
 function toRad(deg: number): number {
   return deg * (Math.PI / 180);
 }
 
-/**
- * Get estimated travel time based on distance (assuming average 30 km/h in urban area)
- */
 export function estimateTravelTime(distanceKm: number): number {
   const avgSpeedKmH = 30;
-  return Math.round((distanceKm / avgSpeedKmH) * 60); // minutes
+  return Math.round((distanceKm / avgSpeedKmH) * 60);
 }
 
-/**
- * Calculate similarity score between two addresses (0-100)
- * Higher score = more similar/closer addresses
- */
 export function addressSimilarityScore(addr1: GeocodedAddress, addr2: GeocodedAddress): number {
   let score = 0;
-  
-  // Same street = very high similarity
   if (addr1.street && addr2.street && addr1.street === addr2.street) {
     score += 50;
   } else if (addr1.street && addr2.street) {
-    // Check for parallel/nearby streets (simplified: same prefix)
     const prefix1 = addr1.street.substring(0, 5);
     const prefix2 = addr2.street.substring(0, 5);
-    if (prefix1 === prefix2) {
-      score += 20;
-    }
+    if (prefix1 === prefix2) score += 20;
   }
-  
-  // Same neighborhood = high similarity
   if (addr1.neighborhood && addr2.neighborhood && addr1.neighborhood === addr2.neighborhood) {
     score += 30;
   }
-  
-  // Same city
   if (addr1.city && addr2.city && addr1.city === addr2.city) {
     score += 10;
   }
-  
-  // Close ZIP codes
   if (addr1.zipCode && addr2.zipCode) {
-    if (addr1.zipCode === addr2.zipCode) {
-      score += 10;
-    } else if (addr1.zipCode.substring(0, 5) === addr2.zipCode.substring(0, 5)) {
-      score += 5;
-    }
+    if (addr1.zipCode === addr2.zipCode) score += 10;
+    else if (addr1.zipCode.substring(0, 5) === addr2.zipCode.substring(0, 5)) score += 5;
   }
-  
   return Math.min(100, score);
 }
 
-/**
- * Geocode the distribution center
- */
 export function getDistributionCenterCoords(): { lat: number; lng: number } {
-  // Fixed coordinates for CD: Av. Iracema, 939 - Jardim Iracema, Barueri - SP
-  return {
-    lat: -23.5115,
-    lng: -46.8754,
-  };
+  return { lat: -23.5115, lng: -46.8754 };
 }
 
-/**
- * Calculate distance from distribution center to an address
- */
 export function distanceFromCD(geocoded: GeocodedAddress): number {
   const cd = getDistributionCenterCoords();
   return calculateDistance(cd.lat, cd.lng, geocoded.estimatedLat, geocoded.estimatedLng);
 }
 
-/**
- * Group orders by geographic proximity (clustering)
- */
 export function clusterOrdersByProximity(
   orders: Order[],
   numClusters: number
 ): Order[][] {
   if (orders.length === 0 || numClusters <= 0) return [];
   
-  // Geocode all orders
   const geocodedOrders = orders.map(order => ({
     order,
     geocoded: parseAddress(order.address),
   }));
   
-  // Simple k-means style clustering based on distance
   const clusters: Order[][] = Array.from({ length: numClusters }, () => []);
   
-  // Initialize cluster centers based on distance from CD
   const sortedByDistance = [...geocodedOrders].sort(
     (a, b) => distanceFromCD(a.geocoded) - distanceFromCD(b.geocoded)
   );
   
-  // Distribute orders to clusters based on their position in sorted list
   const ordersPerCluster = Math.ceil(orders.length / numClusters);
   
   sortedByDistance.forEach((item, index) => {

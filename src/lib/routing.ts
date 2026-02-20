@@ -5,6 +5,8 @@ import {
   estimateTravelTime, 
   distanceFromCD, 
   getDistributionCenterCoords,
+  getCityDistanceFromCD,
+  normalizeCityName,
   GeocodedAddress 
 } from './geocoding';
 
@@ -25,9 +27,18 @@ export interface OrderWithRouteInfo {
   estimatedArrivalMinutes: number;
 }
 
+interface GeocodedOrderItem {
+  order: Order;
+  geocoded: GeocodedAddress;
+  distanceFromCD: number;
+  city: string;
+}
+
 /**
- * Optimize delivery order for a list of orders based on routing strategy
- * Uses nearest neighbor algorithm with strategy-specific modifications
+ * Optimize delivery order using hierarchical sequencing:
+ * 1. Group by city (never mix cities)
+ * 2. Order cities by distance from CD (per strategy)
+ * 3. Within each city, nearest-neighbor with CEP/neighborhood bonuses
  */
 export function optimizeDeliveryOrder(
   orders: Order[],
@@ -43,8 +54,8 @@ export function optimizeDeliveryOrder(
     };
   }
 
-  // Geocode all orders - use real coordinates if available
-  const geocodedOrders = orders.map(order => {
+  // Geocode all orders and extract city
+  const geocodedOrders: GeocodedOrderItem[] = orders.map(order => {
     const geocoded = parseAddress(order.address);
     
     // Override with real coordinates if available
@@ -58,150 +69,174 @@ export function optimizeDeliveryOrder(
       order,
       geocoded,
       distanceFromCD: 0,
+      city: normalizeCityName(geocoded.city || ''),
     };
   });
 
-  // Calculate distance from CD for each order
   geocodedOrders.forEach(item => {
     item.distanceFromCD = distanceFromCD(item.geocoded);
   });
 
-  let orderedList: typeof geocodedOrders;
-
-  switch (strategy) {
-    case 'economy':
-      // Nearest neighbor from CD for minimum total distance
-      orderedList = nearestNeighborRoute(geocodedOrders);
-      break;
-
-    case 'speed':
-      // Optimize for minimal backtracking (similar to economy but prefers main routes)
-      orderedList = nearestNeighborRoute(geocodedOrders);
-      break;
-
-    case 'end_near_cd':
-      // Start with farthest, progressively get closer to CD
-      orderedList = [...geocodedOrders].sort((a, b) => b.distanceFromCD - a.distanceFromCD);
-      break;
-
-    case 'start_far':
-      // Start far from CD, come back gradually
-      orderedList = [...geocodedOrders].sort((a, b) => b.distanceFromCD - a.distanceFromCD);
-      break;
-
-    case 'start_near':
-      // Start near CD, go outward
-      orderedList = [...geocodedOrders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
-      break;
-
-    default:
-      orderedList = nearestNeighborRoute(geocodedOrders);
+  // === LEVEL 1: Group by city ===
+  const cityGroups = new Map<string, GeocodedOrderItem[]>();
+  for (const item of geocodedOrders) {
+    const cityKey = item.city || '__unknown__';
+    if (!cityGroups.has(cityKey)) {
+      cityGroups.set(cityKey, []);
+    }
+    cityGroups.get(cityKey)!.push(item);
   }
 
-  // Build final route with distances
-  return buildRouteWithMetrics(orderedList);
+  // === LEVEL 2: Order cities by distance from CD ===
+  const cityEntries = Array.from(cityGroups.entries()).map(([city, items]) => ({
+    city,
+    items,
+    distFromCD: getCityDistanceFromCD(city),
+  }));
+
+  switch (strategy) {
+    case 'start_near':
+    case 'economy':
+    case 'speed':
+      // Start near CD, go outward
+      cityEntries.sort((a, b) => a.distFromCD - b.distFromCD);
+      break;
+    case 'start_far':
+    case 'end_near_cd':
+      // Start far, come back to CD
+      cityEntries.sort((a, b) => b.distFromCD - a.distFromCD);
+      break;
+    default:
+      cityEntries.sort((a, b) => a.distFromCD - b.distFromCD);
+  }
+
+  // === LEVEL 3: Within each city, sequence by CEP > neighborhood > nearest-neighbor ===
+  const finalSequence: GeocodedOrderItem[] = [];
+  
+  let prevLat = getDistributionCenterCoords().lat;
+  let prevLng = getDistributionCenterCoords().lng;
+
+  for (const { items } of cityEntries) {
+    const sequenced = sequenceWithinCity(items, prevLat, prevLng);
+    finalSequence.push(...sequenced);
+    
+    if (sequenced.length > 0) {
+      const last = sequenced[sequenced.length - 1];
+      prevLat = last.geocoded.estimatedLat;
+      prevLng = last.geocoded.estimatedLng;
+    }
+  }
+
+  return buildRouteWithMetrics(finalSequence);
 }
 
 /**
- * Nearest neighbor algorithm with backtrack penalty
- * Prioritizes geographic continuity over simple distance
+ * Sequence deliveries within a single city.
+ * Groups by CEP prefix first, then uses nearest-neighbor with neighborhood bonuses.
  */
-function nearestNeighborRoute(
-  orders: Array<{ order: Order; geocoded: GeocodedAddress; distanceFromCD: number }>
-): typeof orders {
-  if (orders.length <= 1) return orders;
+function sequenceWithinCity(
+  items: GeocodedOrderItem[],
+  startLat: number,
+  startLng: number
+): GeocodedOrderItem[] {
+  if (items.length <= 1) return items;
 
-  const cd = getDistributionCenterCoords();
-  const result: typeof orders = [];
-  const remaining = [...orders];
+  // Group by CEP prefix (first 5 digits = same postal region)
+  const cepGroups = new Map<string, GeocodedOrderItem[]>();
+  for (const item of items) {
+    const cepKey = item.geocoded.zipCode ? item.geocoded.zipCode.substring(0, 5) : '__nocep__';
+    if (!cepGroups.has(cepKey)) {
+      cepGroups.set(cepKey, []);
+    }
+    cepGroups.get(cepKey)!.push(item);
+  }
 
-  let currentLat = cd.lat;
-  let currentLng = cd.lng;
-  let lastDirection = { lat: 0, lng: 0 };
+  // Order CEP groups by proximity to current position using nearest-group
+  const result: GeocodedOrderItem[] = [];
+  const remainingGroups = Array.from(cepGroups.values());
+  
+  let currentLat = startLat;
+  let currentLng = startLng;
+
+  while (remainingGroups.length > 0) {
+    // Find nearest CEP group
+    let bestGroupIdx = 0;
+    let bestDist = Infinity;
+
+    for (let i = 0; i < remainingGroups.length; i++) {
+      const group = remainingGroups[i];
+      // Use average position of group
+      const avgLat = group.reduce((s, g) => s + g.geocoded.estimatedLat, 0) / group.length;
+      const avgLng = group.reduce((s, g) => s + g.geocoded.estimatedLng, 0) / group.length;
+      const dist = calculateDistance(currentLat, currentLng, avgLat, avgLng);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestGroupIdx = i;
+      }
+    }
+
+    const group = remainingGroups.splice(bestGroupIdx, 1)[0];
+    
+    // Within CEP group, nearest-neighbor with neighborhood bonus
+    const sequenced = nearestNeighborWithBonus(group, currentLat, currentLng);
+    result.push(...sequenced);
+
+    if (sequenced.length > 0) {
+      const last = sequenced[sequenced.length - 1];
+      currentLat = last.geocoded.estimatedLat;
+      currentLng = last.geocoded.estimatedLng;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Nearest-neighbor with strong bonuses for same neighborhood/street
+ */
+function nearestNeighborWithBonus(
+  items: GeocodedOrderItem[],
+  startLat: number,
+  startLng: number
+): GeocodedOrderItem[] {
+  if (items.length <= 1) return items;
+
+  const result: GeocodedOrderItem[] = [];
+  const remaining = [...items];
+  let currentLat = startLat;
+  let currentLng = startLng;
 
   while (remaining.length > 0) {
-    let bestIndex = 0;
+    let bestIdx = 0;
     let bestScore = Infinity;
 
     for (let i = 0; i < remaining.length; i++) {
       const candidate = remaining[i];
-      const dist = calculateDistance(
+      let dist = calculateDistance(
         currentLat, currentLng,
-        candidate.geocoded.estimatedLat,
-        candidate.geocoded.estimatedLng
+        candidate.geocoded.estimatedLat, candidate.geocoded.estimatedLng
       );
 
-      // Calculate direction to candidate
-      const newDirection = {
-        lat: candidate.geocoded.estimatedLat - currentLat,
-        lng: candidate.geocoded.estimatedLng - currentLng,
-      };
-
-      // Calculate backtrack penalty (going back in direction)
-      let backtrackPenalty = 0;
+      // Neighborhood bonus
       if (result.length > 0) {
-        // Dot product: negative = going backwards
-        const dotProduct = lastDirection.lat * newDirection.lat + lastDirection.lng * newDirection.lng;
-        if (dotProduct < 0) {
-          // Strong penalty for backtracking
-          backtrackPenalty = Math.abs(dotProduct) * 2;
+        const prev = result[result.length - 1];
+        if (prev.geocoded.neighborhood && candidate.geocoded.neighborhood &&
+            prev.geocoded.neighborhood.toLowerCase() === candidate.geocoded.neighborhood.toLowerCase()) {
+          dist *= 0.5; // 50% discount for same neighborhood
+        }
+        if (prev.geocoded.street && candidate.geocoded.street &&
+            prev.geocoded.street === candidate.geocoded.street) {
+          dist *= 0.3; // 70% discount for same street
         }
       }
 
-      // Calculate neighborhood consistency bonus
-      let neighborhoodBonus = 0;
-      if (result.length > 0) {
-        const lastOrder = result[result.length - 1];
-        // Same neighborhood = big bonus
-        if (lastOrder.geocoded.neighborhood && candidate.geocoded.neighborhood &&
-            lastOrder.geocoded.neighborhood === candidate.geocoded.neighborhood) {
-          neighborhoodBonus = -0.5; // Reduce score (better)
-        }
-        // Same street = even bigger bonus
-        if (lastOrder.geocoded.street && candidate.geocoded.street &&
-            lastOrder.geocoded.street === candidate.geocoded.street) {
-          neighborhoodBonus = -1;
-        }
-      }
-
-      // Calculate region consistency (penalize crossing to distant regions)
-      let regionPenalty = 0;
-      if (result.length >= 2) {
-        // Check if we're zigzagging between regions
-        const prev1 = result[result.length - 1];
-        const prev2 = result[result.length - 2];
-        
-        const distFromPrev1 = calculateDistance(
-          prev1.geocoded.estimatedLat, prev1.geocoded.estimatedLng,
-          candidate.geocoded.estimatedLat, candidate.geocoded.estimatedLng
-        );
-        const distFromPrev2 = calculateDistance(
-          prev2.geocoded.estimatedLat, prev2.geocoded.estimatedLng,
-          candidate.geocoded.estimatedLat, candidate.geocoded.estimatedLng
-        );
-
-        // If candidate is closer to 2-steps-ago than 1-step-ago, penalize (zigzag)
-        if (distFromPrev2 < distFromPrev1 * 0.7) {
-          regionPenalty = 0.5;
-        }
-      }
-
-      const finalScore = dist * (1 + backtrackPenalty + regionPenalty + neighborhoodBonus);
-
-      if (finalScore < bestScore) {
-        bestScore = finalScore;
-        bestIndex = i;
+      if (dist < bestScore) {
+        bestScore = dist;
+        bestIdx = i;
       }
     }
 
-    const chosen = remaining.splice(bestIndex, 1)[0];
-    
-    // Update direction for next iteration
-    lastDirection = {
-      lat: chosen.geocoded.estimatedLat - currentLat,
-      lng: chosen.geocoded.estimatedLng - currentLng,
-    };
-
+    const chosen = remaining.splice(bestIdx, 1)[0];
     result.push(chosen);
     currentLat = chosen.geocoded.estimatedLat;
     currentLng = chosen.geocoded.estimatedLng;
@@ -214,7 +249,7 @@ function nearestNeighborRoute(
  * Build route metrics (distances, times, etc.)
  */
 function buildRouteWithMetrics(
-  orderedList: Array<{ order: Order; geocoded: GeocodedAddress; distanceFromCD: number }>
+  orderedList: GeocodedOrderItem[]
 ): OptimizedRoute {
   const cd = getDistributionCenterCoords();
   const orderedDeliveries: OrderWithRouteInfo[] = [];
@@ -228,15 +263,12 @@ function buildRouteWithMetrics(
     const item = orderedList[i];
     const distFromPrev = calculateDistance(
       prevLat, prevLng,
-      item.geocoded.estimatedLat,
-      item.geocoded.estimatedLng
+      item.geocoded.estimatedLat, item.geocoded.estimatedLng
     );
 
     cumulativeDistance += distFromPrev;
     cumulativeMinutes += estimateTravelTime(distFromPrev);
-
-    // Add 5 minutes per stop for delivery
-    cumulativeMinutes += 5;
+    cumulativeMinutes += 5; // delivery stop time
 
     orderedDeliveries.push({
       order: item.order,
@@ -251,7 +283,6 @@ function buildRouteWithMetrics(
     prevLng = item.geocoded.estimatedLng;
   }
 
-  // Add return to CD
   const returnDistance = orderedDeliveries.length > 0
     ? calculateDistance(prevLat, prevLng, cd.lat, cd.lng)
     : 0;
