@@ -5,7 +5,7 @@
  */
 
 import { Truck, ParsedOrder, RoutingStrategy } from '@/types';
-import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress } from './geocoding';
+import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, buildCityRegions, areCitiesNeighbors } from './geocoding';
 import { ParsedItemDetail } from './itemDetailParser';
 
 export interface AutoRouterConfig {
@@ -246,9 +246,9 @@ export function autoComposeRoute(
 }
 
 /**
- * Cluster orders by CITY as primary grouping criterion (regionalization).
- * Each truck gets deliveries from the same city or nearby cities.
- * If a city exceeds capacity, it's split into sub-clusters geographically.
+ * Cluster orders by connected city regions using adjacency graph.
+ * Neighboring cities go to the same truck. Within each cluster,
+ * nearest-neighbor with proximity bonuses for geographic continuity.
  */
 function clusterOrdersByCity(
   orders: GeocodedOrder[],
@@ -258,28 +258,41 @@ function clusterOrdersByCity(
   if (orders.length === 0 || numClusters <= 0) return [];
 
   // Group orders by city
-  const cityGroups = new Map<string, GeocodedOrder[]>();
+  const cityOrderMap = new Map<string, GeocodedOrder[]>();
   for (const order of orders) {
     const city = (order.geocoded.city || 'desconhecida').toLowerCase().trim();
-    const existing = cityGroups.get(city) || [];
+    const existing = cityOrderMap.get(city) || [];
     existing.push(order);
-    cityGroups.set(city, existing);
+    cityOrderMap.set(city, existing);
   }
 
-  // Sort city groups by total weight descending (biggest cities first)
-  const sortedCityGroups = [...cityGroups.entries()]
-    .sort((a, b) => {
-      const weightA = a[1].reduce((s, o) => s + o.weight_kg, 0);
-      const weightB = b[1].reduce((s, o) => s + o.weight_kg, 0);
-      return weightB - weightA;
-    });
+  // Build connected regions using BFS on adjacency graph
+  const citiesPresent = Array.from(cityOrderMap.keys());
+  const regions = buildCityRegions(citiesPresent);
 
-  // Distribute city groups into clusters using bin-packing
+  // Collect orders per region
+  const regionOrders: { cities: string[]; orders: GeocodedOrder[]; weight: number }[] = [];
+  for (const region of regions) {
+    const regionOrdrs: GeocodedOrder[] = [];
+    for (const city of region) {
+      const cityOrders = cityOrderMap.get(city);
+      if (cityOrders) regionOrdrs.push(...cityOrders);
+    }
+    regionOrders.push({
+      cities: region,
+      orders: regionOrdrs,
+      weight: regionOrdrs.reduce((s, o) => s + o.weight_kg, 0),
+    });
+  }
+
+  // Sort regions by weight descending for bin-packing
+  regionOrders.sort((a, b) => b.weight - a.weight);
+
+  // Distribute regions to clusters
   const clusters: GeocodedOrder[][] = Array.from({ length: numClusters }, () => []);
   const clusterWeights = new Array(numClusters).fill(0);
 
-  for (const [, cityOrders] of sortedCityGroups) {
-    // Find the cluster with least total weight (best-fit)
+  for (const region of regionOrders) {
     let minIdx = 0;
     let minWeight = clusterWeights[0];
     for (let i = 1; i < numClusters; i++) {
@@ -288,66 +301,89 @@ function clusterOrdersByCity(
         minIdx = i;
       }
     }
-
-    clusters[minIdx].push(...cityOrders);
-    clusterWeights[minIdx] += cityOrders.reduce((s, o) => s + o.weight_kg, 0);
+    clusters[minIdx].push(...region.orders);
+    clusterWeights[minIdx] += region.weight;
   }
 
-  // Sort within each cluster based on strategy
+  // Sort within each cluster using nearest-neighbor with proximity bonuses
+  const cd = getDistributionCenterCoords();
   clusters.forEach(cluster => {
-    switch (strategy) {
-      case 'start_far':
-      case 'end_near_cd':
-        cluster.sort((a, b) => b.distanceFromCD - a.distanceFromCD);
-        break;
-      case 'start_near':
-        cluster.sort((a, b) => a.distanceFromCD - b.distanceFromCD);
-        break;
-      default:
-        // Economy/speed: use nearest neighbor
-        optimizeClusterByNearestNeighbor(cluster);
-    }
+    optimizeClusterByProximity(cluster, cd.lat, cd.lng, strategy);
   });
 
   return clusters;
 }
 
 /**
- * Optimize cluster sequence using nearest neighbor
+ * Optimize cluster sequence using nearest-neighbor with proximity bonuses.
+ * Allows natural city-border crossings.
  */
-function optimizeClusterByNearestNeighbor(cluster: GeocodedOrder[]): void {
+function optimizeClusterByProximity(
+  cluster: GeocodedOrder[], 
+  startLat: number, 
+  startLng: number,
+  strategy: RoutingStrategy
+): void {
   if (cluster.length <= 1) return;
-  
-  const cd = getDistributionCenterCoords();
+
+  let curLat = startLat;
+  let curLng = startLng;
+
+  // For start_far, begin from farthest point
+  if (strategy === 'start_far' || strategy === 'end_near_cd') {
+    const farthest = [...cluster].sort((a, b) => b.distanceFromCD - a.distanceFromCD)[0];
+    if (farthest) {
+      curLat = farthest.geocoded.estimatedLat;
+      curLng = farthest.geocoded.estimatedLng;
+    }
+  }
+
   const result: GeocodedOrder[] = [];
   const remaining = [...cluster];
-  
-  let currentLat = cd.lat;
-  let currentLng = cd.lng;
-  
+  let curCity = '';
+  let curNeighborhood = '';
+  let curStreet = '';
+
   while (remaining.length > 0) {
-    let nearestIndex = 0;
-    let nearestDistance = Infinity;
-    
+    let bestIdx = 0;
+    let bestScore = Infinity;
+
     for (let i = 0; i < remaining.length; i++) {
-      const dist = calculateDistance(
-        currentLat, currentLng,
-        remaining[i].geocoded.estimatedLat,
-        remaining[i].geocoded.estimatedLng
+      const c = remaining[i];
+      let dist = calculateDistance(
+        curLat, curLng,
+        c.geocoded.estimatedLat, c.geocoded.estimatedLng
       );
-      
-      if (dist < nearestDistance) {
-        nearestDistance = dist;
-        nearestIndex = i;
+
+      const cCity = (c.geocoded.city || '').toLowerCase().trim();
+      const cNeighborhood = (c.geocoded.neighborhood || '').toLowerCase();
+      const cStreet = c.geocoded.street || '';
+
+      if (curStreet && cStreet && curStreet === cStreet && curCity === cCity) {
+        dist *= 0.15;
+      } else if (curNeighborhood && cNeighborhood && curNeighborhood === cNeighborhood && curCity === cCity) {
+        dist *= 0.30;
+      } else if (curCity && curCity === cCity) {
+        dist *= 0.70;
+      } else if (curCity && areCitiesNeighbors(curCity, cCity)) {
+        dist *= 0.85;
+      }
+
+      if (dist < bestScore) {
+        bestScore = dist;
+        bestIdx = i;
       }
     }
-    
-    const nearest = remaining.splice(nearestIndex, 1)[0];
-    result.push(nearest);
-    currentLat = nearest.geocoded.estimatedLat;
-    currentLng = nearest.geocoded.estimatedLng;
+
+    const chosen = remaining.splice(bestIdx, 1)[0];
+    result.push(chosen);
+    curLat = chosen.geocoded.estimatedLat;
+    curLng = chosen.geocoded.estimatedLng;
+    curCity = (chosen.geocoded.city || '').toLowerCase().trim();
+    curNeighborhood = (chosen.geocoded.neighborhood || '').toLowerCase();
+    curStreet = chosen.geocoded.street || '';
   }
-  
+
   cluster.length = 0;
   cluster.push(...result);
 }

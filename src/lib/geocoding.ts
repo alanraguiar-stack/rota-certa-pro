@@ -64,6 +64,106 @@ export const CITY_COORDINATES: Record<string, { lat: number; lng: number }> = {
 };
 
 /**
+ * Adjacency graph: which cities share a border.
+ * Used to keep neighboring cities on the same truck and allow
+ * the sequencing algorithm to cross city boundaries when it makes geographic sense.
+ */
+export const CITY_NEIGHBORS: Record<string, string[]> = {
+  'barueri': ['osasco', 'carapicuiba', 'jandira', 'santana de parnaiba', 'cotia', 'sao paulo'],
+  'osasco': ['barueri', 'carapicuiba', 'sao paulo', 'taboao da serra'],
+  'carapicuiba': ['barueri', 'osasco', 'jandira', 'cotia'],
+  'jandira': ['barueri', 'carapicuiba', 'itapevi'],
+  'itapevi': ['jandira', 'cotia', 'vargem grande paulista'],
+  'cotia': ['barueri', 'carapicuiba', 'itapevi', 'vargem grande paulista', 'embu das artes', 'sao paulo'],
+  'santana de parnaiba': ['barueri', 'cajamar', 'pirapora do bom jesus', 'sao paulo'],
+  'cajamar': ['santana de parnaiba', 'caieiras', 'franco da rocha', 'pirapora do bom jesus'],
+  'caieiras': ['cajamar', 'franco da rocha', 'mairipora', 'sao paulo'],
+  'franco da rocha': ['cajamar', 'caieiras', 'francisco morato', 'mairipora'],
+  'francisco morato': ['franco da rocha', 'cajamar'],
+  'pirapora do bom jesus': ['santana de parnaiba', 'cajamar'],
+  'embu das artes': ['cotia', 'taboao da serra', 'sao paulo', 'itapecerica da serra'],
+  'embu': ['cotia', 'taboao da serra', 'sao paulo', 'itapecerica da serra'],
+  'taboao da serra': ['osasco', 'embu das artes', 'sao paulo'],
+  'sao paulo': ['osasco', 'barueri', 'cotia', 'taboao da serra', 'embu das artes', 'santana de parnaiba', 'caieiras', 'guarulhos', 'sao bernardo do campo', 'santo andre', 'sao caetano do sul', 'diadema', 'mairipora', 'itapecerica da serra'],
+  'guarulhos': ['sao paulo', 'aruja', 'itaquaquecetuba', 'mairipora'],
+  'sao bernardo do campo': ['sao paulo', 'santo andre', 'diadema', 'sao caetano do sul', 'ribeirao pires'],
+  'santo andre': ['sao paulo', 'sao bernardo do campo', 'sao caetano do sul', 'maua', 'ribeirao pires', 'rio grande da serra'],
+  'sao caetano do sul': ['sao paulo', 'sao bernardo do campo', 'santo andre'],
+  'diadema': ['sao paulo', 'sao bernardo do campo'],
+  'maua': ['santo andre', 'ribeirao pires', 'rio grande da serra'],
+  'itapecerica da serra': ['embu das artes', 'sao paulo', 'cotia', 'embu-guacu'],
+  'vargem grande paulista': ['cotia', 'itapevi'],
+  'mairipora': ['caieiras', 'franco da rocha', 'sao paulo', 'guarulhos'],
+  'aruja': ['guarulhos', 'itaquaquecetuba'],
+  'itaquaquecetuba': ['guarulhos', 'aruja', 'poa', 'suzano'],
+  'poa': ['itaquaquecetuba', 'suzano', 'ferraz de vasconcelos'],
+  'suzano': ['poa', 'itaquaquecetuba', 'ferraz de vasconcelos', 'mogi das cruzes'],
+  'ferraz de vasconcelos': ['poa', 'suzano'],
+  'mogi das cruzes': ['suzano'],
+  'ribeirao pires': ['sao bernardo do campo', 'santo andre', 'maua', 'rio grande da serra'],
+  'rio grande da serra': ['santo andre', 'maua', 'ribeirao pires'],
+  'embu-guacu': ['itapecerica da serra'],
+};
+
+/**
+ * Check if two cities are direct neighbors (share a border)
+ */
+export function areCitiesNeighbors(cityA: string, cityB: string): boolean {
+  const a = normalizeCityName(cityA);
+  const b = normalizeCityName(cityB);
+  if (a === b) return true;
+  const neighbors = CITY_NEIGHBORS[a];
+  return neighbors ? neighbors.includes(b) : false;
+}
+
+/**
+ * Get the neighbor cities for a given city
+ */
+export function getNeighborCities(city: string): string[] {
+  return CITY_NEIGHBORS[normalizeCityName(city)] || [];
+}
+
+/**
+ * Build connected regions of cities using BFS from a starting city.
+ * Only includes cities that have orders present.
+ */
+export function buildCityRegions(citiesWithOrders: string[]): string[][] {
+  const normalizedCities = new Set(citiesWithOrders.map(c => normalizeCityName(c)));
+  const visited = new Set<string>();
+  const regions: string[][] = [];
+
+  // Start BFS from cities closest to CD
+  const sortedCities = [...normalizedCities].sort((a, b) => 
+    getCityDistanceFromCD(a) - getCityDistanceFromCD(b)
+  );
+
+  for (const startCity of sortedCities) {
+    if (visited.has(startCity)) continue;
+
+    const region: string[] = [];
+    const queue: string[] = [startCity];
+    visited.add(startCity);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      region.push(current);
+
+      const neighbors = CITY_NEIGHBORS[current] || [];
+      for (const neighbor of neighbors) {
+        if (normalizedCities.has(neighbor) && !visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+
+    regions.push(region);
+  }
+
+  return regions;
+}
+
+/**
  * Normalize a city name for lookup in CITY_COORDINATES
  */
 export function normalizeCityName(city: string): string {
