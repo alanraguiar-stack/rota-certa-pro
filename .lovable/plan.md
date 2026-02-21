@@ -1,117 +1,138 @@
 
-# Corrigir Sequenciamento de Entregas: Cidade por Cidade, CEP por CEP
 
-## Problema Identificado
+# Corrigir Distribuicao e Roteamento: Logica de Vizinhanca entre Cidades
 
-A sequencia atual das entregas esta pulando entre cidades de forma caotica. Exemplo real do caminhao atual:
+## Problema Central
+
+Analisando os roteiros historicos do seu analista, identifiquei dois problemas no sistema atual:
+
+### 1. Distribuicao (qual pedido vai para qual caminhao)
+O sistema distribui cidades entre caminhoes apenas por **balanceamento de peso**. Resultado: um caminhao pode receber Osasco + Caieiras (distantes), enquanto o ideal seria Osasco + Carapicuiba (vizinhas).
+
+### 2. Sequenciamento (ordem das entregas)
+O sistema agrupa **rigidamente** por nome de cidade. Mas o analista pensa em **continuidade geografica**: se um bairro de Sao Paulo (Jd D'Abril) fica na divisa com Osasco, ele coloca esse endereco no meio da rota de Osasco, nao separado em um bloco "Sao Paulo".
+
+## O que o Analista Faz (aprendido dos documentos)
+
+**Caminhao EEF (18/02):**
+```text
+Barueri (CD)       → vizinha ao CD
+Santana de Parnaiba → vizinha ao norte
+Sao Paulo (zona oeste) → continua ao norte/nordeste
+Caieiras           → continuidade norte
+```
+Rota linear: CD → norte → nordeste. Sem retornos.
+
+**Caminhao CYR (19/02):**
+```text
+Osasco (Padroeira, Conceicao) → proximo ao CD
+Sao Paulo (Jd D'Abril, Jd Ester) → DIVISA com Osasco
+Osasco (Adalgisa → Rochdale → Portal D'Oeste) → continua Osasco
+Barueri (Parque Imperial, Jd Mutinga) → volta ao CD
+```
+O analista **nao separa rigidamente por cidade**. Ele insere bairros de SP no meio de Osasco porque sao vizinhos geograficamente.
+
+## Solucao: Mapa de Adjacencia de Cidades + Roteamento por Proximidade Real
+
+### Mudanca 1: Mapa de Vizinhanca entre Cidades
+
+Criar um grafo de adjacencia que define quais cidades sao vizinhas. Isso permite ao sistema:
+- Ao distribuir pedidos para caminhoes, manter cidades vizinhas juntas
+- Ao tracar rotas, conectar cidades formando um caminho continuo
 
 ```text
-1. Cotia
-2. Cotia
-3. OSASCO  <-- pula para Osasco
-4. Cotia   <-- volta para Cotia
-5. JANDIRA <-- pula para Jandira
-6. OSASCO  <-- volta para Osasco
-7. CAIEIRAS <-- pula para Caieiras (longe!)
-8. OSASCO  <-- volta para Osasco
+Barueri ←→ Osasco ←→ Sao Paulo (zona oeste)
+Barueri ←→ Carapicuiba ←→ Jandira ←→ Itapevi
+Barueri ←→ Santana de Parnaiba ←→ Cajamar ←→ Caieiras
+Barueri ←→ Cotia ←→ Vargem Grande Paulista
 ```
 
-### Causa Raiz
+### Mudanca 2: Distribuicao por Regiao Geografica (nao por peso)
 
-O sistema gera coordenadas **falsas** baseadas em hash do texto do endereco (funcao `estimateCoordinates` em `geocoding.ts`). Todas as cidades caem numa area de ~20km ao redor de Barueri, entao o algoritmo de "vizinho mais proximo" nao consegue distinguir Cotia de Caieiras. O resultado e uma rota que zigzagueia entre municipios.
+Em vez de jogar cidades para o caminhao com menos peso, o sistema vai:
+1. Identificar "regioes" de cidades vizinhas
+2. Atribuir uma regiao inteira a um caminhao
+3. So dividir uma regiao se exceder a capacidade
 
-## Solucao: Sequenciamento Hierarquico (Cidade > CEP > Bairro)
+Exemplo: Osasco + Carapicuiba + SP zona oeste = uma regiao para um caminhao.
 
-Reescrever a logica de sequenciamento para funcionar em 3 niveis, sem depender de coordenadas falsas:
+### Mudanca 3: Sequenciamento por Proximidade Real (nao por nome de cidade)
 
-### Nivel 1 - Agrupar por Cidade
-Todas as entregas da mesma cidade ficam juntas, sem excecao.
+Em vez de "todas as entregas de Osasco, depois todas de SP", o sistema vai:
+1. Partir do CD (Barueri)
+2. Ir para o endereco mais proximo do ultimo ponto
+3. Se o proximo endereco mais proximo for de outra cidade vizinha, ir para la
+4. Continuar ate completar todas as entregas
 
-### Nivel 2 - Ordenar Cidades por Proximidade ao CD
-As cidades sao ordenadas pela distancia real ao CD (Barueri). Cidades vizinhas ao CD vem primeiro (para `start_near`) ou por ultimo (para `start_far`).
+Isso replica o comportamento do analista de inserir bairros de SP no meio de Osasco quando sao geograficamente proximos.
 
-### Nivel 3 - Dentro de cada Cidade, Ordenar por CEP/Bairro
-Dentro da mesma cidade, agrupar por prefixo do CEP (primeiros 5 digitos = mesma regiao) e depois por bairro.
-
-## Mapa de Proximidade de Cidades
-
-Criar um mapa de coordenadas reais dos centros das cidades da regiao metropolitana de SP, em vez de usar hashes:
-
-| Cidade | Lat | Lng | Distancia do CD |
-|--------|-----|-----|-----------------|
-| Barueri (CD) | -23.5115 | -46.8754 | 0 km |
-| Osasco | -23.5325 | -46.7917 | ~8 km |
-| Carapicuiba | -23.5235 | -46.8356 | ~4 km |
-| Jandira | -23.5278 | -46.9024 | ~3 km |
-| Cotia | -23.6038 | -46.9191 | ~11 km |
-| Santana de Parnaiba | -23.4443 | -46.9173 | ~8 km |
-| Embu | -23.6490 | -46.8522 | ~15 km |
-| Taboao da Serra | -23.6019 | -46.7582 | ~14 km |
-| Caieiras | -23.3643 | -46.7403 | ~20 km |
-| Sao Paulo | -23.5505 | -46.6339 | ~24 km |
-| (e mais...) | | | |
-
-## Mudancas Tecnicas
+## Detalhes Tecnicos
 
 ### Arquivo 1: `src/lib/geocoding.ts`
 
-**Adicionar** mapa de coordenadas reais de cidades (`CITY_COORDINATES`):
-- Tabela com lat/lng do centro de ~30 cidades da Grande SP
-- Funcao `getCityCoordinates(cityName)` que busca nesse mapa
-- Funcao `getCityDistanceFromCD(cityName)` para calcular distancia real
+Adicionar mapa de adjacencia de cidades:
 
-**Alterar** `estimateCoordinates`:
-- Usar as coordenadas reais da CIDADE como base
-- Aplicar micro-offsets baseados em CEP e bairro DENTRO da cidade
-- Resultado: enderecos da mesma cidade ficam proximos, de cidades diferentes ficam distantes
+```text
+CITY_NEIGHBORS = {
+  'barueri': ['osasco', 'carapicuiba', 'jandira', 'santana de parnaiba', 'cotia'],
+  'osasco': ['barueri', 'carapicuiba', 'sao paulo', 'taboao da serra'],
+  'carapicuiba': ['barueri', 'osasco', 'jandira', 'cotia'],
+  ...
+}
+```
 
-### Arquivo 2: `src/lib/routing.ts`
+Adicionar funcao `areCitiesNeighbors(cityA, cityB)` e `getNeighborCities(city)`.
 
-**Reescrever** `optimizeDeliveryOrder` e `nearestNeighborRoute`:
-- Primeiro agrupar por cidade (extrair cidade do endereco parseado)
-- Ordenar as cidades pela distancia ao CD conforme a estrategia
-- Dentro de cada cidade, aplicar nearest-neighbor usando CEP como criterio principal
-- Bonus forte para mesmo bairro e mesmo prefixo CEP
+### Arquivo 2: `src/lib/distribution.ts`
 
-### Arquivo 3: `src/lib/distribution.ts`
+Reescrever `clusterByCityProximity`:
+- Construir grafo de cidades presentes nos pedidos
+- Usar BFS/DFS a partir do CD para criar "regioes" de cidades conectadas
+- Distribuir regioes para caminhoes por capacidade
+- Se uma regiao excede a capacidade de um caminhao, dividir no ponto mais distante
 
-**Corrigir** `clusterByGeographicProximity`:
-- Substituir clustering por angulo (que usa coordenadas falsas) por clustering por cidade real
-- Usar a mesma logica de agrupamento por cidade do `autoRouterEngine.ts`
+### Arquivo 3: `src/lib/routing.ts`
 
-**Corrigir** `reorderDeliveriesByStrategy`:
-- Remover a ordenacao alfabetica (que e um "proxy" incorreto)
-- Usar o mesmo sequenciamento hierarquico: cidade > CEP > bairro
+Alterar `optimizeDeliveryOrder`:
+- Remover o agrupamento rigido por nome de cidade
+- Usar nearest-neighbor puro com bonus forte para:
+  - Mesmo bairro: 70% desconto na distancia
+  - Mesma rua: 85% desconto
+  - Mesma cidade: 30% desconto
+  - Cidade vizinha: 15% desconto
+- Isso permite que o algoritmo "cruze" a fronteira entre cidades vizinhas quando faz sentido geografico
+
+### Arquivo 4: `src/lib/autoRouterEngine.ts`
+
+Atualizar `clusterOrdersByCity` para usar a mesma logica de regioes vizinhas do `distribution.ts`.
 
 ## Resultado Esperado
 
-Para o mesmo caminhao, a sequencia ficaria:
+Para o caminhao CYR com pedidos de Osasco + Barueri + SP:
 
 ```text
- 1. Barueri - R. Abelardo Luz (cidade do CD, primeiro)
- 2. Barueri - R. Limoeiro
- 3. Barueri - R. Zeca
- 4. Barueri - R. Nova Aurora
- 5. Carapicuiba - R. Laerte Cearense (cidade vizinha)
- 6. Carapicuiba - Est. Fazendinha
- 7. Carapicuiba - Est. do Copiuva
- 8. Jandira - R. Amaralina
- 9. Osasco - Rua Assemblea de Deus
-10. Osasco - Est. dos Jasmins
-11. Osasco - R. Quero-Quero
-12. Cotia - Av. Prof. Jose Barreto (todas de Cotia juntas)
-13. Cotia - R. Juiz de Fora
-14. Cotia - R. Jorge Rizo
-15. Cotia - R. Conde
-16. Cotia - R. Francisco Moracci
-17. Cotia - Av. Eng. Agenor Machado
-...e assim por diante
+ 1. Osasco - Padroeira (proximo ao CD)
+ 2. Osasco - Padroeira
+ 3. Osasco - Conceicao
+ 4. Sao Paulo - Jd D'Abril (divisa com Osasco - vizinho!)
+ 5. Sao Paulo - Jd Ester (proximo ao anterior)
+ 6. Osasco - Adalgisa (volta pela proximidade)
+ 7. Osasco - Vila Yara
+ 8. Osasco - Pres. Altino
+ 9. Osasco - Rochdale
+10. Osasco - Rochdale
+...
+20. Barueri - Pq Imperial (volta ao CD)
 ```
+
+Exatamente como o analista faria.
 
 ## Arquivos Modificados
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/lib/geocoding.ts` | Adicionar mapa de cidades reais + corrigir `estimateCoordinates` para usar centro da cidade |
-| `src/lib/routing.ts` | Reescrever sequenciamento: cidade > CEP > bairro, sem coordenadas falsas |
-| `src/lib/distribution.ts` | Corrigir clustering e `reorderDeliveriesByStrategy` para usar cidade real |
+| `src/lib/geocoding.ts` | Adicionar `CITY_NEIGHBORS`, `areCitiesNeighbors()`, `getNeighborCities()` |
+| `src/lib/distribution.ts` | Reescrever clustering para usar regioes de cidades vizinhas |
+| `src/lib/routing.ts` | Remover agrupamento rigido por cidade, usar nearest-neighbor com bonus de vizinhanca |
+| `src/lib/autoRouterEngine.ts` | Atualizar clustering para usar mesma logica de regioes |
+
