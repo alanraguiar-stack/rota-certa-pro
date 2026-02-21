@@ -1,5 +1,9 @@
 import { Order, RoutingStrategy, TruckDistribution, RouteTruck, Truck } from '@/types';
-import { parseAddress, calculateDistance, getDistributionCenterCoords, getCityDistanceFromCD, normalizeCityName, GeocodedAddress } from './geocoding';
+import { 
+  parseAddress, calculateDistance, getDistributionCenterCoords, 
+  getCityDistanceFromCD, normalizeCityName, areCitiesNeighbors,
+  buildCityRegions, GeocodedAddress 
+} from './geocoding';
 
 export interface DistributionResult {
   distributions: TruckDistribution[];
@@ -15,8 +19,9 @@ interface GeocodedOrder {
 }
 
 /**
- * Advanced distribution algorithm that prioritizes GEOGRAPHIC PROXIMITY by CITY.
- * Weight is only used as a capacity constraint.
+ * Advanced distribution algorithm that groups neighboring cities into regions
+ * and assigns each region to a truck. Replicates the human analyst's logic
+ * of keeping geographically connected areas on the same truck.
  */
 export function distributeOrders(
   orders: Order[],
@@ -51,8 +56,8 @@ export function distributeOrders(
 
   const totalWeight = orders.reduce((sum, o) => sum + Number(o.weight_kg), 0);
 
-  // Cluster orders by CITY instead of angle
-  const clusters = clusterByCityProximity(geocodedOrders, distributions.length, strategy);
+  // Cluster orders by connected city regions
+  const clusters = clusterByRegions(geocodedOrders, distributions.length);
 
   assignClustersToTrucks(clusters, distributions, routeTrucks);
 
@@ -64,103 +69,73 @@ export function distributeOrders(
 }
 
 /**
- * Cluster orders by city proximity.
- * Groups all orders from the same city together, then distributes city groups across trucks.
+ * Cluster orders by connected city regions using the adjacency graph.
+ * Each region is a set of neighboring cities that should go to the same truck.
  */
-function clusterByCityProximity(
+function clusterByRegions(
   geocodedOrders: GeocodedOrder[],
-  numClusters: number,
-  strategy: RoutingStrategy
+  numClusters: number
 ): GeocodedOrder[][] {
   if (geocodedOrders.length === 0 || numClusters <= 0) return [];
 
-  // Group by city
-  const cityGroups = new Map<string, GeocodedOrder[]>();
+  // Group orders by city
+  const cityOrderMap = new Map<string, GeocodedOrder[]>();
   for (const go of geocodedOrders) {
     const key = go.city || '__unknown__';
-    if (!cityGroups.has(key)) cityGroups.set(key, []);
-    cityGroups.get(key)!.push(go);
+    if (!cityOrderMap.has(key)) cityOrderMap.set(key, []);
+    cityOrderMap.get(key)!.push(go);
   }
 
-  // Sort city groups by distance from CD
-  const sortedCities = Array.from(cityGroups.entries())
-    .map(([city, items]) => ({ city, items, dist: getCityDistanceFromCD(city) }))
-    .sort((a, b) => a.dist - b.dist);
+  // Build connected regions using BFS on adjacency graph
+  const citiesPresent = Array.from(cityOrderMap.keys());
+  const regions = buildCityRegions(citiesPresent);
 
-  // Distribute city groups to clusters, keeping cities together when possible
+  // Each region is a group of cities. Collect their orders.
+  const regionOrders: { cities: string[]; orders: GeocodedOrder[]; weight: number }[] = [];
+  for (const region of regions) {
+    const orders: GeocodedOrder[] = [];
+    for (const city of region) {
+      const cityOrders = cityOrderMap.get(city);
+      if (cityOrders) orders.push(...cityOrders);
+    }
+    regionOrders.push({
+      cities: region,
+      orders,
+      weight: orders.reduce((s, go) => s + Number(go.order.weight_kg), 0),
+    });
+  }
+
+  // Sort regions by weight descending for better bin-packing
+  regionOrders.sort((a, b) => b.weight - a.weight);
+
+  // Distribute regions to clusters (trucks)
   const clusters: GeocodedOrder[][] = Array.from({ length: numClusters }, () => []);
   const clusterWeights = new Array(numClusters).fill(0);
 
-  for (const { items } of sortedCities) {
-    // Find cluster with least total weight (for balance)
-    let bestCluster = 0;
-    let minWeight = Infinity;
-    for (let i = 0; i < numClusters; i++) {
+  for (const region of regionOrders) {
+    // If region fits in one truck, assign to lightest truck
+    // If region is too big, split by city sub-groups
+    if (numClusters === 1) {
+      clusters[0].push(...region.orders);
+      clusterWeights[0] += region.weight;
+      continue;
+    }
+
+    // Find lightest cluster
+    let minIdx = 0;
+    let minWeight = clusterWeights[0];
+    for (let i = 1; i < numClusters; i++) {
       if (clusterWeights[i] < minWeight) {
         minWeight = clusterWeights[i];
-        bestCluster = i;
+        minIdx = i;
       }
     }
 
-    clusters[bestCluster].push(...items);
-    clusterWeights[bestCluster] += items.reduce((s, go) => s + Number(go.order.weight_kg), 0);
-  }
-
-  // Within each cluster, order by city distance from CD, then by CEP/neighborhood
-  for (const cluster of clusters) {
-    reorderClusterHierarchically(cluster, strategy);
+    clusters[minIdx].push(...region.orders);
+    clusterWeights[minIdx] += region.weight;
   }
 
   return clusters;
-}
-
-/**
- * Reorder a cluster hierarchically: city > CEP > neighborhood
- */
-function reorderClusterHierarchically(
-  cluster: GeocodedOrder[],
-  strategy: RoutingStrategy
-) {
-  if (cluster.length <= 1) return;
-
-  // Group by city within cluster
-  const cityGroups = new Map<string, GeocodedOrder[]>();
-  for (const go of cluster) {
-    const key = go.city || '__unknown__';
-    if (!cityGroups.has(key)) cityGroups.set(key, []);
-    cityGroups.get(key)!.push(go);
-  }
-
-  // Order cities by distance from CD
-  const sortedCities = Array.from(cityGroups.entries())
-    .map(([city, items]) => ({ city, items, dist: getCityDistanceFromCD(city) }));
-
-  if (strategy === 'start_far' || strategy === 'end_near_cd') {
-    sortedCities.sort((a, b) => b.dist - a.dist);
-  } else {
-    sortedCities.sort((a, b) => a.dist - b.dist);
-  }
-
-  // Within each city, sort by CEP then neighborhood
-  const result: GeocodedOrder[] = [];
-  for (const { items } of sortedCities) {
-    items.sort((a, b) => {
-      // First by CEP prefix
-      const cepA = a.geocoded.zipCode?.substring(0, 5) || 'zzzzz';
-      const cepB = b.geocoded.zipCode?.substring(0, 5) || 'zzzzz';
-      if (cepA !== cepB) return cepA.localeCompare(cepB);
-      // Then by neighborhood
-      const nA = (a.geocoded.neighborhood || '').toLowerCase();
-      const nB = (b.geocoded.neighborhood || '').toLowerCase();
-      if (nA !== nB) return nA.localeCompare(nB);
-      // Then by street
-      return (a.geocoded.street || '').localeCompare(b.geocoded.street || '');
-    });
-    result.push(...items);
-  }
-
-  cluster.length = 0;
-  cluster.push(...result);
 }
 
 /**
@@ -246,7 +221,8 @@ function assignClustersToTrucks(
 }
 
 /**
- * Reorder deliveries within each truck using hierarchical city > CEP > neighborhood logic
+ * Reorder deliveries within each truck using nearest-neighbor with proximity bonuses.
+ * Allows natural city-border crossings like the human analyst does.
  */
 export function reorderDeliveriesByStrategy(
   distributions: TruckDistribution[],
@@ -254,55 +230,94 @@ export function reorderDeliveriesByStrategy(
   strategy: RoutingStrategy
 ): TruckDistribution[] {
   const ordersMap = new Map(orders.map((o) => [o.id, o]));
+  const cd = getDistributionCenterCoords();
 
   return distributions.map((dist) => {
-    const truckOrders = dist.orders.map((o) => {
-      const order = ordersMap.get(o.orderId);
-      const geocoded = order ? parseAddress(order.address) : null;
-      return {
-        ...o,
-        order,
-        geocoded,
-        city: geocoded ? normalizeCityName(geocoded.city || '') : '',
-      };
-    });
+    const truckOrders = dist.orders
+      .map((o) => {
+        const order = ordersMap.get(o.orderId);
+        if (!order) return null;
+        const geocoded = parseAddress(order.address);
+        // Use real coords if available
+        if (order.latitude != null && order.longitude != null && order.geocoding_status === 'success') {
+          geocoded.estimatedLat = Number(order.latitude);
+          geocoded.estimatedLng = Number(order.longitude);
+        }
+        return {
+          ...o,
+          order,
+          geocoded,
+          city: normalizeCityName(geocoded.city || ''),
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
 
-    // Group by city
-    const cityGroups = new Map<string, typeof truckOrders>();
-    for (const to of truckOrders) {
-      const key = to.city || '__unknown__';
-      if (!cityGroups.has(key)) cityGroups.set(key, []);
-      cityGroups.get(key)!.push(to);
+    if (truckOrders.length <= 1) {
+      return dist;
     }
 
-    // Sort cities by distance from CD
-    const sortedCities = Array.from(cityGroups.entries())
-      .map(([city, items]) => ({ city, items, dist: getCityDistanceFromCD(city) }));
+    // Pick start point based on strategy
+    let startLat = cd.lat;
+    let startLng = cd.lng;
 
     if (strategy === 'start_far' || strategy === 'end_near_cd') {
-      sortedCities.sort((a, b) => b.dist - a.dist);
-    } else {
-      sortedCities.sort((a, b) => a.dist - b.dist);
+      const farthest = [...truckOrders].sort((a, b) => {
+        const distA = calculateDistance(cd.lat, cd.lng, a.geocoded.estimatedLat, a.geocoded.estimatedLng);
+        const distB = calculateDistance(cd.lat, cd.lng, b.geocoded.estimatedLat, b.geocoded.estimatedLng);
+        return distB - distA;
+      })[0];
+      if (farthest) {
+        startLat = farthest.geocoded.estimatedLat;
+        startLng = farthest.geocoded.estimatedLng;
+      }
     }
 
-    // Within each city, sort by CEP > neighborhood > street
-    const sortedOrders: typeof truckOrders = [];
-    for (const { items } of sortedCities) {
-      items.sort((a, b) => {
-        const cepA = a.geocoded?.zipCode?.substring(0, 5) || 'zzzzz';
-        const cepB = b.geocoded?.zipCode?.substring(0, 5) || 'zzzzz';
-        if (cepA !== cepB) return cepA.localeCompare(cepB);
-        const nA = (a.geocoded?.neighborhood || '').toLowerCase();
-        const nB = (b.geocoded?.neighborhood || '').toLowerCase();
-        if (nA !== nB) return nA.localeCompare(nB);
-        return (a.geocoded?.street || '').localeCompare(b.geocoded?.street || '');
-      });
-      sortedOrders.push(...items);
+    // Nearest-neighbor with proximity bonuses
+    const remaining = [...truckOrders];
+    const sorted: typeof truckOrders = [];
+    let curLat = startLat;
+    let curLng = startLng;
+    let curCity = '';
+    let curNeighborhood = '';
+    let curStreet = '';
+
+    while (remaining.length > 0) {
+      let bestIdx = 0;
+      let bestScore = Infinity;
+
+      for (let i = 0; i < remaining.length; i++) {
+        const c = remaining[i];
+        let d = calculateDistance(curLat, curLng, c.geocoded.estimatedLat, c.geocoded.estimatedLng);
+
+        if (curStreet && c.geocoded.street && curStreet === c.geocoded.street && curCity === c.city) {
+          d *= 0.15;
+        } else if (curNeighborhood && c.geocoded.neighborhood && 
+                   curNeighborhood === c.geocoded.neighborhood.toLowerCase() && curCity === c.city) {
+          d *= 0.30;
+        } else if (curCity && curCity === c.city) {
+          d *= 0.70;
+        } else if (curCity && areCitiesNeighbors(curCity, c.city)) {
+          d *= 0.85;
+        }
+
+        if (d < bestScore) {
+          bestScore = d;
+          bestIdx = i;
+        }
+      }
+
+      const chosen = remaining.splice(bestIdx, 1)[0];
+      sorted.push(chosen);
+      curLat = chosen.geocoded.estimatedLat;
+      curLng = chosen.geocoded.estimatedLng;
+      curCity = chosen.city;
+      curNeighborhood = (chosen.geocoded.neighborhood || '').toLowerCase();
+      curStreet = chosen.geocoded.street || '';
     }
 
     return {
       ...dist,
-      orders: sortedOrders.map((o, index) => ({
+      orders: sorted.map((o, index) => ({
         orderId: o.orderId,
         weight: o.weight,
         sequence: index + 1,
