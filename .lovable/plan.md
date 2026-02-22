@@ -1,138 +1,108 @@
 
 
-# Corrigir Distribuicao e Roteamento: Logica de Vizinhanca entre Cidades
+# Landing Page Completa - Rota Certa
 
-## Problema Central
+## Visao Geral
 
-Analisando os roteiros historicos do seu analista, identifiquei dois problemas no sistema atual:
+Criar uma landing page publica completa com todas as 10 secoes solicitadas, acessivel sem autenticacao. A pagina seguira o design system existente (Deep Navy, Teal, Coral Orange) e sera otimizada para conversao.
 
-### 1. Distribuicao (qual pedido vai para qual caminhao)
-O sistema distribui cidades entre caminhoes apenas por **balanceamento de peso**. Resultado: um caminhao pode receber Osasco + Caieiras (distantes), enquanto o ideal seria Osasco + Carapicuiba (vizinhas).
+## Arquitetura de Roteamento
 
-### 2. Sequenciamento (ordem das entregas)
-O sistema agrupa **rigidamente** por nome de cidade. Mas o analista pensa em **continuidade geografica**: se um bairro de Sao Paulo (Jd D'Abril) fica na divisa com Osasco, ele coloca esse endereco no meio da rota de Osasco, nao separado em um bloco "Sao Paulo".
+Atualmente, `/` requer autenticacao (dashboard). A landing page sera criada em uma nova rota `/landing` e o fluxo sera ajustado:
 
-## O que o Analista Faz (aprendido dos documentos)
+- Usuarios nao autenticados acessando `/` serao redirecionados para `/landing` em vez de `/login`
+- `/login` continua existindo para acesso direto
+- `/landing` e publica (sem autenticacao)
+- CTAs da landing levam para `/login`
 
-**Caminhao EEF (18/02):**
-```text
-Barueri (CD)       → vizinha ao CD
-Santana de Parnaiba → vizinha ao norte
-Sao Paulo (zona oeste) → continua ao norte/nordeste
-Caieiras           → continuidade norte
-```
-Rota linear: CD → norte → nordeste. Sem retornos.
+**Arquivos afetados:**
+| Arquivo | Mudanca |
+|---------|---------|
+| `src/pages/LandingPage.tsx` | **Novo** - Pagina completa com as 10 secoes |
+| `src/App.tsx` | Adicionar rota `/landing` |
+| `src/components/layout/AppLayout.tsx` | Redirecionar para `/landing` em vez de `/login` |
 
-**Caminhao CYR (19/02):**
-```text
-Osasco (Padroeira, Conceicao) → proximo ao CD
-Sao Paulo (Jd D'Abril, Jd Ester) → DIVISA com Osasco
-Osasco (Adalgisa → Rochdale → Portal D'Oeste) → continua Osasco
-Barueri (Parque Imperial, Jd Mutinga) → volta ao CD
-```
-O analista **nao separa rigidamente por cidade**. Ele insere bairros de SP no meio de Osasco porque sao vizinhos geograficamente.
+## Estrutura das 10 Secoes
 
-## Solucao: Mapa de Adjacencia de Cidades + Roteamento por Proximidade Real
+### 1. Hero Section (acima da dobra)
+- Background escuro com mesh gradient (reutiliza `bg-mesh-gradient` existente)
+- Headline: "Planeje, execute e comprove suas entregas em um so lugar."
+- Subheadline e texto de apoio
+- 2 CTAs: "Comecar agora" (gradiente CTA) e "Ver demonstracao" (outline)
+- Animacao SVG de rotas reutilizando o padrao do Auth.tsx
+- Icones flutuantes de caminhao, pacote, pin
 
-### Mudanca 1: Mapa de Vizinhanca entre Cidades
+### 2. Para Quem E
+- Fundo claro com cards/badges
+- Icones representando cada segmento (Distribuidoras, Food Service, etc.)
+- Layout em grid responsivo
 
-Criar um grafo de adjacencia que define quais cidades sao vizinhas. Isso permite ao sistema:
-- Ao distribuir pedidos para caminhoes, manter cidades vizinhas juntas
-- Ao tracar rotas, conectar cidades formando um caminho continuo
+### 3. O Problema
+- Cards com icones e texto descritivo
+- Fundo com gradiente sutil
+- 5 cards: planejamento manual, erros de rota, sobrecarga, falta de controle, falta de comprovacao
 
-```text
-Barueri ←→ Osasco ←→ Sao Paulo (zona oeste)
-Barueri ←→ Carapicuiba ←→ Jandira ←→ Itapevi
-Barueri ←→ Santana de Parnaiba ←→ Cajamar ←→ Caieiras
-Barueri ←→ Cotia ←→ Vargem Grande Paulista
-```
+### 4. Como Funciona
+- 4 etapas visuais conectadas (1 -> 2 -> 3 -> 4)
+- Cada etapa com icone, titulo e descricao curta
+- Linha conectora entre etapas (horizontal em desktop, vertical em mobile)
 
-### Mudanca 2: Distribuicao por Regiao Geografica (nao por peso)
+### 5. Beneficios
+- Grid de 5 cards com icones
+- Cada card com titulo e descricao curta
+- Hover effects usando `hover-lift` existente
 
-Em vez de jogar cidades para o caminhao com menos peso, o sistema vai:
-1. Identificar "regioes" de cidades vizinhas
-2. Atribuir uma regiao inteira a um caminhao
-3. So dividir uma regiao se exceder a capacidade
+### 6. Features
+- 3 colunas: Planejamento, Operacao, Controle
+- Cada coluna com lista de features com checkmarks
+- Fundo alternado para diferenciar
 
-Exemplo: Osasco + Carapicuiba + SP zona oeste = uma regiao para um caminhao.
+### 7. Planos e Precos
+- 3 cards lado a lado: Free, Premium, Pro
+- Premium destacado (borda accent, badge "Mais popular")
+- Lista de features com check/x para cada plano
+- CTAs individuais
 
-### Mudanca 3: Sequenciamento por Proximidade Real (nao por nome de cidade)
+### 8. Diferencial
+- Secao com fundo escuro (hero-gradient)
+- Texto impactante com destaque em accent
+- Icone ou ilustracao lateral
 
-Em vez de "todas as entregas de Osasco, depois todas de SP", o sistema vai:
-1. Partir do CD (Barueri)
-2. Ir para o endereco mais proximo do ultimo ponto
-3. Se o proximo endereco mais proximo for de outra cidade vizinha, ir para la
-4. Continuar ate completar todas as entregas
+### 9. CTA Final
+- Fundo gradiente accent
+- Headline forte
+- 2 botoes: "Testar gratuitamente" e "Ver demonstracao"
 
-Isso replica o comportamento do analista de inserir bairros de SP no meio de Osasco quando sao geograficamente proximos.
+### 10. Rodape
+- Fundo escuro
+- Logo, links (Termos, Privacidade, Contato, Suporte)
+- Copyright
 
 ## Detalhes Tecnicos
 
-### Arquivo 1: `src/lib/geocoding.ts`
+### Componente LandingPage.tsx
+- Componente unico com todas as secoes (sem AppLayout, sem sidebar)
+- Navbar fixa no topo com logo + botoes "Entrar" e "Comecar gratis"
+- Scroll suave entre secoes usando IDs de ancora
+- Totalmente responsivo (mobile-first)
+- Reutiliza classes CSS existentes: `bg-mesh-gradient`, `bg-hero-gradient`, `glass-card`, `btn-cta`, `hover-lift`, `shadow-elevated`, `glow-accent`, `animate-fade-in-up`
+- Icones do lucide-react ja instalado
 
-Adicionar mapa de adjacencia de cidades:
+### Roteamento (App.tsx)
+- Adicionar: `<Route path="/landing" element={<LandingPage />} />`
+- Importar o novo componente
 
-```text
-CITY_NEIGHBORS = {
-  'barueri': ['osasco', 'carapicuiba', 'jandira', 'santana de parnaiba', 'cotia'],
-  'osasco': ['barueri', 'carapicuiba', 'sao paulo', 'taboao da serra'],
-  'carapicuiba': ['barueri', 'osasco', 'jandira', 'cotia'],
-  ...
-}
-```
+### Redirect (AppLayout.tsx)
+- Alterar `<Navigate to="/login" replace />` para `<Navigate to="/landing" replace />`
+- Assim, qualquer acesso autenticado que falhe leva a landing em vez do login direto
 
-Adicionar funcao `areCitiesNeighbors(cityA, cityB)` e `getNeighborCities(city)`.
+### Responsividade
+- Mobile: secoes empilhadas, 1 coluna
+- Tablet: 2 colunas onde aplicavel
+- Desktop: layout completo com grids de 3-4 colunas
 
-### Arquivo 2: `src/lib/distribution.ts`
-
-Reescrever `clusterByCityProximity`:
-- Construir grafo de cidades presentes nos pedidos
-- Usar BFS/DFS a partir do CD para criar "regioes" de cidades conectadas
-- Distribuir regioes para caminhoes por capacidade
-- Se uma regiao excede a capacidade de um caminhao, dividir no ponto mais distante
-
-### Arquivo 3: `src/lib/routing.ts`
-
-Alterar `optimizeDeliveryOrder`:
-- Remover o agrupamento rigido por nome de cidade
-- Usar nearest-neighbor puro com bonus forte para:
-  - Mesmo bairro: 70% desconto na distancia
-  - Mesma rua: 85% desconto
-  - Mesma cidade: 30% desconto
-  - Cidade vizinha: 15% desconto
-- Isso permite que o algoritmo "cruze" a fronteira entre cidades vizinhas quando faz sentido geografico
-
-### Arquivo 4: `src/lib/autoRouterEngine.ts`
-
-Atualizar `clusterOrdersByCity` para usar a mesma logica de regioes vizinhas do `distribution.ts`.
-
-## Resultado Esperado
-
-Para o caminhao CYR com pedidos de Osasco + Barueri + SP:
-
-```text
- 1. Osasco - Padroeira (proximo ao CD)
- 2. Osasco - Padroeira
- 3. Osasco - Conceicao
- 4. Sao Paulo - Jd D'Abril (divisa com Osasco - vizinho!)
- 5. Sao Paulo - Jd Ester (proximo ao anterior)
- 6. Osasco - Adalgisa (volta pela proximidade)
- 7. Osasco - Vila Yara
- 8. Osasco - Pres. Altino
- 9. Osasco - Rochdale
-10. Osasco - Rochdale
-...
-20. Barueri - Pq Imperial (volta ao CD)
-```
-
-Exatamente como o analista faria.
-
-## Arquivos Modificados
-
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/lib/geocoding.ts` | Adicionar `CITY_NEIGHBORS`, `areCitiesNeighbors()`, `getNeighborCities()` |
-| `src/lib/distribution.ts` | Reescrever clustering para usar regioes de cidades vizinhas |
-| `src/lib/routing.ts` | Remover agrupamento rigido por cidade, usar nearest-neighbor com bonus de vizinhanca |
-| `src/lib/autoRouterEngine.ts` | Atualizar clustering para usar mesma logica de regioes |
+### Performance
+- Sem dependencias novas
+- Animacoes CSS ja existentes no index.css
+- Lazy loading nao necessario (pagina unica)
 
