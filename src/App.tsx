@@ -14,6 +14,7 @@ import Settings from "./pages/Settings";
 import DriverDashboard from "./pages/DriverDashboard";
 import DeliveryConfirmation from "./pages/DeliveryConfirmation";
 import NotFound from "./pages/NotFound";
+import LandingPage from "./pages/LandingPage";
 
 const queryClient = new QueryClient();
 
@@ -25,6 +26,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/login" element={<Auth />} />
             <Route path="/" element={<Index />} />
             <Route path="/frota" element={<Fleet />} />
