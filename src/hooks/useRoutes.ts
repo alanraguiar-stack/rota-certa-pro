@@ -401,7 +401,7 @@ export function useRouteDetails(routeId: string | undefined) {
       const distributionResult = distributeOrders(
         route.orders,
         routeTrucks,
-        'economy' // Strategy for load distribution
+        'padrao' // Strategy for load distribution
       );
 
       // Clear existing assignments
@@ -493,7 +493,7 @@ export function useRouteDetails(routeId: string | undefined) {
 
   // Step 3: Route optimization (after loading is confirmed)
   const optimizeRoutesMutation = useMutation({
-    mutationFn: async (strategy: RoutingStrategy = 'economy') => {
+    mutationFn: async (strategy: RoutingStrategy = 'padrao') => {
       const route = routeQuery.data;
       if (!route || route.route_trucks.length === 0) {
         throw new Error('É necessário ter caminhões com carga atribuída');
@@ -557,7 +557,7 @@ export function useRouteDetails(routeId: string | undefined) {
 
   // Legacy: Combined distribution (for backwards compatibility)
   const distributeOrdersMutation = useMutation({
-    mutationFn: async (strategy: RoutingStrategy = 'economy') => {
+    mutationFn: async (strategy: RoutingStrategy = 'padrao') => {
       const route = routeQuery.data;
       if (!route || route.route_trucks.length === 0 || route.orders.length === 0) {
         throw new Error('É necessário ter pedidos e caminhões atribuídos');
@@ -699,7 +699,7 @@ export function useRouteDetails(routeId: string | undefined) {
             .map(r => toOrder(route.orders.find(o => o.id === r.orderId)))
             .filter((o): o is Order => o !== undefined);
           
-          const routeMetrics = optimizeDeliveryOrder(truckOrders, 'economy');
+          const routeMetrics = optimizeDeliveryOrder(truckOrders, 'padrao');
           
           await supabase
             .from('route_trucks')

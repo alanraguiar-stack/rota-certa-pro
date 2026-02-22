@@ -6,11 +6,9 @@ export const DISTRIBUTION_CENTER = {
 
 // Routing strategy types
 export type RoutingStrategy = 
-  | 'economy'      // Menor distância total
-  | 'speed'        // Menor tempo de entrega
-  | 'end_near_cd'  // Terminar próximo ao CD
-  | 'start_far'    // Iniciar longe, terminar perto
-  | 'start_near';  // Iniciar perto, terminar longe
+  | 'padrao'                // Iniciar pela entrega mais próxima do CD dentro da cidade do caminhão
+  | 'finalizacao_proxima'   // Iniciar pela mais distante, voltar ao CD
+  | 'finalizacao_distante'; // Iniciar perto do CD, terminar na mais distante
 
 export interface RoutingStrategyOption {
   id: RoutingStrategy;
@@ -22,37 +20,23 @@ export interface RoutingStrategyOption {
 
 export const ROUTING_STRATEGIES: RoutingStrategyOption[] = [
   {
-    id: 'economy',
-    name: 'Economia',
-    description: 'Menor distância total para economizar combustível',
-    icon: 'Fuel',
+    id: 'padrao',
+    name: 'Padrão',
+    description: 'Iniciar pela entrega mais próxima do CD e avançar progressivamente',
+    icon: 'Compass',
     color: 'route-economy',
   },
   {
-    id: 'speed',
-    name: 'Velocidade',
-    description: 'Menor tempo total de entrega',
-    icon: 'Clock',
-    color: 'route-speed',
-  },
-  {
-    id: 'end_near_cd',
-    name: 'Finalizar no CD',
-    description: 'Terminar a rota próximo ao Centro de Distribuição',
+    id: 'finalizacao_proxima',
+    name: 'Finalização próxima ao CD',
+    description: 'Iniciar pela entrega mais distante e retornar ao CD',
     icon: 'Home',
     color: 'route-balanced',
   },
   {
-    id: 'start_far',
-    name: 'Longe → Perto',
-    description: 'Começar longe do CD e retornar gradualmente',
-    icon: 'ArrowDownLeft',
-    color: 'route-end-near',
-  },
-  {
-    id: 'start_near',
-    name: 'Perto → Longe',
-    description: 'Começar próximo ao CD e ir se afastando',
+    id: 'finalizacao_distante',
+    name: 'Finalização distante',
+    description: 'Iniciar próximo ao CD e terminar na entrega mais distante',
     icon: 'ArrowUpRight',
     color: 'route-start-near',
   },

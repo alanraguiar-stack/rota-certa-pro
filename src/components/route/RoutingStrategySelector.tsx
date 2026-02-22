@@ -1,4 +1,4 @@
-import { Fuel, Clock, Home, ArrowDownLeft, ArrowUpRight, MapPin } from 'lucide-react';
+import { Compass, Home, ArrowUpRight, MapPin } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { RoutingStrategy, ROUTING_STRATEGIES, DISTRIBUTION_CENTER } from '@/types';
@@ -10,10 +10,8 @@ interface RoutingStrategySelectorProps {
 }
 
 const iconMap = {
-  Fuel,
-  Clock,
+  Compass,
   Home,
-  ArrowDownLeft,
   ArrowUpRight,
 };
 
@@ -37,10 +35,10 @@ export function RoutingStrategySelector({
       </Card>
 
       {/* Strategy Options */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-3">
         {ROUTING_STRATEGIES.map((strategy) => {
           const isSelected = selectedStrategy === strategy.id;
-          const Icon = iconMap[strategy.icon as keyof typeof iconMap] || Fuel;
+          const Icon = iconMap[strategy.icon as keyof typeof iconMap] || Compass;
 
           return (
             <Card
@@ -81,7 +79,7 @@ export function RoutingStrategySelector({
           <div className="flex items-start gap-3">
             {(() => {
               const strategy = ROUTING_STRATEGIES.find((s) => s.id === selectedStrategy);
-              const Icon = strategy ? iconMap[strategy.icon as keyof typeof iconMap] || Fuel : Fuel;
+              const Icon = strategy ? iconMap[strategy.icon as keyof typeof iconMap] || Compass : Compass;
               return (
                 <>
                   <Icon className="mt-0.5 h-5 w-5 text-primary" />
@@ -105,16 +103,12 @@ export function RoutingStrategySelector({
 
 function getStrategyExplanation(strategy: RoutingStrategy): string {
   switch (strategy) {
-    case 'economy':
-      return 'As entregas serão organizadas para minimizar a distância total percorrida, economizando combustível e reduzindo custos operacionais.';
-    case 'speed':
-      return 'As entregas serão priorizadas para reduzir o tempo total de entrega, ideal para pedidos urgentes.';
-    case 'end_near_cd':
-      return 'A rota será organizada para que o caminhão termine próximo ao Centro de Distribuição, facilitando o retorno.';
-    case 'start_far':
-      return 'O caminhão começará pelas entregas mais distantes e vai retornando gradualmente ao CD, evitando retornos longos.';
-    case 'start_near':
-      return 'O caminhão fará primeiro as entregas próximas ao CD e vai se afastando progressivamente.';
+    case 'padrao':
+      return 'O caminhão sai do CD e faz primeiro a entrega mais próxima dentro da sua cidade principal, avançando progressivamente até a mais distante. Rotas previsíveis e fáceis de acompanhar.';
+    case 'finalizacao_proxima':
+      return 'O caminhão começa pela entrega mais distante e vai retornando progressivamente em direção ao CD, facilitando o retorno ao final do dia.';
+    case 'finalizacao_distante':
+      return 'O caminhão começa pelas entregas próximas ao CD e avança até a região mais distante. Ideal quando o retorno ao CD não é prioridade.';
     default:
       return '';
   }

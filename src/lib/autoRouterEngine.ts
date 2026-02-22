@@ -5,7 +5,7 @@
  */
 
 import { Truck, ParsedOrder, RoutingStrategy } from '@/types';
-import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, buildCityRegions, areCitiesNeighbors } from './geocoding';
+import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, areCitiesNeighbors, getNeighborCities, getCityDistanceFromCD, CITY_NEIGHBORS } from './geocoding';
 import { ParsedItemDetail } from './itemDetailParser';
 
 export interface AutoRouterConfig {
@@ -40,7 +40,7 @@ interface GeocodedOrder extends ParsedOrder {
 }
 
 const DEFAULT_CONFIG: AutoRouterConfig = {
-  strategy: 'economy',
+  strategy: 'padrao',
   safetyMarginPercent: 10,
   maxOccupancyPercent: 95,
   balanceOrders: true,
@@ -246,9 +246,12 @@ export function autoComposeRoute(
 }
 
 /**
- * Cluster orders by connected city regions using adjacency graph.
- * Neighboring cities go to the same truck. Within each cluster,
- * nearest-neighbor with proximity bonuses for geographic continuity.
+ * Cluster orders by city using layered territorial logic:
+ * 1. Group by city
+ * 2. Classify cities as grande/pequena
+ * 3. Assign large cities to clusters
+ * 3.5. Complement with small neighboring cities
+ * 4. Handle orphans
  */
 function clusterOrdersByCity(
   orders: GeocodedOrder[],
@@ -257,52 +260,111 @@ function clusterOrdersByCity(
 ): GeocodedOrder[][] {
   if (orders.length === 0 || numClusters <= 0) return [];
 
-  // Group orders by city
+  // CAMADA 1: Group orders by city
   const cityOrderMap = new Map<string, GeocodedOrder[]>();
   for (const order of orders) {
-    const city = (order.geocoded.city || 'desconhecida').toLowerCase().trim();
+    const city = normalizeCityName(order.geocoded.city || 'desconhecida');
     const existing = cityOrderMap.get(city) || [];
     existing.push(order);
     cityOrderMap.set(city, existing);
   }
 
-  // Build connected regions using BFS on adjacency graph
-  const citiesPresent = Array.from(cityOrderMap.keys());
-  const regions = buildCityRegions(citiesPresent);
+  // CAMADA 2: Volume per city
+  const totalWeight = orders.reduce((s, o) => s + o.weight_kg, 0);
+  const avgClusterCapacity = totalWeight / numClusters;
+  const SMALL_THRESHOLD = 0.30;
 
-  // Collect orders per region
-  const regionOrders: { cities: string[]; orders: GeocodedOrder[]; weight: number }[] = [];
-  for (const region of regions) {
-    const regionOrdrs: GeocodedOrder[] = [];
-    for (const city of region) {
-      const cityOrders = cityOrderMap.get(city);
-      if (cityOrders) regionOrdrs.push(...cityOrders);
-    }
-    regionOrders.push({
-      cities: region,
-      orders: regionOrdrs,
-      weight: regionOrdrs.reduce((s, o) => s + o.weight_kg, 0),
-    });
+  interface CityInfo {
+    city: string;
+    orders: GeocodedOrder[];
+    weight: number;
+    classification: 'grande' | 'pequena';
+    assigned: boolean;
   }
 
-  // Sort regions by weight descending for bin-packing
-  regionOrders.sort((a, b) => b.weight - a.weight);
+  const cities: CityInfo[] = [];
+  for (const [city, cityOrders] of cityOrderMap) {
+    const weight = cityOrders.reduce((s, o) => s + o.weight_kg, 0);
+    cities.push({
+      city,
+      orders: cityOrders,
+      weight,
+      classification: weight >= avgClusterCapacity * SMALL_THRESHOLD ? 'grande' : 'pequena',
+      assigned: false,
+    });
+  }
+  cities.sort((a, b) => b.weight - a.weight);
 
-  // Distribute regions to clusters
+  // CAMADA 3: Assign large cities
   const clusters: GeocodedOrder[][] = Array.from({ length: numClusters }, () => []);
   const clusterWeights = new Array(numClusters).fill(0);
+  const clusterPrimaryCities: string[] = new Array(numClusters).fill('');
+  let clusterIdx = 0;
 
-  for (const region of regionOrders) {
-    let minIdx = 0;
-    let minWeight = clusterWeights[0];
-    for (let i = 1; i < numClusters; i++) {
-      if (clusterWeights[i] < minWeight) {
-        minWeight = clusterWeights[i];
-        minIdx = i;
+  for (const ci of cities) {
+    if (ci.classification === 'pequena' || ci.assigned) continue;
+    
+    const trucksNeeded = Math.ceil(ci.weight / avgClusterCapacity);
+    
+    if (trucksNeeded > 1 && clusterIdx + trucksNeeded <= numClusters) {
+      // Split into blocks
+      const sorted = [...ci.orders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+      const blocks: GeocodedOrder[][] = Array.from({ length: trucksNeeded }, () => []);
+      const blockWeights = new Array(trucksNeeded).fill(0);
+      
+      for (const order of sorted) {
+        let minI = 0;
+        for (let i = 1; i < trucksNeeded; i++) {
+          if (blockWeights[i] < blockWeights[minI]) minI = i;
+        }
+        blocks[minI].push(order);
+        blockWeights[minI] += order.weight_kg;
       }
+      
+      for (const block of blocks) {
+        if (clusterIdx >= numClusters) break;
+        clusters[clusterIdx].push(...block);
+        clusterWeights[clusterIdx] += block.reduce((s, o) => s + o.weight_kg, 0);
+        clusterPrimaryCities[clusterIdx] = ci.city;
+        clusterIdx++;
+      }
+    } else if (clusterIdx < numClusters) {
+      clusters[clusterIdx].push(...ci.orders);
+      clusterWeights[clusterIdx] += ci.weight;
+      clusterPrimaryCities[clusterIdx] = ci.city;
+      clusterIdx++;
     }
-    clusters[minIdx].push(...region.orders);
-    clusterWeights[minIdx] += region.weight;
+    ci.assigned = true;
+  }
+
+  // CAMADA 3.5: Complement with small neighboring cities
+  for (let i = 0; i < Math.min(clusterIdx, numClusters); i++) {
+    const primaryCity = clusterPrimaryCities[i];
+    if (!primaryCity) continue;
+
+    const neighbors = getNeighborCities(primaryCity)
+      .sort((a, b) => getCityDistanceFromCD(a) - getCityDistanceFromCD(b));
+
+    for (const neighbor of neighbors) {
+      const nci = cities.find(c => c.city === neighbor && !c.assigned && c.classification === 'pequena');
+      if (!nci) continue;
+      clusters[i].push(...nci.orders);
+      clusterWeights[i] += nci.weight;
+      nci.assigned = true;
+    }
+  }
+
+  // CAMADA 4: Orphans
+  const orphans = cities.filter(c => !c.assigned);
+  for (const orphan of orphans) {
+    // Find cluster with least weight
+    let minI = 0;
+    for (let i = 1; i < numClusters; i++) {
+      if (clusterWeights[i] < clusterWeights[minI]) minI = i;
+    }
+    clusters[minI].push(...orphan.orders);
+    clusterWeights[minI] += orphan.weight;
+    orphan.assigned = true;
   }
 
   // Sort within each cluster using nearest-neighbor with proximity bonuses
@@ -330,7 +392,7 @@ function optimizeClusterByProximity(
   let curLng = startLng;
 
   // For start_far, begin from farthest point
-  if (strategy === 'start_far' || strategy === 'end_near_cd') {
+  if (strategy === 'finalizacao_proxima') {
     const farthest = [...cluster].sort((a, b) => b.distanceFromCD - a.distanceFromCD)[0];
     if (farthest) {
       curLat = farthest.geocoded.estimatedLat;

@@ -30,11 +30,9 @@ import { ExecutionTracker } from '@/components/route/ExecutionTracker';
 // Helper function to get strategy label
 function getStrategyLabel(strategy: RoutingStrategy): string {
   const labels: Record<RoutingStrategy, string> = {
-    economy: 'Economia (menor distância)',
-    speed: 'Velocidade (menor tempo)',
-    end_near_cd: 'Finalizar no CD',
-    start_far: 'Longe → Perto',
-    start_near: 'Perto → Longe',
+    padrao: 'Padrão',
+    finalizacao_proxima: 'Finalização próxima ao CD',
+    finalizacao_distante: 'Finalização distante',
   };
   return labels[strategy] || strategy;
 }
@@ -75,7 +73,7 @@ export default function RouteDetails() {
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
   const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
-  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
+  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('padrao');
   const [showMap, setShowMap] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   

@@ -84,7 +84,7 @@ export function optimizeDeliveryOrder(
   let startLat = cd.lat;
   let startLng = cd.lng;
 
-  if (strategy === 'start_far' || strategy === 'end_near_cd') {
+  if (strategy === 'finalizacao_proxima') {
     // Start from the farthest point
     const farthest = [...geocodedOrders].sort((a, b) => b.distanceFromCD - a.distanceFromCD)[0];
     if (farthest) {

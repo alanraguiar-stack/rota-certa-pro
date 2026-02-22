@@ -33,7 +33,7 @@ export default function NewRoute() {
   const [routeName, setRouteName] = useState('');
   const [orders, setOrders] = useState<ParsedOrder[]>([]);
   const [selectedTruckIds, setSelectedTruckIds] = useState<string[]>([]);
-  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('economy');
+  const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('padrao');
   const [isCreating, setIsCreating] = useState(false);
   
   // Auto-routing state
@@ -82,7 +82,7 @@ export default function NewRoute() {
     // Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
       const result = autoComposeRoute(parsedOrders, activeTrucks, {
-        strategy: 'economy',
+        strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
       });
@@ -172,11 +172,9 @@ export default function NewRoute() {
     }
     if (routingStrategy) {
       const strategyLabels: Record<RoutingStrategy, string> = {
-        economy: 'Economia',
-        speed: 'Velocidade',
-        end_near_cd: 'Fim no CD',
-        start_far: 'Longe→Perto',
-        start_near: 'Perto→Longe',
+        padrao: 'Padrão',
+        finalizacao_proxima: 'Fim próximo ao CD',
+        finalizacao_distante: 'Fim distante',
       };
       summary.push(strategyLabels[routingStrategy]);
     }
