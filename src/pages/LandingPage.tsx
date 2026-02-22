@@ -154,7 +154,7 @@ export default function LandingPage() {
                 </Button>
               </Link>
               <a href="#como-funciona">
-                <Button size="lg" variant="outline" className="h-14 border-white/20 px-8 text-base text-white hover:bg-white/10">
+                <Button size="lg" variant="outline" className="h-14 border-accent/40 px-8 text-base text-accent hover:bg-accent/10">
                   Ver demonstração
                 </Button>
               </a>
@@ -397,7 +397,7 @@ export default function LandingPage() {
               </Button>
             </Link>
             <a href="#como-funciona">
-              <Button size="lg" variant="outline" className="h-14 border-white/30 px-8 text-base text-white hover:bg-white/15">
+              <Button size="lg" variant="outline" className="h-14 border-accent/40 px-8 text-base text-accent hover:bg-accent/10">
                 Ver demonstração
               </Button>
             </a>
