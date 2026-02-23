@@ -482,7 +482,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       });
       
       toast({
-        title: 'Relatório Geral detectado!',
+        title: 'Vendas do Dia detectado!',
         description: `${records.length} endereços de entrega`,
       });
       
@@ -733,7 +733,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
     if ((area1.detectedType === 'adv' || area2.detectedType === 'adv') && !mergedOrders) {
       toast({
         title: 'Dados incompletos',
-        description: 'O Detalhe das Vendas não tem endereços. Cole também o Relatório Geral.',
+        description: 'O Detalhe das Vendas não tem endereços. Cole também as Vendas do Dia.',
         variant: 'destructive',
       });
       return;
@@ -772,7 +772,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
   };
   
   const getAreaLabel = (area: PasteAreaState, defaultLabel: string) => {
-    if (area.detectedType === 'itinerario') return 'Relatório Geral de Vendas';
+    if (area.detectedType === 'itinerario') return 'Vendas do Dia';
     if (area.detectedType === 'adv') return 'Detalhe das Vendas';
     if (area.detectedType === 'generic') return 'Dados de Pedidos';
     return defaultLabel;
@@ -784,7 +784,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
       <Alert>
         <ClipboardPaste className="h-4 w-4" />
         <AlertDescription>
-          <strong>Cruzamento Manual:</strong> Cole os dados do <strong>Relatório Geral de Vendas</strong> (endereços) 
+          <strong>Cruzamento Manual:</strong> Cole os dados das <strong>Vendas do Dia</strong> (endereços) 
           e do <strong>Detalhe das Vendas</strong> (itens) nas áreas abaixo. O sistema cruzará automaticamente pelo número da venda.
         </AlertDescription>
       </Alert>
@@ -798,7 +798,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base flex-wrap">
               {getAreaIcon(area1)}
-              {getAreaLabel(area1, '1. Relatório Geral de Vendas')}
+              {getAreaLabel(area1, '1. Vendas do Dia')}
               {area1.status === 'success' && (
                 <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
               )}
