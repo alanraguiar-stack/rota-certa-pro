@@ -196,7 +196,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           setUploadState({
             file,
             status: 'processing',
-            message: 'Processando Relatório Geral de Vendas...',
+            message: 'Processando Vendas do Dia...',
             data: null,
           });
           
@@ -214,7 +214,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             });
             
             toast({
-              title: '📍 Relatório Geral detectado!',
+              title: '📍 Vendas do Dia detectado!',
               description: `${itinerarioRecords.length} vendas com endereços (${formatWeightIntl(totalWeight)})`,
             });
             
@@ -347,7 +347,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           });
           
           toast({
-            title: 'Relatório Geral detectado!',
+            title: 'Vendas do Dia detectado!',
             description: `${result.itinerarioRecords.length} endereços (${formatWeightIntl(totalWeight)})`,
           });
           
@@ -528,7 +528,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
     if (file1Upload.detectedType === 'adv' || file2Upload.detectedType === 'adv') {
       toast({
         title: 'Dados incompletos',
-        description: 'O Detalhe das Vendas não contém endereços. Carregue também o Relatório Geral.',
+        description: 'O Detalhe das Vendas não contém endereços. Carregue também as Vendas do Dia.',
         variant: 'destructive',
       });
       return;
@@ -592,7 +592,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   
   // Determinar labels dinâmicos
   const getFileLabel = (upload: UploadState, defaultLabel: string): string => {
-    if (upload.detectedType === 'itinerario') return 'Relatório Geral de Vendas';
+    if (upload.detectedType === 'itinerario') return 'Vendas do Dia';
     if (upload.detectedType === 'adv') return 'Detalhe das Vendas';
     if (upload.detectedType === 'excel') return 'Planilha Excel';
     return defaultLabel;
@@ -610,7 +610,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
       <Alert>
         <FileSpreadsheet className="h-4 w-4" />
         <AlertDescription>
-          <strong>Cruzamento Automático:</strong> Carregue dois arquivos PDF - o <strong>Relatório Geral de Vendas</strong> (com endereços) 
+          <strong>Cruzamento Automático:</strong> Carregue dois arquivos PDF - as <strong>Vendas do Dia</strong> (com endereços) 
           e o <strong>Detalhe das Vendas</strong> (com itens detalhados). O sistema irá cruzar os dados automaticamente pelo número da venda.
         </AlertDescription>
       </Alert>
@@ -624,7 +624,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base flex-wrap">
               {getFileIcon(file1Upload)}
-              {getFileLabel(file1Upload, '1. Relatório Geral de Vendas')}
+              {getFileLabel(file1Upload, '1. Vendas do Dia')}
               {file1Upload.status === 'success' && (
                 <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
               )}
@@ -846,7 +846,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         {file1Upload.status === 'success' && file2Upload.status !== 'success' && (
           <p className="text-sm text-muted-foreground text-center">
             {file1Upload.detectedType === 'adv' 
-              ? 'Carregue o Relatório Geral para obter os endereços de entrega.'
+              ? 'Carregue as Vendas do Dia para obter os endereços de entrega.'
               : file1Upload.detectedType === 'itinerario'
               ? 'Você pode prosseguir ou carregar o Detalhe das Vendas para itens detalhados.'
               : 'Você pode prosseguir ou carregar um segundo arquivo para cruzamento.'}
