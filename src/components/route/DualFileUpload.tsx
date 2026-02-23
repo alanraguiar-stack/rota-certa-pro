@@ -189,8 +189,16 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         // =========================================================================
         // PRIORIDADE 2: Detectar formato Itinerário (Relatório Geral)
         // =========================================================================
-        const firstRowHeaders = rawRows[0]?.map(c => String(c ?? '')) || [];
-        if (isItinerarioExcelFormat(firstRowHeaders)) {
+        // Procurar header do Itinerário nas primeiras 10 linhas
+        let itinerarioDetected = false;
+        for (let i = 0; i < Math.min(10, rawRows.length); i++) {
+          const rowHeaders = rawRows[i]?.map(c => String(c ?? '')) || [];
+          if (isItinerarioExcelFormat(rowHeaders)) {
+            itinerarioDetected = true;
+            break;
+          }
+        }
+        if (itinerarioDetected) {
           console.log('[DualFileUpload] ✅ Formato Itinerário detectado - usando parser especializado');
           
           setUploadState({
