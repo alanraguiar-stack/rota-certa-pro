@@ -112,17 +112,20 @@ export function classifyRows(
     // Detectar header (primeira linha com texto significativo que não seja totalização)
     let isHeader = false;
     if (!headerFound && !isEmpty && !isTotalization && !isObservation) {
-      // Verificar se tem palavras típicas de header
-      const hasHeaderWords = cells.some(cell => {
-        if (cell === null || typeof cell === 'number') return false;
-        const norm = superNormalize(cell);
-        return ['cliente', 'peso', 'endereco', 'venda', 'pedido', 'produto'].some(kw => norm.includes(kw));
-      });
-      
-      if (hasHeaderWords) {
-        isHeader = true;
-        headerFound = true;
-        headerRowIndex = i;
+      // Exigir mínimo de 3 células com conteúdo para ser header
+      const nonEmptyCells = cells.filter(c => c !== null && String(c).trim() !== '').length;
+      if (nonEmptyCells >= 3) {
+        const hasHeaderWords = cells.some(cell => {
+          if (cell === null || typeof cell === 'number') return false;
+          const norm = superNormalize(cell);
+          return ['cliente', 'peso', 'endereco', 'venda', 'pedido', 'produto'].some(kw => norm.includes(kw));
+        });
+        
+        if (hasHeaderWords) {
+          isHeader = true;
+          headerFound = true;
+          headerRowIndex = i;
+        }
       }
     }
     
