@@ -43,11 +43,25 @@ interface StoredPattern {
 // ── Shared helpers ──
 
 const extractTruckLabel = (filename: string): string => {
-  const match = filename.match(/^([A-Z]{2,5})/i);
+  const baseName = filename.replace(/\.[^.]+$/, '');
+  
+  // Padrão "Entregas{data}_{TRUCK}" - ex: Entregas23_02_2026_FKD
+  const entregasMatch = baseName.match(/^Entregas\d.*_([A-Z]{2,5})$/i);
+  if (entregasMatch) return entregasMatch[1].toUpperCase();
+  
+  // Padrão original: início do nome (ex: CYR01.02.25)
+  const match = baseName.match(/^([A-Z]{2,5})/i);
   return match ? match[1].toUpperCase() : 'UNKNOWN';
 };
 
 const extractRouteDate = (filename: string): string | null => {
+  // Padrão DD_MM_YYYY (ex: 23_02_2026)
+  const matchFull = filename.match(/(\d{2})_(\d{2})_(\d{4})/);
+  if (matchFull) {
+    const [, dd, mm, yyyy] = matchFull;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
   const match3 = filename.match(/(\d{2})\.(\d{2})\.(\d{2})/);
   if (match3) {
     const [, dd, mm, yy] = match3;
@@ -106,17 +120,20 @@ function mapRowsToHistoryImport(
     routeDate = extractDateFromColumn(rawRows, headers, headerIdx);
   }
 
+  const findCol = (keywords: string[]) =>
+    headers.findIndex(h => keywords.some(kw => h.includes(kw)));
+
   const colIdx = {
-    ordem: headers.indexOf('ordem'),
-    venda: headers.indexOf('venda'),
-    cliente: headers.indexOf('cliente'),
-    fantasia: headers.indexOf('fantasia'),
-    cep: headers.indexOf('cep'),
-    endereco: headers.indexOf('endereço') !== -1 ? headers.indexOf('endereço') : headers.indexOf('endereco'),
-    numero: headers.indexOf('número') !== -1 ? headers.indexOf('número') : headers.indexOf('numero'),
-    bairro: headers.indexOf('bairro'),
-    cidade: headers.indexOf('cidade'),
-    uf: headers.indexOf('uf'),
+    ordem: findCol(['ordem']),
+    venda: findCol(['venda']),
+    cliente: findCol(['cliente']),
+    fantasia: findCol(['fantasia']),
+    cep: findCol(['cep']),
+    endereco: findCol(['endere']),
+    numero: findCol(['númer', 'numer']),
+    bairro: findCol(['bairro']),
+    cidade: findCol(['cidade']),
+    uf: findCol(['uf']),
   };
 
   const rows: ParsedHistoryRow[] = [];
