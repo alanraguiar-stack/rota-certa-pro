@@ -1,93 +1,136 @@
 
-# Suportar formato "Entregas" no Importador de Roteiro do Analista
 
-## Problema
+# Motor de Aprendizado com Base Historica do Analista
 
-O arquivo `Entregas23_02_2026_FKD.xls` nao e reconhecido pelo importador porque:
+## Visao Geral
 
-1. **Truck label errado**: `extractTruckLabel` usa regex `^([A-Z]{2,5})` que captura "ENTRE" do inicio do nome. O truck real e "FKD", localizado no final do nome antes da extensao.
-2. **Data nao detectada**: `extractRouteDate` procura datas com pontos (ex: `23.02.26`), mas o nome usa underscores (`23_02_2026`).
-3. **Colunas deslocadas**: O XML usa `MergeAcross="1"` na coluna "Venda" (ocupa 2 colunas), o que pode deslocar os indices das colunas seguintes quando o XLSX faz o parse.
+O sistema ja importa e armazena padroes historicos na tabela `route_history_patterns`, mas o motor de roteirizacao (`autoRouterEngine.ts` e `distribution.ts`) **ignora completamente** esses dados. Este plano cria um modulo de inteligencia que extrai padroes das bases historicas e os injeta no processo de composicao automatica.
 
-## Correcoes
+## Arquitetura
 
-### Arquivo: `src/components/route/RouteHistoryImporter.tsx`
-
-#### 1. Atualizar `extractTruckLabel` (linhas 45-48)
-
-Adicionar deteccao do padrao "Entregas" - quando o nome comeca com "Entregas", extrair o truck do final (apos o ultimo underscore):
-
-```typescript
-const extractTruckLabel = (filename: string): string => {
-  const baseName = filename.replace(/\.[^.]+$/, ''); // remover extensao
-  
-  // Padrao "Entregas{data}_{TRUCK}" - ex: Entregas23_02_2026_FKD
-  const entregasMatch = baseName.match(/^Entregas\d.*_([A-Z]{2,5})$/i);
-  if (entregasMatch) return entregasMatch[1].toUpperCase();
-  
-  // Padrao original: inicio do nome (ex: CYR01.02.25)
-  const match = baseName.match(/^([A-Z]{2,5})/i);
-  return match ? match[1].toUpperCase() : 'UNKNOWN';
-};
+```text
+route_history_patterns (DB)
+        |
+        v
+ [historyPatternEngine.ts]  <-- NOVO modulo
+   - Extrai padroes de cidade-caminhao
+   - Calcula co-ocorrencia de cidades
+   - Identifica preferencias de agrupamento
+        |
+        v
+ [autoRouterEngine.ts]  <-- MODIFICADO
+   - Recebe padroes como parametro opcional
+   - Usa padroes para influenciar clustering
+   - Gera explicacoes de decisao
+        |
+        v
+ [NewRoute.tsx]  <-- MODIFICADO
+   - Busca padroes do DB antes de roteirizar
+   - Passa padroes ao motor
+   - Exibe explicacoes ao usuario
 ```
 
-#### 2. Atualizar `extractRouteDate` (linhas 50-64)
+## Detalhamento Tecnico
 
-Adicionar deteccao de datas com underscores e formato completo (DD_MM_YYYY):
+### 1. Novo arquivo: `src/lib/historyPatternEngine.ts`
 
+Motor de extracao de padroes a partir dos dados historicos. Funcoes principais:
+
+**`extractCityPatterns(patterns: HistoryRow[])`** - Analisa todos os registros e gera:
+- **Mapa de co-ocorrencia**: quais cidades aparecem juntas no mesmo caminhao (ex: "Cotia + Embu = 85% das vezes")
+- **Mapa de exclusao**: quais cidades raramente se misturam (ex: "Barueri + Osasco = apenas 5%")
+- **Caminhoes por cidade**: quantos caminhoes cada cidade costuma usar (ex: "Osasco = 2 caminhoes em 70% dos casos")
+- **Cidades dedicadas**: cidades que quase sempre tem caminhao exclusivo (ex: "Barueri = dedicado em 90%")
+- **Ordem de prioridade**: quais cidades sao atribuidas primeiro
+
+**`findSimilarScenario(currentCities, currentWeight, patterns)`** - Compara o cenario atual com cenarios historicos e retorna o mais similar, com score de similaridade.
+
+**`generateRoutingHints(patterns, currentOrders)`** - Retorna sugestoes concretas:
 ```typescript
-const extractRouteDate = (filename: string): string | null => {
-  // Padrao DD_MM_YYYY (ex: 23_02_2026)
-  const matchFull = filename.match(/(\d{2})_(\d{2})_(\d{4})/);
-  if (matchFull) {
-    const [, dd, mm, yyyy] = matchFull;
-    return `${yyyy}-${mm}-${dd}`;
-  }
-  
-  // Padrao DD.MM.YY (existente)
-  const match3 = filename.match(/(\d{2})\.(\d{2})\.(\d{2})/);
-  if (match3) { /* ... manter logica existente ... */ }
-  
-  // Padrao DD.MM (existente)
-  const match2 = filename.match(/(\d{2})\.(\d{2})/);
-  if (match2) { /* ... manter logica existente ... */ }
-  
-  return null;
-};
+interface RoutingHint {
+  type: 'dedicate_truck' | 'combine_cities' | 'split_city' | 'priority_order';
+  cities: string[];
+  confidence: number; // 0-100, baseado em frequencia historica
+  reasoning: string;  // Ex: "Em 85% das rotas anteriores, Cotia e Embu ficaram juntas"
+}
 ```
 
-#### 3. Tornar deteccao de colunas mais flexivel em `mapRowsToHistoryImport` (linhas 109-120)
+### 2. Modificacao: `src/lib/autoRouterEngine.ts`
 
-Atualmente usa `headers.indexOf('ordem')` que e exato. Adicionar busca parcial para lidar com possiveis espacos ou variacoes causadas por MergeAcross:
+**Funcao `autoComposeRoute`** - Adicionar parametro opcional `historyHints`:
 
 ```typescript
-const findCol = (keywords: string[]) => 
-  headers.findIndex(h => keywords.some(kw => h.includes(kw)));
-
-const colIdx = {
-  ordem: findCol(['ordem']),
-  venda: findCol(['venda']),
-  cliente: findCol(['cliente']),
-  fantasia: findCol(['fantasia']),
-  cep: findCol(['cep']),
-  endereco: findCol(['endere']),
-  numero: findCol(['númer', 'numer']),
-  bairro: findCol(['bairro']),
-  cidade: findCol(['cidade']),
-  uf: findCol(['uf']),
-};
+export function autoComposeRoute(
+  orders: ParsedOrder[],
+  availableTrucks: Truck[],
+  config: Partial<AutoRouterConfig> = {},
+  historyHints?: RoutingHint[]  // NOVO
+): AutoRouterResult
 ```
 
-#### 4. Filtrar linhas vazias de separacao
+**Funcao `clusterOrdersByCity`** - Modificar a logica de clustering para:
 
-O XML gera linhas de separacao vazias (Height="0.73") entre cada registro. A logica atual ja ignora linhas sem cliente e sem venda (`if (!cliente && !venda) continue;`), entao isso ja esta coberto.
+1. **Antes de atribuir cidades grandes**: verificar se o historico sugere cidade dedicada. Se sim e a confianca > 70%, reservar um cluster exclusivo.
+2. **Na camada 3.5 (complemento com vizinhas)**: priorizar combinacoes que aparecem no historico. Se "Cotia + Embu" tem 85% de co-ocorrencia, priorizar Embu como complemento de Cotia sobre outras vizinhas.
+3. **Na camada 4 (orfas)**: usar o historico para decidir em qual caminhao colocar as orfas (preferir combinacoes historicas).
 
-## Resumo
+A logica matematica (capacidade, peso) continua sendo respeitada como limite rigido. O historico apenas influencia a **preferencia** de agrupamento.
 
-| Mudanca | Motivo |
-|---------|--------|
-| `extractTruckLabel`: detectar padrao "Entregas..._{TRUCK}" | Extrair "FKD" corretamente do final do nome |
-| `extractRouteDate`: aceitar underscores e formato YYYY completo | Detectar data "23_02_2026" do nome do arquivo |
-| `mapRowsToHistoryImport`: busca parcial de headers | Lidar com variacoes de colunas causadas por MergeAcross |
+**Novo campo no `AutoRouterResult`**:
+```typescript
+export interface AutoRouterResult {
+  // ... campos existentes
+  reasoning: string[];  // NOVO - explicacoes das decisoes
+}
+```
 
-Nenhuma mudanca na UI ou no fluxo de importacao -- apenas o parsing fica mais robusto para aceitar este novo formato de arquivo.
+### 3. Modificacao: `src/pages/NewRoute.tsx`
+
+**Ao carregar pedidos** (`handleAutoDataReady`):
+1. Buscar padroes do DB (`route_history_patterns`) para o usuario atual
+2. Extrair hints via `generateRoutingHints()`
+3. Passar hints para `autoComposeRoute()`
+
+**Na UI** (`AutoCompositionView`):
+- Exibir as explicacoes de decisao (campo `reasoning`) como cards informativos
+- Exemplo: "Esta composicao segue o padrao observado em 80% das rotas anteriores para Barueri"
+
+### 4. Novo hook: `src/hooks/useHistoryPatterns.ts`
+
+Hook para buscar e cachear padroes historicos:
+```typescript
+export function useHistoryPatterns() {
+  // Busca route_history_patterns do usuario
+  // Extrai padroes via historyPatternEngine
+  // Retorna { hints, isLoading, patternsCount }
+}
+```
+
+### 5. Aprendizado continuo
+
+**Quando o usuario ajusta manualmente uma rota** (ja existe o fluxo de edicao em `TruckRouteEditor.tsx`):
+- Ao confirmar a rota final, salvar a composicao como novo registro em `route_history_patterns`
+- Isso acontece automaticamente no fluxo de criacao de rota existente (`handleCreateRoute`)
+
+Nao e necessaria nova tabela -- a tabela `route_history_patterns` ja possui todos os campos necessarios (truck_label, city, sequence_order, client_name, address).
+
+### 6. Limites de seguranca
+
+O motor de padroes respeita limites rigidos:
+- Confianca minima de 60% para aplicar um padrao
+- Capacidade fisica do caminhao nunca e violada
+- Se o cenario atual diverge muito do historico (< 40% similaridade), ignora padroes e usa logica pura
+- Padroes com menos de 3 ocorrencias sao ignorados (evita aprender de dados insuficientes)
+
+## Resumo de arquivos
+
+| Arquivo | Acao | Descricao |
+|---------|------|-----------|
+| `src/lib/historyPatternEngine.ts` | CRIAR | Motor de extracao de padroes |
+| `src/hooks/useHistoryPatterns.ts` | CRIAR | Hook para buscar padroes do DB |
+| `src/lib/autoRouterEngine.ts` | MODIFICAR | Receber e aplicar hints historicos |
+| `src/pages/NewRoute.tsx` | MODIFICAR | Integrar padroes no fluxo |
+| `src/components/route/AutoCompositionView.tsx` | MODIFICAR | Exibir explicacoes de decisao |
+
+Nenhuma mudanca de schema no banco de dados -- usa a tabela `route_history_patterns` existente.
+
