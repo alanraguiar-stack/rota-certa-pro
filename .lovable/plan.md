@@ -1,23 +1,35 @@
 
 
-# Corrigir cor do botao "Ver demonstracao"
+# Renomear labels dos relatórios e corrigir mensagem de erro
 
 ## Problema
-Os botoes "Ver demonstracao" usam `text-white` com `border-white/20`, o que os torna invisiveis em fundos claros. Ha 2 instancias no arquivo `src/pages/LandingPage.tsx`.
+1. O lado esquerdo mostra "Relatório Geral de Vendas" - deve ser **"Vendas do Dia"**
+2. O lado direito "Detalhe das Vendas" - **manter como está**
+3. A mensagem de erro menciona "Relatório Geral" - deve referenciar "Vendas do Dia"
+4. O Detalhe das Vendas contém nome do cliente (sem endereço) - o endereço está nas Vendas do Dia
 
-## Correcao
+## Alterações
 
-### Arquivo: `src/pages/LandingPage.tsx`
+### Arquivo 1: `src/components/route/DualFileUpload.tsx`
 
-**Linha 157 (Hero Section):**
-Trocar `text-white` por `text-foreground` e ajustar a borda para usar a cor do tema:
-- De: `border-white/20 text-white hover:bg-white/10`
-- Para: `border-accent/40 text-accent hover:bg-accent/10`
+| Local | De | Para |
+|-------|-----|------|
+| Instrução (linha 613) | "Relatório Geral de Vendas" | "Vendas do Dia" |
+| Label detectado (linha 595) | `'Relatório Geral de Vendas'` | `'Vendas do Dia'` |
+| Default label esquerdo (linha 627) | `'1. Relatório Geral de Vendas'` | `'1. Vendas do Dia'` |
+| Toast itinerário (linhas 217, 350) | `'Relatório Geral detectado!'` | `'Vendas do Dia detectado!'` |
+| Toast erro (linha 531) | `'Carregue também o Relatório Geral.'` | `'Carregue também as Vendas do Dia.'` |
+| Hint inferior (linha 849) | `'Carregue o Relatório Geral para obter os endereços'` | `'Carregue as Vendas do Dia para obter os endereços'` |
 
-**Linha 400 (CTA Final):**
-Mesma correcao:
-- De: `border-white/30 text-white hover:bg-white/15`
-- Para: `border-accent/40 text-accent hover:bg-accent/10`
+### Arquivo 2: `src/components/route/DualPasteData.tsx`
 
-Isso garante que o texto do botao fique visivel em qualquer fundo, usando a cor accent (teal) do design system.
+| Local | De | Para |
+|-------|-----|------|
+| Label detectado (linha 775) | `'Relatório Geral de Vendas'` | `'Vendas do Dia'` |
+| Default label esquerdo (linha 801) | `'1. Relatório Geral de Vendas'` | `'1. Vendas do Dia'` |
+| Instrução (linha 787) | "Relatório Geral de Vendas" | "Vendas do Dia" |
+| Toast itinerário (linha 485) | `'Relatório Geral detectado!'` | `'Vendas do Dia detectado!'` |
+| Toast erro (linha 736) | `'Cole também o Relatório Geral.'` | `'Cole também as Vendas do Dia.'` |
+
+Total: ~12 ocorrências em 2 arquivos. Nenhuma lógica muda, apenas os textos exibidos ao usuário.
 
