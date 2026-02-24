@@ -3,7 +3,7 @@
  * Exibe regra âncora, cidade principal, limites e violações
  */
 
-import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert, Anchor, ArrowRight } from 'lucide-react';
+import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert, Anchor, ArrowRight, FileText, Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -64,10 +64,11 @@ function AnchorRuleBadge({ rule }: { rule: AnchorRule }) {
   );
 }
 
-function TruckCompositionCard({ composition, index, violations }: { 
+function TruckCompositionCard({ composition, index, violations, reasoning }: { 
   composition: TruckComposition; 
   index: number; 
   violations: string[];
+  reasoning: string[];
 }) {
   const truckColors = [
     'text-blue-600 bg-blue-100',
@@ -129,23 +130,62 @@ function TruckCompositionCard({ composition, index, violations }: {
       <CardContent className="space-y-4">
         {/* Anchor rule info */}
         {rule && !rule.isSupport && (
-          <div className="flex items-center gap-2 rounded-lg bg-primary/10 border border-primary/20 px-3 py-2">
-            <Anchor className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold text-primary capitalize">
-              {rule.anchorCity}
-            </span>
-            <span className="text-xs text-muted-foreground ml-auto">
-              máx {rule.maxDeliveries} entregas
-            </span>
+          <div className="rounded-lg bg-primary/10 border border-primary/20 px-3 py-2 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <Anchor className="h-4 w-4 text-primary" />
+              <span className="text-sm font-semibold text-primary capitalize">
+                {rule.anchorCity}
+              </span>
+              <span className="text-xs text-muted-foreground ml-auto">
+                máx {rule.maxDeliveries} entregas
+              </span>
+            </div>
+            {rule.allowedFillCities.length > 0 && (
+              <p className="text-xs text-muted-foreground pl-6">
+                Encaixe permitido: {rule.allowedFillCities.map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(', ')}
+              </p>
+            )}
+            {rule.neighborhoodExceptions.length > 0 && (
+              <p className="text-xs text-muted-foreground pl-6">
+                Exceções de bairro: {rule.neighborhoodExceptions.map(e => 
+                  `${e.neighborhood.charAt(0).toUpperCase() + e.neighborhood.slice(1)} (${e.city}, máx ${e.maxDeliveries})`
+                ).join('; ')}
+              </p>
+            )}
           </div>
         )}
 
         {rule && rule.isSupport && (
-          <div className="flex items-center gap-2 rounded-lg bg-warning/10 border border-warning/20 px-3 py-2">
-            <ArrowRight className="h-4 w-4 text-warning" />
-            <span className="text-sm font-semibold text-warning">
-              Recebe excedentes + cidades restantes
-            </span>
+          <div className="rounded-lg bg-warning/10 border border-warning/20 px-3 py-2 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <ArrowRight className="h-4 w-4 text-warning" />
+              <span className="text-sm font-semibold text-warning">
+                Recebe excedentes + cidades restantes
+              </span>
+            </div>
+            {rule.allowedFillCities.length > 0 && (
+              <p className="text-xs text-muted-foreground pl-6">
+                Cidades próprias: {rule.allowedFillCities.map(c => c.charAt(0).toUpperCase() + c.slice(1)).join(', ')}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Applied rules log */}
+        {reasoning.length > 0 && (
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <FileText className="h-3 w-3" />
+              Regras aplicadas ({reasoning.length})
+            </p>
+            <div className="max-h-24 overflow-y-auto space-y-1 rounded-lg border border-muted bg-muted/30 p-2">
+              {reasoning.map((r, i) => (
+                <div key={i} className="flex items-start gap-1.5 text-xs">
+                  <Info className="h-3 w-3 text-primary shrink-0 mt-0.5" />
+                  <span className="text-muted-foreground">{r}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -384,14 +424,21 @@ export function AutoCompositionView({
           Caminhões ({activeCompositions.length})
         </h3>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
-          {activeCompositions.map((composition, index) => (
-            <TruckCompositionCard 
-              key={composition.truck.id} 
-              composition={composition} 
-              index={index}
-              violations={violationsByPlate.get(composition.truck.plate) || []}
-            />
-          ))}
+          {activeCompositions.map((composition, index) => {
+            const plate = composition.truck.plate;
+            const truckReasoning = (result.reasoning || []).filter(r => 
+              r.includes(plate) || r.includes(`→ ${plate}`)
+            );
+            return (
+              <TruckCompositionCard 
+                key={composition.truck.id} 
+                composition={composition} 
+                index={index}
+                violations={violationsByPlate.get(plate) || []}
+                reasoning={truckReasoning}
+              />
+            );
+          })}
         </div>
       </div>
       
