@@ -1,112 +1,108 @@
 
-# Reestruturacao do Motor: Corredores Regionais do Analista
 
-## Diagnostico
+# Reestruturacao: Logica Territorial por Volume de Cidade
 
-Analisei todas as 302 entregas historicas em 5 datas diferentes (10/02, 16/02, 18/02, 19/02, 23/02) e o resultado da rota atual.
+## Problema Atual
 
-### O que o analista FAZ (dados reais do banco):
+O motor atual usa "corredores regionais" com Jaccard similarity, o que causa dois problemas graves:
 
-O analista **sempre mistura cidades** - todo caminhao tem 2 a 7 cidades. Porem, ele segue **corredores regionais fixos**:
+1. **Force merge (linhas 571-584)**: quando ha mais clusters que caminhoes, forca a uniao de clusters incompativeis, gerando caminhoes com 5-9 cidades misturadas
+2. **Corredores sao muito permissivos**: o Jaccard threshold (0.35) permite misturas amplas demais, e a logica de "corredor" trata multiplas cidades como um bloco unico
+
+O usuario quer uma logica mais simples e deterministica: **cidade como unidade primaria, volume como criterio, encaixe inteligente so com vizinhas**.
+
+## Nova Logica (5 Etapas)
 
 ```text
-CORREDOR OSASCO (CYR):
-  Osasco (nucleo) + Sao Paulo (zona oeste) + Barueri (poucas)
-  Aparece em 5/5 rotas historicas
-
-CORREDOR CARAPICUIBA (FKD/EKH):
-  Carapicuiba (nucleo) + Jandira + Osasco (fronteira) + Barueri (poucas)
-  Aparece em 3/5 rotas
-
-CORREDOR OESTE (OUTRO/ROTEI):
-  Jandira + Itapevi + Cotia + Vargem Grande Paulista + Barueri
-  Aparece em 2/5 rotas
-
-CORREDOR NORTE (EEF):
-  Santana de Parnaiba + Cajamar + Caieiras + Sao Paulo (Perus) + Barueri
-  Aparece em 3/5 rotas
-
-CORREDOR SUL (EFF):
-  Embu + Taboao da Serra + Pirapora + Santana de Parnaiba + Barueri
-  Aparece em 1/5 rotas
+ETAPA 1: Agrupar pedidos por cidade, normalizar nomes
+ETAPA 2: Ordenar cidades por volume (pedidos + peso)
+ETAPA 3: Alocar caminhoes exclusivos por cidade (maior volume primeiro)
+         - Se cidade precisa de N caminhoes, dividir em N blocos
+ETAPA 4: Encaixe inteligente - cidades pequenas vao para caminhoes com sobra
+         - SO se forem vizinhas geograficamente
+         - SO se houver co-ocorrencia historica
+         - Nunca intercalar na sequencia
+ETAPA 5: Sequenciamento interno por cidade > CEP > bairro > rua
+         - Todas entregas da mesma cidade em bloco continuo
+         - PROIBIDO alternar cidades na sequencia
 ```
 
-Barueri aparece em TODOS os caminhoes porque e a cidade do CD -- sempre tem 1-6 entregas de passagem.
+## Arquivos a Modificar
 
-### O que o sistema faz ERRADO:
+### 1. `src/lib/autoRouterEngine.ts` - Reescrever clustering e sequenciamento
 
-A rota atual (c7c5a9ff) tem o caminhao DHS-4318 com: Cotia, Sao Paulo, Jandira, Carapicuiba, Itapevi, Osasco, Embu, Santana de Parnaiba, Barueri = **9 cidades misturadas sem logica regional**.
+**Reescrever `buildCorridorClusters` -> `buildCityFirstClusters`**
 
-O motor atual impoe "uma cidade por caminhao" que e o OPOSTO do que o analista faz. E quando precisa consolidar (por falta de caminhoes), mistura aleatoriamente.
+Nova logica:
 
-## Solucao
+- Agrupar todos pedidos por cidade
+- Ordenar cidades por: quantidade de pedidos (desc), peso total (desc)
+- Para cada cidade em ordem:
+  - Calcular quantos caminhoes precisa (peso / capacidade)
+  - Criar cluster(s) exclusivo(s) para essa cidade
+  - Dividir pedidos por proximidade ao CD se precisar de multiplos caminhoes
+- Apos todas as cidades principais alocadas:
+  - Para cada cluster com sobra de capacidade (>15% livre):
+    - Buscar cidades pequenas NAO alocadas
+    - Verificar se a cidade pequena e vizinha (usando `areCitiesNeighbors`)
+    - Verificar co-ocorrencia historica (se disponivel)
+    - Se ambos ok E cabe no peso: encaixar
+    - Senao: deixar como cluster proprio (sub-utilizado)
+- **Remover completamente o force merge** (linhas 571-584)
+- Se sobram mais clusters que caminhoes E nao ha merge compativel: marcar como nao atribuidos com aviso
 
-Substituir a logica "uma cidade por caminhao" por **corredores regionais** extraidos diretamente do historico do analista.
+**Reescrever `optimizeDeliverySequence`**
 
-### Arquivo 1: `src/lib/historyPatternEngine.ts`
+Nova logica de sequenciamento:
 
-**Adicionar `extractRegionalCorridors`** - Nova funcao principal:
+- Primeiro: agrupar pedidos por cidade (bloco continuo por cidade)
+- Ordenar cidades dentro do caminhao: a mais proxima do CD primeiro (ou mais distante, conforme estrategia)
+- Dentro de cada bloco de cidade: ordenar por CEP (5 primeiros digitos), depois por bairro, depois por rua
+- **Validacao**: verificar que nao ha alternancia de cidades na sequencia final
 
-Analisa o historico e identifica corredores recorrentes:
-- Agrupa por truck_label + route_date
-- Para cada caminhao em cada rota, registra o conjunto de cidades
-- Identifica quais conjuntos de cidades se repetem
-- Extrai a **cidade nucleo** (mais entregas) e as **cidades satelite**
-- Retorna templates de corredor com score de confianca
+**Atualizar `validateComposition`**
 
-```typescript
-interface RegionalCorridor {
-  id: string;                    // ex: "osasco-core"
-  coreCity: string;              // ex: "osasco"
-  satelliteCities: string[];     // ex: ["sao paulo", "barueri", "carapicuiba"]
-  frequency: number;             // quantas vezes apareceu
-  avgDeliveries: number;         // media de entregas por corredor
-  confidence: number;            // 0-100
-}
-```
+Adicionar verificacao de:
+- Alternancia de cidades na sequencia de entregas
+- Mais de 2 cidades nao-vizinhas no mesmo caminhao (sem historico)
 
-**Adicionar `matchOrdersToCorridor`** - Dado um conjunto de pedidos, encontra qual corredor historico melhor se encaixa:
-- Calcula Jaccard similarity entre cidades do pedido e cidades do corredor
-- Retorna o corredor mais similar com score
+### 2. `src/lib/historyPatternEngine.ts` - Simplificar validacao
 
-### Arquivo 2: `src/lib/autoRouterEngine.ts`
+**Manter `isValidCityCombination`** mas simplificar:
+- Se as cidades sao vizinhas: permitir
+- Se tem co-ocorrencia historica > 0: permitir
+- Caso contrario: bloquear
 
-**Reescrever `buildTerritorialClusters`** completamente:
+**Manter `getCityExclusionMap`** sem alteracao (ja funciona corretamente)
 
-Nova logica em 5 passos:
+### 3. `src/components/route/AutoCompositionView.tsx` - Feedback territorial
 
-1. **Agrupar pedidos por cidade** (manter)
-2. **Buscar corredores historicos** via `extractRegionalCorridors`
-3. **Para cada corredor disponivel**: puxar TODAS as entregas das cidades daquele corredor ate encher a capacidade do caminhao
-4. **Pedidos restantes**: tentar encaixar em corredores com espaco OU criar corredor novo baseado em proximidade geografica
-5. **Barueri como hub**: entregas de Barueri sao distribuidas proporcionalmente entre os caminhoes (nunca um caminhao so de Barueri)
+- Exibir cidade principal do caminhao em destaque
+- Se houver cidade complementar, mostrar como "complemento" com badge diferente
+- Alertas de validacao: "Alternancia de cidades na sequencia" e "Mistura sem coerencia territorial"
+- Bloquear confirmacao se houver violacao
 
-A regra de "uma cidade por caminhao" e REMOVIDA.
-A regra de validacao com `isValidCityCombination` e AJUSTADA para validar por corredor (permitir misturas que o analista faz).
+### 4. `src/pages/NewRoute.tsx` - Sem mudanca estrutural
 
-**Remover logica de "dedicated cities"** que impede misturas validas.
+- Manter integracao existente com `extractedPatterns`
+- A validacao ja e chamada via `autoComposeRoute`
 
-### Arquivo 3: `src/lib/historyPatternEngine.ts`
+## Regras Implementadas
 
-**Ajustar `isValidCityCombination`**: Em vez de rejeitar qualquer mistura sem co-ocorrencia, verificar se as cidades formam um corredor historico valido. Cidades que aparecem juntas em pelo menos 1 rota historica sao permitidas.
-
-**Ajustar `getCityExclusionMap`**: So excluir pares que NUNCA apareceram juntos E que estao em corredores opostos (ex: Caieiras nunca aparece com Cotia).
-
-### Arquivo 4: `src/components/route/AutoCompositionView.tsx`
-
-**Atualizar validacao visual**: Mostrar o nome do corredor regional em cada card de caminhao (ex: "Corredor Osasco", "Corredor Oeste") em vez de apenas listar cidades. Manter o bloqueio de confirmacao apenas para misturas que nao existem em NENHUM corredor historico.
-
-### Arquivo 5: `src/pages/NewRoute.tsx`
-
-Passar os corredores extraidos para o motor de composicao.
+| Regra | Como |
+|-------|------|
+| Cidade como entidade primaria | Clusters exclusivos por cidade |
+| Volume como prioridade | Cidades ordenadas por qtd pedidos + peso |
+| Encaixe so com vizinhas | `areCitiesNeighbors` + historico |
+| Sequencia sem alternancia | Blocos continuos por cidade, CEP interno |
+| Bloqueio de rota ruim | Validacao automatica pre-confirmacao |
+| Sem force merge | Pedidos ficam nao atribuidos se nao couberem |
 
 ## Resumo de Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/lib/historyPatternEngine.ts` | Adicionar `extractRegionalCorridors`, `matchOrdersToCorridor`; ajustar validacao |
-| `src/lib/autoRouterEngine.ts` | Reescrever `buildTerritorialClusters` com logica de corredores regionais |
-| `src/components/route/AutoCompositionView.tsx` | Exibir nome do corredor e ajustar validacao |
-| `src/pages/NewRoute.tsx` | Integrar corredores no fluxo |
+| `src/lib/autoRouterEngine.ts` | Reescrever clustering (cidade-primeiro), sequenciamento (cidade>CEP>bairro), remover force merge |
+| `src/lib/historyPatternEngine.ts` | Simplificar validacao de combinacao |
+| `src/components/route/AutoCompositionView.tsx` | Feedback visual territorial, bloquear alternancia |
 
-Nenhuma mudanca de schema no banco de dados.
