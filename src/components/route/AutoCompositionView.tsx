@@ -1,10 +1,9 @@
 /**
- * Componente de visualização da composição automática de caminhões
- * Exibe CIDADE PRINCIPAL + COMPLEMENTOS por caminhão
- * Bloqueia confirmação se houver violações territoriais
+ * Componente de visualização da composição por caminhões âncora
+ * Exibe regra âncora, cidade principal, limites e violações
  */
 
-import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert } from 'lucide-react';
+import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert, Anchor, ArrowRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -17,6 +16,7 @@ import {
   TruckComposition,
   getRoutingSummary 
 } from '@/lib/autoRouterEngine';
+import { AnchorRule } from '@/lib/anchorRules';
 
 interface AutoCompositionViewProps {
   result: AutoRouterResult;
@@ -47,7 +47,28 @@ function EfficiencyBadge({ efficiency }: { efficiency: 'excellent' | 'good' | 'f
   );
 }
 
-function TruckCompositionCard({ composition, index, hasViolation }: { composition: TruckComposition; index: number; hasViolation: boolean }) {
+function AnchorRuleBadge({ rule }: { rule: AnchorRule }) {
+  if (rule.isSupport) {
+    return (
+      <Badge variant="outline" className="bg-warning/10 text-warning border-warning/30">
+        <ArrowRight className="h-3 w-3 mr-1" />
+        Apoio / Excedentes
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
+      <Anchor className="h-3 w-3 mr-1" />
+      Âncora: {rule.anchorCity.charAt(0).toUpperCase() + rule.anchorCity.slice(1)}
+    </Badge>
+  );
+}
+
+function TruckCompositionCard({ composition, index, violations }: { 
+  composition: TruckComposition; 
+  index: number; 
+  violations: string[];
+}) {
   const truckColors = [
     'text-blue-600 bg-blue-100',
     'text-green-600 bg-green-100',
@@ -57,6 +78,8 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
   ];
   
   const colorClass = truckColors[index % truckColors.length];
+  const rule = composition.anchorRule;
+  const hasViolation = violations.length > 0;
   
   const productSummary = new Map<string, number>();
   composition.orders.forEach(order => {
@@ -74,10 +97,6 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
   const topProducts = Array.from(productSummary.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
-
-  const cities = composition.cities || [];
-  const primaryCity = composition.primaryCity;
-  const complementCities = composition.complementCities || [];
   
   return (
     <Card className={cn(hasViolation && 'border-destructive/50 bg-destructive/5')}>
@@ -92,74 +111,94 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
               <CardDescription>{composition.truck.model}</CardDescription>
             </div>
           </div>
-          <Badge 
-            variant="outline"
-            className={cn(
-              composition.occupancyPercent > 90 ? 'border-destructive/50 text-destructive' :
-              composition.occupancyPercent > 75 ? 'border-warning/50 text-warning' :
-              'border-success/50 text-success'
-            )}
-          >
-            {composition.occupancyPercent}%
-          </Badge>
+          <div className="flex flex-col items-end gap-1">
+            {rule && <AnchorRuleBadge rule={rule} />}
+            <Badge 
+              variant="outline"
+              className={cn(
+                composition.occupancyPercent > 90 ? 'border-destructive/50 text-destructive' :
+                composition.occupancyPercent > 75 ? 'border-warning/50 text-warning' :
+                'border-success/50 text-success'
+              )}
+            >
+              {composition.occupancyPercent}%
+            </Badge>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Primary city highlight */}
-        {primaryCity && (
+        {/* Anchor rule info */}
+        {rule && !rule.isSupport && (
           <div className="flex items-center gap-2 rounded-lg bg-primary/10 border border-primary/20 px-3 py-2">
-            <MapPin className="h-4 w-4 text-primary" />
+            <Anchor className="h-4 w-4 text-primary" />
             <span className="text-sm font-semibold text-primary capitalize">
-              {primaryCity}
+              {rule.anchorCity}
             </span>
-            <Badge variant="outline" className="text-xs border-primary/30 text-primary ml-auto">
-              Principal
-            </Badge>
+            <span className="text-xs text-muted-foreground ml-auto">
+              máx {rule.maxDeliveries} entregas
+            </span>
+          </div>
+        )}
+
+        {rule && rule.isSupport && (
+          <div className="flex items-center gap-2 rounded-lg bg-warning/10 border border-warning/20 px-3 py-2">
+            <ArrowRight className="h-4 w-4 text-warning" />
+            <span className="text-sm font-semibold text-warning">
+              Recebe excedentes + cidades restantes
+            </span>
           </div>
         )}
 
         {/* City tags */}
-        {cities.length > 0 && (
+        {composition.cities.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
               <MapPin className="h-3 w-3" />
-              Cidades ({cities.filter(c => c !== 'barueri').length}{cities.includes('barueri') ? ' + hub' : ''})
+              Cidades ({composition.cities.length})
             </p>
             <div className="flex flex-wrap gap-1">
-              {cities.map((city) => (
+              {composition.cities.map((city) => (
                 <Badge 
                   key={city} 
                   variant="secondary" 
                   className={cn(
                     "text-xs capitalize",
-                    city === 'barueri' && "bg-muted/80 text-muted-foreground border-muted",
-                    city === primaryCity && city !== 'barueri' && "bg-primary/15 text-primary border-primary/30",
-                    complementCities.includes(city) && "bg-accent/50 text-accent-foreground border-accent/30",
-                    hasViolation && city !== 'barueri' && city !== primaryCity && !complementCities.includes(city) && "bg-destructive/10 text-destructive border-destructive/30"
+                    rule && city === rule.anchorCity && "bg-primary/15 text-primary border-primary/30",
+                    composition.complementCities?.includes(city) && "bg-accent/50 text-accent-foreground border-accent/30",
                   )}
                 >
                   {city}
-                  {city === 'barueri' && ' (hub)'}
-                  {complementCities.includes(city) && ' (complemento)'}
+                  {rule && city === rule.anchorCity && ' (âncora)'}
+                  {composition.complementCities?.includes(city) && ' (encaixe)'}
                 </Badge>
               ))}
             </div>
-            {!hasViolation && complementCities.length > 0 && (
-              <p className="text-xs text-success">✓ Complementos são cidades vizinhas</p>
-            )}
-            {!hasViolation && cities.filter(c => c !== 'barueri').length === 1 && (
-              <p className="text-xs text-success">✓ Caminhão exclusivo por cidade</p>
-            )}
-            {hasViolation && (
-              <p className="text-xs text-destructive">⚠ Mistura sem coerência territorial</p>
-            )}
+          </div>
+        )}
+
+        {/* Delivery count vs limit */}
+        {rule && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Entregas</span>
+              <span className={cn(
+                "font-medium",
+                composition.orders.length > rule.maxDeliveries && "text-destructive"
+              )}>
+                {composition.orders.length} / {rule.maxDeliveries}
+              </span>
+            </div>
+            <Progress 
+              value={Math.min(100, (composition.orders.length / rule.maxDeliveries) * 100)} 
+              className="h-1.5" 
+            />
           </div>
         )}
 
         {/* Capacity bar */}
         <div className="space-y-1">
           <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">Ocupação</span>
+            <span className="text-muted-foreground">Peso</span>
             <span className="font-medium">
               {formatWeight(composition.totalWeight)} / {formatWeight(Number(composition.truck.capacity_kg))}
             </span>
@@ -167,20 +206,18 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
           <Progress value={composition.occupancyPercent} className="h-2" />
         </div>
         
-        {/* Quick stats */}
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="rounded-lg bg-muted/50 p-2">
-            <p className="text-muted-foreground text-xs">Entregas</p>
-            <p className="font-semibold">{composition.orders.length}</p>
+        {/* Violations for this truck */}
+        {violations.length > 0 && (
+          <div className="space-y-1">
+            {violations.map((v, i) => (
+              <div key={i} className="flex items-start gap-2 text-xs text-destructive rounded border border-destructive/20 bg-destructive/5 px-2 py-1.5">
+                <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
+                <span>{v}</span>
+              </div>
+            ))}
           </div>
-          <div className="rounded-lg bg-muted/50 p-2">
-            <p className="text-muted-foreground text-xs">Peso Médio</p>
-            <p className="font-semibold">
-              {formatWeight(composition.totalWeight / Math.max(composition.orders.length, 1))}
-            </p>
-          </div>
-        </div>
-        
+        )}
+
         {/* Top products */}
         {topProducts.length > 0 && (
           <div className="space-y-1">
@@ -227,18 +264,19 @@ export function AutoCompositionView({
   const activeCompositions = result.compositions.filter(c => c.orders.length > 0);
   const hasViolations = result.validation && !result.validation.valid;
   
-  const violatedTrucks = new Set<string>();
+  // Map violations to truck plates
+  const violationsByPlate = new Map<string, string[]>();
   if (hasViolations && result.validation.violations) {
     for (const v of result.validation.violations) {
-      const match = v.match(/Caminhão\s+(\S+)/);
-      if (match) violatedTrucks.add(match[1]);
+      const match = v.match(/^(\S+):/);
+      if (match) {
+        const plate = match[1];
+        const existing = violationsByPlate.get(plate) || [];
+        existing.push(v.replace(/^\S+:\s*/, ''));
+        violationsByPlate.set(plate, existing);
+      }
     }
   }
-
-  // Count unique primary cities
-  const primaryCityCount = new Set(
-    activeCompositions.filter(c => c.primaryCity).map(c => c.primaryCity)
-  ).size;
   
   return (
     <div className="space-y-6">
@@ -248,12 +286,11 @@ export function AutoCompositionView({
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                Composição Territorial por Cidade
+                <Anchor className="h-5 w-5 text-primary" />
+                Composição por Caminhões Âncora
               </CardTitle>
               <CardDescription>
-                Agrupamento cidade-primeiro com encaixe inteligente de vizinhas
-                {primaryCityCount > 0 && ` • ${primaryCityCount} cidade(s) principal(is)`}
+                Regras operacionais fixas por território — placa → cidade
               </CardDescription>
             </div>
             <EfficiencyBadge efficiency={summary.efficiency} />
@@ -281,16 +318,16 @@ export function AutoCompositionView({
         </CardContent>
       </Card>
 
-      {/* Validation Violations - BLOCKING */}
+      {/* Validation Violations */}
       {hasViolations && (
         <Card className="border-destructive/50 bg-destructive/5">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2 text-destructive">
               <ShieldAlert className="h-5 w-5" />
-              Violações de coerência territorial
+              Violações de regras operacionais
             </CardTitle>
             <CardDescription className="text-destructive/80">
-              A composição contém misturas de cidades sem coerência. Corrija antes de confirmar.
+              Corrija as violações antes de confirmar a rota.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -314,9 +351,6 @@ export function AutoCompositionView({
               <Brain className="h-4 w-4 text-primary" />
               Raciocínio da composição ({result.reasoning.length})
             </CardTitle>
-            <CardDescription>
-              Decisões baseadas em volume por cidade e coerência territorial
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="max-h-40 overflow-y-auto space-y-1.5">
@@ -347,15 +381,15 @@ export function AutoCompositionView({
       <div>
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <Truck className="h-5 w-5" />
-          Distribuição por Cidade ({activeCompositions.length})
+          Caminhões ({activeCompositions.length})
         </h3>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-2">
           {activeCompositions.map((composition, index) => (
             <TruckCompositionCard 
               key={composition.truck.id} 
               composition={composition} 
               index={index}
-              hasViolation={violatedTrucks.has(composition.truck.plate)}
+              violations={violationsByPlate.get(composition.truck.plate) || []}
             />
           ))}
         </div>
@@ -370,7 +404,7 @@ export function AutoCompositionView({
               Pedidos Não Atribuídos ({result.unassignedOrders.length})
             </CardTitle>
             <CardDescription>
-              Frota insuficiente para manter coerência territorial. Considere adicionar mais caminhões.
+              Estes pedidos não puderam ser alocados nos caminhões disponíveis.
             </CardDescription>
           </CardHeader>
           <CardContent>
