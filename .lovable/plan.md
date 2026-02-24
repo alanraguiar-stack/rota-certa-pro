@@ -1,54 +1,31 @@
 
 
-# Auto-selecionar Caminhoes Ancora com Base nas Cidades dos Pedidos
+# Preencher campo `city` nos pedidos para ativar auto-selecao de caminhoes ancora
 
 ## Problema
 
-Quando os pedidos contem entregas em Osasco, o caminhao CYR (ancora de Osasco) deveria vir automaticamente selecionado na etapa de frota. O mesmo vale para EUR (Barueri), FKD (Carapicuiba), etc. Atualmente, a recomendacao de frota e puramente baseada em peso/capacidade, ignorando as regras de ancora territorial.
+A coluna L ("Cidade Ent.") do relatorio de vendas ja e lida corretamente pelo parser (linha 1125 do `advParser.ts`), e o campo `city` ja existe na interface `ParsedOrder` (linha 202 do `types/index.ts`). Porem, nenhum dos tres caminhos de conversao copia esse valor para o campo `city` do pedido final. Resultado: `order.city` e sempre `undefined`, e o motor de recomendacao de frota nao consegue detectar as cidades para selecionar CYR, EUR, FKD automaticamente.
 
-## Solucao
+## Correcoes (3 pontos)
 
-Modificar a logica de recomendacao de frota para detectar as cidades presentes nos pedidos e forcar a inclusao dos caminhoes ancora correspondentes.
+### 1. `src/lib/advParser.ts` - funcao `mergeItinerarioWithADV` (linha 610)
 
-### Arquivo 1: `src/components/route/IntelligentFleetPanel.tsx`
+Adicionar `city: enderecoData.city || undefined` no objeto retornado quando ha match entre itinerario e ADV.
 
-- Adicionar prop `orders: ParsedOrder[]` na interface do componente
-- Passar `orders` para `analyzeFleetRequirements`
+### 2. `src/lib/advParser.ts` - funcao `createOrdersFromItinerario` (linha 660)
 
-### Arquivo 2: `src/lib/routeIntelligence.ts`
+Adicionar `city: record.city || undefined` no objeto retornado para cada registro do itinerario.
 
-- Alterar `analyzeFleetRequirements` para receber um parametro opcional `orders: ParsedOrder[]`
-- Extrair as cidades presentes nos pedidos (normalizadas)
-- Para cada cidade encontrada, verificar se existe um caminhao ancora (`ANCHOR_RULES`) correspondente na frota disponivel
-- Se existir, forcar sua inclusao na lista `recommendedTrucks` ANTES do algoritmo de bin-packing por peso
-- Adicionar raciocinio explicativo: "Pedidos em Osasco detectados -> CYR-9829 incluido obrigatoriamente"
+### 3. `src/lib/spreadsheet/intelligentReader.ts` - funcao `convertToLegacyFormat` (linha 480)
 
-### Arquivo 3: `src/pages/NewRoute.tsx`
-
-- Passar `orders` como prop para `IntelligentFleetPanel`
-
-## Logica Detalhada
-
-```text
-1. Extrair cidades unicas dos pedidos (order.city normalizado)
-2. Para cada ANCHOR_RULE:
-   - Se anchorCity esta nas cidades dos pedidos
-   - E existe um caminhao na frota com platePrefix correspondente
-   - Adicionar esse caminhao como "obrigatorio" nos recommendedTrucks
-3. Depois, preencher capacidade restante com bin-packing normal
-4. No reasoning, explicar: "Osasco detectado nos pedidos -> CYR selecionado automaticamente"
-```
+Adicionar `city: order.address_parts?.city || undefined` no objeto retornado para cada pedido convertido.
 
 ## Resultado
 
-- Se ha entregas em Osasco, CYR vem pre-selecionado
-- Se ha entregas em Barueri, EUR vem pre-selecionado
-- Se ha entregas em Carapicuiba, FKD vem pre-selecionado
-- EEF entra se necessario por capacidade ou se suas cidades proprias estao presentes
-- O usuario ainda pode desmarcar manualmente se quiser
+Com essas 3 linhas adicionadas, o campo `city` sera preenchido com o valor da coluna "Cidade Ent." (ex: "OSASCO", "SAO PAULO", "CARAPICUIBA"). O motor em `routeIntelligence.ts` ja normaliza e compara esse campo com as regras ancora, entao o CYR sera automaticamente recomendado quando houver vendas em Osasco.
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/lib/routeIntelligence.ts` | `analyzeFleetRequirements` recebe `orders`, detecta cidades, forca caminhoes ancora |
-| `src/components/route/IntelligentFleetPanel.tsx` | Nova prop `orders`, passa para `analyzeFleetRequirements` |
-| `src/pages/NewRoute.tsx` | Passa `orders` para `IntelligentFleetPanel` |
+| `src/lib/advParser.ts` | Adicionar `city` em `mergeItinerarioWithADV` (linha 610) e `createOrdersFromItinerario` (linha 660) |
+| `src/lib/spreadsheet/intelligentReader.ts` | Adicionar `city` em `convertToLegacyFormat` (linha 480) |
+
