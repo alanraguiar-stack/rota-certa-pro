@@ -1,115 +1,112 @@
 
+# Reestruturacao do Motor: Corredores Regionais do Analista
 
-# Reestruturacao do Motor de Roteirizacao - Logica Territorial Rigida
+## Diagnostico
 
-## Problema Atual
+Analisei todas as 302 entregas historicas em 5 datas diferentes (10/02, 16/02, 18/02, 19/02, 23/02) e o resultado da rota atual.
 
-O motor atual tem dois defeitos graves:
+### O que o analista FAZ (dados reais do banco):
 
-1. **`assignClustersToTrucks`** usa bin-packing generico: ao atribuir clusters a caminhoes, ele escolhe "o caminhao com mais espaco", quebrando a integridade territorial. Um cluster de Barueri pode ser dividido entre 2 caminhoes junto com pedidos de Osasco.
+O analista **sempre mistura cidades** - todo caminhao tem 2 a 7 cidades. Porem, ele segue **corredores regionais fixos**:
 
-2. **Complemento de vizinhas sem restricao**: na camada 3.5, cidades pequenas sao adicionadas sem verificar se o peso total cabe no caminhao, causando misturas indevidas.
+```text
+CORREDOR OSASCO (CYR):
+  Osasco (nucleo) + Sao Paulo (zona oeste) + Barueri (poucas)
+  Aparece em 5/5 rotas historicas
 
-3. **Sem validacao de bloqueio**: nao existe verificacao antes de confirmar se a composicao respeita os padroes historicos.
+CORREDOR CARAPICUIBA (FKD/EKH):
+  Carapicuiba (nucleo) + Jandira + Osasco (fronteira) + Barueri (poucas)
+  Aparece em 3/5 rotas
+
+CORREDOR OESTE (OUTRO/ROTEI):
+  Jandira + Itapevi + Cotia + Vargem Grande Paulista + Barueri
+  Aparece em 2/5 rotas
+
+CORREDOR NORTE (EEF):
+  Santana de Parnaiba + Cajamar + Caieiras + Sao Paulo (Perus) + Barueri
+  Aparece em 3/5 rotas
+
+CORREDOR SUL (EFF):
+  Embu + Taboao da Serra + Pirapora + Santana de Parnaiba + Barueri
+  Aparece em 1/5 rotas
+```
+
+Barueri aparece em TODOS os caminhoes porque e a cidade do CD -- sempre tem 1-6 entregas de passagem.
+
+### O que o sistema faz ERRADO:
+
+A rota atual (c7c5a9ff) tem o caminhao DHS-4318 com: Cotia, Sao Paulo, Jandira, Carapicuiba, Itapevi, Osasco, Embu, Santana de Parnaiba, Barueri = **9 cidades misturadas sem logica regional**.
+
+O motor atual impoe "uma cidade por caminhao" que e o OPOSTO do que o analista faz. E quando precisa consolidar (por falta de caminhoes), mistura aleatoriamente.
 
 ## Solucao
 
-Reescrever as funcoes criticas para impor logica territorial rigida: **uma cidade por caminhao, esgotando volume antes de passar para a proxima**.
+Substituir a logica "uma cidade por caminhao" por **corredores regionais** extraidos diretamente do historico do analista.
 
-### Arquivo 1: `src/lib/autoRouterEngine.ts`
+### Arquivo 1: `src/lib/historyPatternEngine.ts`
 
-**Reescrever `clusterOrdersByCity`** - Nova logica:
+**Adicionar `extractRegionalCorridors`** - Nova funcao principal:
 
-```text
-1. Agrupar TODOS os pedidos por cidade
-2. Ordenar cidades por volume (maior primeiro)
-3. Para cada cidade (em ordem):
-   a. Se o volume cabe em 1 caminhao -> 1 cluster exclusivo
-   b. Se precisa de N caminhoes -> dividir em N clusters (mesma cidade)
-   c. Marcar como alocada
-4. Sobra controlada (SOMENTE se historico permitir):
-   a. Para cada cluster com espaco sobrando
-   b. Verificar se historico tem combinacao permitida
-   c. Se sim E cabe no peso -> adicionar cidade pequena
-   d. Se nao -> deixar o espaco vazio (melhor vazio que misturado)
-5. Orfas SEM historico -> cluster proprio (mesmo que sub-utilizado)
-```
-
-**Reescrever `assignClustersToTrucks`** - Nova logica:
-
-```text
-Em vez de bin-packing generico:
-1. Cada cluster ja representa 1 caminhao logico
-2. Mapear cluster[0] -> truck[0], cluster[1] -> truck[1]...
-3. Ordenar: cluster mais pesado -> caminhao com mais capacidade
-4. Respeitar capacidade como limite rigido
-5. NUNCA mover pedidos entre clusters para "otimizar"
-```
-
-**Adicionar `validateComposition`** - Nova funcao:
+Analisa o historico e identifica corredores recorrentes:
+- Agrupa por truck_label + route_date
+- Para cada caminhao em cada rota, registra o conjunto de cidades
+- Identifica quais conjuntos de cidades se repetem
+- Extrai a **cidade nucleo** (mais entregas) e as **cidades satelite**
+- Retorna templates de corredor com score de confianca
 
 ```typescript
-function validateComposition(
-  compositions: TruckComposition[],
-  historyHints?: RoutingHint[]
-): { valid: boolean; violations: string[] }
+interface RegionalCorridor {
+  id: string;                    // ex: "osasco-core"
+  coreCity: string;              // ex: "osasco"
+  satelliteCities: string[];     // ex: ["sao paulo", "barueri", "carapicuiba"]
+  frequency: number;             // quantas vezes apareceu
+  avgDeliveries: number;         // media de entregas por corredor
+  confidence: number;            // 0-100
+}
 ```
 
-Verifica:
-- Quantas cidades distintas em cada caminhao
-- Se a mistura e historicamente permitida
-- Se ainda existem cidades nao alocadas
-- Gera lista de violacoes para exibir ao usuario
+**Adicionar `matchOrdersToCorridor`** - Dado um conjunto de pedidos, encontra qual corredor historico melhor se encaixa:
+- Calcula Jaccard similarity entre cidades do pedido e cidades do corredor
+- Retorna o corredor mais similar com score
 
-### Arquivo 2: `src/lib/historyPatternEngine.ts`
+### Arquivo 2: `src/lib/autoRouterEngine.ts`
 
-**Adicionar `getCityExclusionMap`** - Retorna pares de cidades que NUNCA devem ficar juntas (co-ocorrencia < 10% no historico):
+**Reescrever `buildTerritorialClusters`** completamente:
 
-```typescript
-export function getCityExclusionMap(
-  patterns: ExtractedPatterns
-): Map<string, Set<string>>
-```
+Nova logica em 5 passos:
 
-**Adicionar `isValidCityCombination`** - Verificacao rapida:
+1. **Agrupar pedidos por cidade** (manter)
+2. **Buscar corredores historicos** via `extractRegionalCorridors`
+3. **Para cada corredor disponivel**: puxar TODAS as entregas das cidades daquele corredor ate encher a capacidade do caminhao
+4. **Pedidos restantes**: tentar encaixar em corredores com espaco OU criar corredor novo baseado em proximidade geografica
+5. **Barueri como hub**: entregas de Barueri sao distribuidas proporcionalmente entre os caminhoes (nunca um caminhao so de Barueri)
 
-```typescript
-export function isValidCityCombination(
-  cities: string[],
-  patterns: ExtractedPatterns
-): { valid: boolean; reason: string }
-```
+A regra de "uma cidade por caminhao" e REMOVIDA.
+A regra de validacao com `isValidCityCombination` e AJUSTADA para validar por corredor (permitir misturas que o analista faz).
 
-### Arquivo 3: `src/components/route/AutoCompositionView.tsx`
+**Remover logica de "dedicated cities"** que impede misturas validas.
 
-**Adicionar exibicao de cidades por caminhao**: Cada card de caminhao mostra as cidades que contem, com destaque visual se houver mistura fora do padrao.
+### Arquivo 3: `src/lib/historyPatternEngine.ts`
 
-**Adicionar validacao visual**: Se a composicao tiver violacoes, exibir alerta vermelho e bloquear o botao "Confirmar e Criar Rota" com mensagem:
+**Ajustar `isValidCityCombination`**: Em vez de rejeitar qualquer mistura sem co-ocorrencia, verificar se as cidades formam um corredor historico valido. Cidades que aparecem juntas em pelo menos 1 rota historica sao permitidas.
 
-```
-"Rota incoerente com padrao operacional historico"
-```
+**Ajustar `getCityExclusionMap`**: So excluir pares que NUNCA apareceram juntos E que estao em corredores opostos (ex: Caieiras nunca aparece com Cotia).
 
-### Arquivo 4: `src/pages/NewRoute.tsx`
+### Arquivo 4: `src/components/route/AutoCompositionView.tsx`
 
-**Integrar validacao**: Antes de permitir `handleCreateRoute`, executar `validateComposition`. Se houver violacoes, bloquear e mostrar as razoes.
+**Atualizar validacao visual**: Mostrar o nome do corredor regional em cada card de caminhao (ex: "Corredor Osasco", "Corredor Oeste") em vez de apenas listar cidades. Manter o bloqueio de confirmacao apenas para misturas que nao existem em NENHUM corredor historico.
 
-## Regras Rigidas Implementadas
+### Arquivo 5: `src/pages/NewRoute.tsx`
 
-| Regra | Implementacao |
-|-------|--------------|
-| Uma cidade por caminhao | Cluster exclusivo por cidade |
-| Esgotar volume antes de passar | Cidade so "libera" quando todos pedidos alocados |
-| Mistura so com historico | `isValidCityCombination` antes de complementar |
-| Bloqueio de rota ruim | `validateComposition` impede confirmacao |
-| Explicacao da decisao | Campo `reasoning` em cada cluster |
+Passar os corredores extraidos para o motor de composicao.
 
 ## Resumo de Arquivos
 
 | Arquivo | Acao |
 |---------|------|
-| `src/lib/autoRouterEngine.ts` | Reescrever `clusterOrdersByCity` e `assignClustersToTrucks`, adicionar `validateComposition` |
-| `src/lib/historyPatternEngine.ts` | Adicionar `getCityExclusionMap` e `isValidCityCombination` |
-| `src/components/route/AutoCompositionView.tsx` | Exibir cidades por caminhao, bloquear confirmacao se houver violacoes |
-| `src/pages/NewRoute.tsx` | Integrar validacao antes de criar rota |
+| `src/lib/historyPatternEngine.ts` | Adicionar `extractRegionalCorridors`, `matchOrdersToCorridor`; ajustar validacao |
+| `src/lib/autoRouterEngine.ts` | Reescrever `buildTerritorialClusters` com logica de corredores regionais |
+| `src/components/route/AutoCompositionView.tsx` | Exibir nome do corredor e ajustar validacao |
+| `src/pages/NewRoute.tsx` | Integrar corredores no fluxo |
 
+Nenhuma mudanca de schema no banco de dados.
