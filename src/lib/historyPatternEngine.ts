@@ -439,8 +439,8 @@ export function getCityExclusionMap(
 }
 
 /**
- * Validate if a combination of cities is historically acceptable.
- * Now uses CORRIDOR logic: cities are valid if they form part of a known corridor.
+ * Validate if a combination of cities is acceptable.
+ * Simple logic: neighbors OR historical co-occurrence.
  */
 export function isValidCityCombination(
   cities: string[],
@@ -451,32 +451,32 @@ export function isValidCityCombination(
   const normalized = cities.map(c => normalizeCity(c)).filter(c => c !== HUB_CITY && c !== 'desconhecida');
   if (normalized.length <= 1) return { valid: true, reason: '' };
 
-  // Check if these cities appear together in ANY corridor
-  for (const corridor of patterns.corridors) {
-    const corridorCities = corridor.allCities;
-    const allInCorridor = normalized.every(c => corridorCities.has(c));
-    if (allInCorridor) {
-      return { valid: true, reason: `Corredor "${corridor.coreCity}" permite esta combinação` };
-    }
-  }
+  // Import areCitiesNeighbors lazily to avoid circular deps
+  const { areCitiesNeighbors } = require('./geocoding');
 
-  // Check if each pair has co-occurrence > 0 in history
+  // Check each pair: must be neighbors OR have co-occurrence > 0
   for (let i = 0; i < normalized.length; i++) {
     for (let j = i + 1; j < normalized.length; j++) {
       const cityA = normalized[i];
       const cityB = normalized[j];
 
+      // If neighbors, always allow
+      if (areCitiesNeighbors(cityA, cityB)) continue;
+
+      // Check co-occurrence
       const profileA = patterns.cityProfiles.get(cityA);
-      if (!profileA) continue; // new city, no history - allow
+      if (!profileA) continue; // new city, no history — allow
 
       const coCount = profileA.coOccurrences.get(cityB) || 0;
+      if (coCount > 0) continue; // historical co-occurrence — allow
+
       const profileB = patterns.cityProfiles.get(cityB);
 
-      // Only flag if BOTH cities have sufficient history AND never co-occurred
-      if (profileB && profileA.totalAppearances >= 2 && profileB.totalAppearances >= 2 && coCount === 0) {
+      // Only flag if BOTH cities have sufficient history AND never co-occurred AND not neighbors
+      if (profileB && profileA.totalAppearances >= 2 && profileB.totalAppearances >= 2) {
         return {
           valid: false,
-          reason: `"${cityA}" e "${cityB}" nunca foram combinadas no histórico operacional`,
+          reason: `"${cityA}" e "${cityB}" não são vizinhas e nunca foram combinadas no histórico`,
         };
       }
     }
