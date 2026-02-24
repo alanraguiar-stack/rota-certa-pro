@@ -132,12 +132,26 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
       });
       
       try {
-        // Ler dados brutos primeiro para detectar formato
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rawRows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+        let rawRows: unknown[][];
+        
+        // CSV com separador `;` precisa de tratamento especial
+        const isCSV = /\.csv$/i.test(file.name) || file.type === 'text/csv';
+        
+        if (isCSV) {
+          // Ler como texto e fazer split manual por `;`
+          const text = await file.text();
+          rawRows = text
+            .split(/\r?\n/)
+            .map(line => line.split(';').map(cell => cell.trim() || null));
+          console.log('[DualFileUpload] CSV lido com split por ";". Linhas:', rawRows.length);
+        } else {
+          // Ler dados brutos primeiro para detectar formato
+          const arrayBuffer = await file.arrayBuffer();
+          const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+          rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+        }
         
         console.log('[DualFileUpload] Analisando arquivo:', file.name, '- Linhas:', rawRows.length);
         
@@ -417,7 +431,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
     setUploadState({
       file,
       status: 'error',
-      message: 'Formato inválido. Use PDF ou Excel',
+      message: 'Formato inválido. Use PDF, Excel ou CSV',
       data: null,
     });
     return null;
@@ -680,7 +694,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             <Input
               ref={file1InputRef}
               type="file"
-              accept=".xlsx,.xls,.pdf"
+              accept=".xlsx,.xls,.pdf,.csv"
               onChange={(e) => e.target.files?.[0] && handleFile1(e.target.files[0])}
               className="hidden"
               id="file1-upload"
@@ -767,7 +781,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             <Input
               ref={file2InputRef}
               type="file"
-              accept=".xlsx,.xls,.pdf"
+              accept=".xlsx,.xls,.pdf,.csv"
               onChange={(e) => e.target.files?.[0] && handleFile2(e.target.files[0])}
               className="hidden"
               id="file2-upload"

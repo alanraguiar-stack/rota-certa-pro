@@ -241,9 +241,10 @@ export function isPDFFile(file: File): boolean {
  * Check if a file is an Excel file
  */
 export function isExcelFile(file: File): boolean {
-  return /\.xlsx?$/i.test(file.name) || 
+  return /\.(xlsx?|csv)$/i.test(file.name) || 
          file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-         file.type === 'application/vnd.ms-excel';
+         file.type === 'application/vnd.ms-excel' ||
+         file.type === 'text/csv';
 }
 
 /**
