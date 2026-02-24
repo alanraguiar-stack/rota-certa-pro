@@ -1,31 +1,40 @@
 
 
-# Preencher campo `city` nos pedidos para ativar auto-selecao de caminhoes ancora
+# Garantir que caminhoes ancora sejam SELECIONADOS (nao apenas recomendados)
 
 ## Problema
 
-A coluna L ("Cidade Ent.") do relatorio de vendas ja e lida corretamente pelo parser (linha 1125 do `advParser.ts`), e o campo `city` ja existe na interface `ParsedOrder` (linha 202 do `types/index.ts`). Porem, nenhum dos tres caminhos de conversao copia esse valor para o campo `city` do pedido final. Resultado: `order.city` e sempre `undefined`, e o motor de recomendacao de frota nao consegue detectar as cidades para selecionar CYR, EUR, FKD automaticamente.
+O `useEffect` atual em `IntelligentFleetPanel.tsx` so auto-seleciona os caminhoes recomendados quando `selectedTruckIds.length === 0`. Se o algoritmo de peso ja selecionou alguns caminhoes antes do campo `city` estar disponivel, os caminhoes ancora (como CYR) aparecem apenas com o badge "Recomendado" mas nao ficam marcados com o checkbox.
 
-## Correcoes (3 pontos)
+## Solucao
 
-### 1. `src/lib/advParser.ts` - funcao `mergeItinerarioWithADV` (linha 610)
+Modificar o `useEffect` no `IntelligentFleetPanel.tsx` para garantir que os caminhoes ancora estejam SEMPRE incluidos na selecao, mesmo que ja existam outros caminhoes selecionados.
 
-Adicionar `city: enderecoData.city || undefined` no objeto retornado quando ha match entre itinerario e ADV.
+### Arquivo: `src/components/route/IntelligentFleetPanel.tsx` (linhas 70-79)
 
-### 2. `src/lib/advParser.ts` - funcao `createOrdersFromItinerario` (linha 660)
+Substituir a logica atual do useEffect por:
 
-Adicionar `city: record.city || undefined` no objeto retornado para cada registro do itinerario.
+```text
+useEffect:
+  1. Se nenhum caminhao selecionado e ha recomendados -> selecionar todos os recomendados (comportamento atual)
+  2. Se ja ha caminhoes selecionados -> verificar se todos os caminhoes ancora obrigatorios estao incluidos
+     - Extrair cidades dos pedidos (orders)
+     - Para cada ANCHOR_RULE com cidade presente nos pedidos, verificar se o caminhao correspondente esta em selectedTruckIds
+     - Se algum ancora estiver faltando, adiciona-lo a selecao existente
+```
 
-### 3. `src/lib/spreadsheet/intelligentReader.ts` - funcao `convertToLegacyFormat` (linha 480)
+A logica usara as `ANCHOR_RULES` diretamente para detectar quais caminhoes sao obrigatorios com base nas cidades dos pedidos, e forcara sua inclusao na selecao.
 
-Adicionar `city: order.address_parts?.city || undefined` no objeto retornado para cada pedido convertido.
+### Mudanca especifica
 
-## Resultado
+No `useEffect` (linhas 70-79), adicionar um segundo bloco condicional:
 
-Com essas 3 linhas adicionadas, o campo `city` sera preenchido com o valor da coluna "Cidade Ent." (ex: "OSASCO", "SAO PAULO", "CARAPICUIBA"). O motor em `routeIntelligence.ts` ja normaliza e compara esse campo com as regras ancora, entao o CYR sera automaticamente recomendado quando houver vendas em Osasco.
+- Se `selectedTruckIds.length > 0` e `orders` tem cidades que correspondem a regras ancora, verificar se os caminhoes ancora correspondentes estao em `selectedTruckIds`
+- Se nao estiverem, chamar `onSelectionChange` com a uniao de `selectedTruckIds` + IDs dos caminhoes ancora faltantes
+
+Isso garante que o CYR apareca ja com checkbox marcado (selecionado) sempre que houver vendas em Osasco.
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/lib/advParser.ts` | Adicionar `city` em `mergeItinerarioWithADV` (linha 610) e `createOrdersFromItinerario` (linha 660) |
-| `src/lib/spreadsheet/intelligentReader.ts` | Adicionar `city` em `convertToLegacyFormat` (linha 480) |
+| `src/components/route/IntelligentFleetPanel.tsx` | Expandir useEffect para forcar inclusao de caminhoes ancora na selecao |
 
