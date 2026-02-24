@@ -39,6 +39,7 @@ import {
 } from '@/lib/itemDetailParser';
 import { mergeItemsIntoOrders } from '@/lib/autoRouterEngine';
 import { isPDFFile, isExcelFile } from '@/lib/pdfParser';
+import { decodeFileContent } from '@/lib/encoding';
 import {
   detectAndParsePDF,
   mergeItinerarioWithADV,
@@ -139,7 +140,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         
         if (isCSV) {
           // Ler como texto e fazer split manual por `;`
-          const text = await file.text();
+          const text = await decodeFileContent(file);
           rawRows = text
             .split(/\r?\n/)
             .map(line => line.split(';').map(cell => cell.trim() || null));
