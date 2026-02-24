@@ -1,64 +1,54 @@
 
 
-# Correcao: Motor de Roteirizacao Territorial Rigido
+# Auto-selecionar Caminhoes Ancora com Base nas Cidades dos Pedidos
 
-## Problema Identificado
+## Problema
 
-O caminhao CYR (Osasco) esta recebendo entregas de cidades nao autorizadas. A raiz do problema esta em tres pontos:
-
-1. **Excecoes de bairro sem cidade definida**: As `neighborhoodExceptions` (Jaguare, Parque Imperial para CYR) buscam bairros em TODAS as cidades. Se um bairro "Jaguare" aparece em Sao Paulo, o sistema puxa essa entrega para CYR sem verificar se a cidade e permitida.
-
-2. **Validacao contradiz a alocacao**: A validacao em `validateComposition` verifica se todas as cidades estao em `allowedCities`, mas as excecoes de bairro adicionam cidades fora dessa lista, gerando violacao.
-
-3. **Falta de rigidez territorial**: O motor nao impoe de forma absoluta que cada caminhao APENAS receba entregas de sua cidade ancora + cidades de encaixe explicitamente definidas.
+Quando os pedidos contem entregas em Osasco, o caminhao CYR (ancora de Osasco) deveria vir automaticamente selecionado na etapa de frota. O mesmo vale para EUR (Barueri), FKD (Carapicuiba), etc. Atualmente, a recomendacao de frota e puramente baseada em peso/capacidade, ignorando as regras de ancora territorial.
 
 ## Solucao
 
-### 1. `src/lib/anchorRules.ts` - Adicionar cidade de origem nas excecoes de bairro
+Modificar a logica de recomendacao de frota para detectar as cidades presentes nos pedidos e forcar a inclusao dos caminhoes ancora correspondentes.
 
-Cada `NeighborhoodException` precisa declarar de qual cidade o bairro pertence. Isso evita que bairros homonimos de outras cidades sejam puxados indevidamente.
+### Arquivo 1: `src/components/route/IntelligentFleetPanel.tsx`
+
+- Adicionar prop `orders: ParsedOrder[]` na interface do componente
+- Passar `orders` para `analyzeFleetRequirements`
+
+### Arquivo 2: `src/lib/routeIntelligence.ts`
+
+- Alterar `analyzeFleetRequirements` para receber um parametro opcional `orders: ParsedOrder[]`
+- Extrair as cidades presentes nos pedidos (normalizadas)
+- Para cada cidade encontrada, verificar se existe um caminhao ancora (`ANCHOR_RULES`) correspondente na frota disponivel
+- Se existir, forcar sua inclusao na lista `recommendedTrucks` ANTES do algoritmo de bin-packing por peso
+- Adicionar raciocinio explicativo: "Pedidos em Osasco detectados -> CYR-9829 incluido obrigatoriamente"
+
+### Arquivo 3: `src/pages/NewRoute.tsx`
+
+- Passar `orders` como prop para `IntelligentFleetPanel`
+
+## Logica Detalhada
 
 ```text
-interface NeighborhoodException {
-  neighborhood: string;
-  city: string;              // NOVO: cidade de onde vem o bairro
-  maxDeliveries: number;
-  insertAfterNeighborhood?: string;
-}
+1. Extrair cidades unicas dos pedidos (order.city normalizado)
+2. Para cada ANCHOR_RULE:
+   - Se anchorCity esta nas cidades dos pedidos
+   - E existe um caminhao na frota com platePrefix correspondente
+   - Adicionar esse caminhao como "obrigatorio" nos recommendedTrucks
+3. Depois, preencher capacidade restante com bin-packing normal
+4. No reasoning, explicar: "Osasco detectado nos pedidos -> CYR selecionado automaticamente"
 ```
-
-Atualizar as regras:
-- CYR: `jaguare` e `parque imperial` pertencem a `sao paulo`
-- FKD: `metalurgicos` pertence a `osasco`, `vila do conde` pertence a `barueri` (ou a cidade correta - confirmar com dados)
-
-### 2. `src/lib/autoRouterEngine.ts` - Reforcamento territorial absoluto
-
-**Excecoes de bairro (linhas 242-260)**: Adicionar filtro por cidade na busca de excecoes. Antes de testar o bairro, verificar se a cidade do pedido corresponde a `exception.city`.
-
-**Validacao (linhas 498-517)**: Ao construir `allowedCities`, incluir as cidades das excecoes de bairro. Assim a validacao nao contradiz a alocacao.
-
-**Pedidos restantes (linhas 366-420)**: Caminhoes nao-ancora que recebem pedidos remanescentes devem manter blocos por cidade, sem misturar cidades aleatoriamente. Adicionar agrupamento estrito.
-
-### 3. `src/lib/autoRouterEngine.ts` - Sequenciamento revisado
-
-O sequenciamento ja esta correto (cidade ancora primeiro, blocos continuos). Apenas garantir que a validacao de alternancia funcione corretamente apos as correcoes de alocacao.
-
-### 4. `src/components/route/AutoCompositionView.tsx` - Sem mudanca
-
-O componente de visualizacao ja exibe corretamente badges de ancora, complemento e violacoes. Nenhuma alteracao necessaria.
-
-## Detalhes Tecnicos
-
-| Arquivo | Mudanca |
-|---------|---------|
-| `src/lib/anchorRules.ts` | Adicionar campo `city` em `NeighborhoodException`; atualizar regras CYR e FKD |
-| `src/lib/autoRouterEngine.ts` | Filtrar excecoes de bairro por cidade; incluir cidades de excecao em `allowedCities` na validacao; remover logica de caminhoes nao-ancora que mistura cidades |
 
 ## Resultado
 
-- CYR recebera APENAS: entregas de Osasco + ate 2 entregas dos bairros Jaguare/Parque Imperial **de Sao Paulo especificamente**
-- EUR recebera APENAS: Barueri + Jandira/Itapevi/Cotia/Vargem Grande Paulista
-- FKD recebera APENAS: Carapicuiba + excecoes de bairro definidas
-- EEF recebera: suas cidades proprias + todos os excedentes
-- Nenhuma mistura aleatoria de cidades sera possivel
+- Se ha entregas em Osasco, CYR vem pre-selecionado
+- Se ha entregas em Barueri, EUR vem pre-selecionado
+- Se ha entregas em Carapicuiba, FKD vem pre-selecionado
+- EEF entra se necessario por capacidade ou se suas cidades proprias estao presentes
+- O usuario ainda pode desmarcar manualmente se quiser
 
+| Arquivo | Mudanca |
+|---------|---------|
+| `src/lib/routeIntelligence.ts` | `analyzeFleetRequirements` recebe `orders`, detecta cidades, forca caminhoes ancora |
+| `src/components/route/IntelligentFleetPanel.tsx` | Nova prop `orders`, passa para `analyzeFleetRequirements` |
+| `src/pages/NewRoute.tsx` | Passa `orders` para `IntelligentFleetPanel` |
