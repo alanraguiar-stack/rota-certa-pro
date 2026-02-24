@@ -610,6 +610,7 @@ export function mergeItinerarioWithADV(
       return {
         ...order,
         address: fullAddress,
+        city: enderecoData.city || undefined,
         // Atualizar peso do itinerário (fonte oficial)
         weight_kg: enderecoData.weight_kg > 0 ? enderecoData.weight_kg : order.weight_kg,
         isValid: true,
@@ -661,6 +662,7 @@ export function createOrdersFromItinerario(itinerario: ItinerarioRecord[]): Pars
       pedido_id: record.venda_id,
       client_name: record.client_name,
       address: addressParts.join(', '),
+      city: record.city || undefined,
       weight_kg: record.weight_kg,
       product_description: undefined,
       items: [],
