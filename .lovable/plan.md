@@ -1,45 +1,64 @@
 
 
-# Fix CSV Encoding for Correct Venda ID Matching
+# Correcao: Motor de Roteirizacao Territorial Rigido
 
-## Problem
+## Problema Identificado
 
-When the CSV "Detalhe das Vendas" is read with `file.text()`, the character `º` in `Venda Nº:` and `NFe Nº:` becomes `\ufffd` (replacement character) because the file is encoded in Windows-1252, not UTF-8. This causes:
+O caminhao CYR (Osasco) esta recebendo entregas de cidades nao autorizadas. A raiz do problema esta em tres pontos:
 
-1. `isADVExcelFormat` may fail to detect the ADV format (regex `venda\s*n[º°]?\s*:\s*` doesn't match `Venda N\ufffd:`)
-2. `parseADVDetailExcel` can't extract the Venda ID from the broken text
-3. Without correct Venda IDs, the merge between "Vendas do Dia" (column B) and "Detalhe das Vendas" fails
+1. **Excecoes de bairro sem cidade definida**: As `neighborhoodExceptions` (Jaguare, Parque Imperial para CYR) buscam bairros em TODAS as cidades. Se um bairro "Jaguare" aparece em Sao Paulo, o sistema puxa essa entrega para CYR sem verificar se a cidade e permitida.
 
-## Solution
+2. **Validacao contradiz a alocacao**: A validacao em `validateComposition` verifica se todas as cidades estao em `allowedCities`, mas as excecoes de bairro adicionam cidades fora dessa lista, gerando violacao.
 
-One change in one file:
+3. **Falta de rigidez territorial**: O motor nao impoe de forma absoluta que cada caminhao APENAS receba entregas de sua cidade ancora + cidades de encaixe explicitamente definidas.
 
-### `src/components/route/DualFileUpload.tsx`
+## Solucao
 
-In the CSV reading block (lines 140-146), replace `file.text()` with the existing `decodeFileContent()` from `@/lib/encoding.ts`, which already handles Windows-1252 and ISO-8859-1 fallback:
+### 1. `src/lib/anchorRules.ts` - Adicionar cidade de origem nas excecoes de bairro
+
+Cada `NeighborhoodException` precisa declarar de qual cidade o bairro pertence. Isso evita que bairros homonimos de outras cidades sejam puxados indevidamente.
 
 ```text
-Before:  const text = await file.text();
-After:   const text = await decodeFileContent(file);
+interface NeighborhoodException {
+  neighborhood: string;
+  city: string;              // NOVO: cidade de onde vem o bairro
+  maxDeliveries: number;
+  insertAfterNeighborhood?: string;
+}
 ```
 
-This ensures `Venda Nº:` is correctly decoded, the regex matches, `278351` is extracted as the `pedido_id`, and the merge with column B of "Vendas do Dia" works via `normalizeVendaId`.
+Atualizar as regras:
+- CYR: `jaguare` e `parque imperial` pertencem a `sao paulo`
+- FKD: `metalurgicos` pertence a `osasco`, `vila do conde` pertence a `barueri` (ou a cidade correta - confirmar com dados)
 
-## Why This Works
+### 2. `src/lib/autoRouterEngine.ts` - Reforcamento territorial absoluto
 
-The existing `decodeFileContent` in `encoding.ts` already:
-- Tries UTF-8 first
-- Detects `\ufffd` as encoding issue
-- Falls back to ISO-8859-1 then Windows-1252
-- Returns correctly decoded text with proper `º` character
+**Excecoes de bairro (linhas 242-260)**: Adicionar filtro por cidade na busca de excecoes. Antes de testar o bairro, verificar se a cidade do pedido corresponde a `exception.city`.
 
-Once the text is correct, the existing flow works:
-1. CSV split by `;` produces cells like `["Venda Nº:", "", "", "", "", "278351", "NFe Nº:", ...]`
-2. `parseADVDetailExcel` joins with space: `"Venda Nº:     278351 NFe Nº:  52112"`
-3. Regex `venda\s*n[º°]?\s*:\s*(\d+)` captures `278351`
-4. `mergeItinerarioWithADV` matches this with column B via `normalizeVendaId`
+**Validacao (linhas 498-517)**: Ao construir `allowedCities`, incluir as cidades das excecoes de bairro. Assim a validacao nao contradiz a alocacao.
+
+**Pedidos restantes (linhas 366-420)**: Caminhoes nao-ancora que recebem pedidos remanescentes devem manter blocos por cidade, sem misturar cidades aleatoriamente. Adicionar agrupamento estrito.
+
+### 3. `src/lib/autoRouterEngine.ts` - Sequenciamento revisado
+
+O sequenciamento ja esta correto (cidade ancora primeiro, blocos continuos). Apenas garantir que a validacao de alternancia funcione corretamente apos as correcoes de alocacao.
+
+### 4. `src/components/route/AutoCompositionView.tsx` - Sem mudanca
+
+O componente de visualizacao ja exibe corretamente badges de ancora, complemento e violacoes. Nenhuma alteracao necessaria.
+
+## Detalhes Tecnicos
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/components/route/DualFileUpload.tsx` | Import `decodeFileContent`, usar no lugar de `file.text()` no bloco CSV |
+| `src/lib/anchorRules.ts` | Adicionar campo `city` em `NeighborhoodException`; atualizar regras CYR e FKD |
+| `src/lib/autoRouterEngine.ts` | Filtrar excecoes de bairro por cidade; incluir cidades de excecao em `allowedCities` na validacao; remover logica de caminhoes nao-ancora que mistura cidades |
+
+## Resultado
+
+- CYR recebera APENAS: entregas de Osasco + ate 2 entregas dos bairros Jaguare/Parque Imperial **de Sao Paulo especificamente**
+- EUR recebera APENAS: Barueri + Jandira/Itapevi/Cotia/Vargem Grande Paulista
+- FKD recebera APENAS: Carapicuiba + excecoes de bairro definidas
+- EEF recebera: suas cidades proprias + todos os excedentes
+- Nenhuma mistura aleatoria de cidades sera possivel
 
