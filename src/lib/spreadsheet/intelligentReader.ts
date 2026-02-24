@@ -481,6 +481,7 @@ export function convertToLegacyFormat(orders: ExtractedOrder[]): import('@/types
     pedido_id: order.pedido_id,
     client_name: order.client_name,
     address: order.address,
+    city: order.address_parts?.city || undefined,
     weight_kg: order.weight_kg,
     product_description: order.products.map(p => p.name).join(', ') || undefined,
     items: order.products.map(p => ({
