@@ -14,13 +14,13 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { ManifestViewer } from '@/components/route/ManifestViewer';
 import { LoadingManifest } from '@/components/route/LoadingManifest';
-import { LoadingConfirmation } from '@/components/route/LoadingConfirmation';
+
 import { RouteWorkflowStepper, getActiveStep, RouteWorkflowStep } from '@/components/route/RouteWorkflowStepper';
 import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
-import { LoadConsolidationView } from '@/components/route/LoadConsolidationView';
+
 import { SideBySideManifests } from '@/components/route/SideBySideManifests';
 import { TruckManifestCards } from '@/components/route/TruckManifestCards';
 import { TruckRouteEditor } from '@/components/route/TruckRouteEditor';
@@ -571,27 +571,6 @@ export default function RouteDetails() {
               isProcessing={optimizeRoutes.isPending || moveOrderToTruck.isPending}
             />
             
-            {/* Sub-etapa: Consolidação de Carga (colapsável) */}
-            <details className="group">
-              <summary className="cursor-pointer list-none">
-                <Card className="hover:bg-muted/30 transition-colors">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Package className="h-4 w-4" />
-                      Ver Consolidação de Carga
-                      <ChevronLeft className="ml-auto h-4 w-4 transition-transform group-open:rotate-[-90deg]" />
-                    </CardTitle>
-                  </CardHeader>
-                </Card>
-              </summary>
-              <div className="mt-4">
-                <LoadConsolidationView
-                  orders={route.orders}
-                  trucks={truckDataForComponents}
-                />
-              </div>
-            </details>
-            
             {/* Romaneio de Carga por Caminhão (para impressão) - colapsável */}
             <details className="group">
               <summary className="cursor-pointer list-none">
@@ -614,28 +593,6 @@ export default function RouteDetails() {
               </div>
             </details>
 
-            {/* Confirmação de Carregamento - OPCIONAL */}
-            <details className="group opacity-80">
-              <summary className="cursor-pointer list-none">
-                <Card className="hover:bg-muted/30 transition-colors">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Lock className="h-4 w-4" />
-                      Conferência Física (Opcional)
-                      <ChevronLeft className="ml-auto h-4 w-4 transition-transform group-open:rotate-[-90deg]" />
-                    </CardTitle>
-                  </CardHeader>
-                </Card>
-              </summary>
-              <div className="mt-4">
-                <LoadingConfirmation
-                  routeName={route.name}
-                  trucks={truckDataForComponents}
-                  onConfirm={handleConfirmLoading}
-                  isLoading={confirmLoading.isPending}
-                />
-              </div>
-            </details>
           </div>
         )}
 

@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { Upload, FileSpreadsheet, Trash2, Package, Download } from 'lucide-react';
+import { useState, useCallback, useMemo } from 'react';
+import { Upload, FileSpreadsheet, Trash2, Package, Download, Search } from 'lucide-react';
 import defaultSpreadsheet from '@/assets/unidade_de_medida.xlsx?url';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useProductUnits } from '@/hooks/useProductUnits';
 import { useToast } from '@/hooks/use-toast';
+import { Input } from '@/components/ui/input';
 import * as XLSX from 'xlsx';
 
 const ABBREVIATION_MAP: Record<string, string> = {
@@ -38,6 +39,13 @@ export function ProductUnitsImporter() {
   const { toast } = useToast();
   const [preview, setPreview] = useState<ParsedRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const filteredUnits = useMemo(() => {
+    if (!searchTerm.trim()) return units;
+    const term = searchTerm.toLowerCase();
+    return units.filter(u => u.product_name.toLowerCase().includes(term));
+  }, [units, searchTerm]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -231,36 +239,54 @@ export function ProductUnitsImporter() {
               Nenhum produto cadastrado. Importe uma planilha acima.
             </p>
           ) : (
-            <div className="max-h-[400px] overflow-y-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Produto</TableHead>
-                    <TableHead>Unidade</TableHead>
-                    <TableHead className="w-[80px]">Ação</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {units.map(unit => (
-                    <TableRow key={unit.id}>
-                      <TableCell className="font-medium">{unit.product_name}</TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{unit.unit_type}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => handleDelete(unit.id)}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </TableCell>
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar produto..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <div className="max-h-[400px] overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Produto</TableHead>
+                      <TableHead>Unidade</TableHead>
+                      <TableHead className="w-[80px]">Ação</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUnits.map(unit => (
+                      <TableRow key={unit.id}>
+                        <TableCell className="font-medium">{unit.product_name}</TableCell>
+                        <TableCell>
+                          <Badge variant="secondary">{unit.unit_type}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => handleDelete(unit.id)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                    {filteredUnits.length === 0 && searchTerm && (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center text-muted-foreground">
+                          Nenhum produto encontrado para "{searchTerm}"
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           )}
         </CardContent>

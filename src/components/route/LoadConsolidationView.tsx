@@ -11,6 +11,9 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { Order, OrderItem, Truck as TruckType } from '@/types';
 import { cn } from '@/lib/utils';
+import { useProductUnits } from '@/hooks/useProductUnits';
+
+const WEIGHT_UNITS = ['kg', 'g'];
 
 interface LoadConsolidationViewProps {
   orders: Order[];
@@ -109,11 +112,21 @@ function consolidateProductsByTruck(orders: Order[]): ConsolidatedProduct[] {
 }
 
 export function LoadConsolidationView({ orders, trucks }: LoadConsolidationViewProps) {
+  const { getUnitForProduct } = useProductUnits();
+  
   // Consolidar todos os produtos do dia
   const allProducts = consolidateAllProducts(orders);
   const totalWeight = orders.reduce((sum, o) => sum + Number(o.weight_kg), 0);
   const totalCapacity = trucks.reduce((sum, t) => sum + Number(t.truck.capacity_kg), 0);
   const overallOccupancy = totalCapacity > 0 ? Math.round((totalWeight / totalCapacity) * 100) : 0;
+
+  const formatProductDisplay = (product: ConsolidatedProduct): string => {
+    const unit = getUnitForProduct(product.product);
+    if (WEIGHT_UNITS.includes(unit)) {
+      return formatWeight(product.totalWeight);
+    }
+    return `${product.orderCount} ${unit}${product.orderCount > 1 ? 's' : ''}`;
+  };
 
   return (
     <div className="space-y-6">
@@ -150,7 +163,7 @@ export function LoadConsolidationView({ orders, trucks }: LoadConsolidationViewP
             <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
               Produtos para Separação
             </h4>
-            <div className="max-h-[300px] overflow-y-auto space-y-2">
+            <div className="space-y-2">
               {allProducts.map((product, idx) => (
                 <div
                   key={idx}
@@ -168,7 +181,7 @@ export function LoadConsolidationView({ orders, trucks }: LoadConsolidationViewP
                     </div>
                   </div>
                   <Badge variant="secondary" className="text-base font-bold">
-                    {formatWeight(product.totalWeight)}
+                    {formatProductDisplay(product)}
                   </Badge>
                 </div>
               ))}
@@ -228,7 +241,7 @@ export function LoadConsolidationView({ orders, trucks }: LoadConsolidationViewP
                   <Separator />
                   
                   {/* Produtos neste Caminhão */}
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                  <div className="space-y-1">
                     {truckProducts.map((product, pIdx) => (
                       <div
                         key={pIdx}
@@ -238,7 +251,7 @@ export function LoadConsolidationView({ orders, trucks }: LoadConsolidationViewP
                           <Package className="h-3 w-3 text-muted-foreground" />
                           <span className="truncate max-w-[120px]">{product.product}</span>
                         </div>
-                        <span className="font-medium shrink-0">{formatWeight(product.totalWeight)}</span>
+                        <span className="font-medium shrink-0">{formatProductDisplay(product)}</span>
                       </div>
                     ))}
                   </div>

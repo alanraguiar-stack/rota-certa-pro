@@ -12,8 +12,11 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
+import { useProductUnits } from '@/hooks/useProductUnits';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+
+const WEIGHT_UNITS = ['kg', 'g'];
 
 interface TruckManifestCardsProps {
   routeName: string;
@@ -105,7 +108,8 @@ function generateLoadingPDF(
   truck: TruckType,
   products: ConsolidatedProduct[],
   totalWeight: number,
-  occupancyPercent: number
+  occupancyPercent: number,
+  getUnitForProduct?: (name: string) => string
 ): jsPDF {
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -153,11 +157,20 @@ function generateLoadingPDF(
   autoTable(doc, {
     startY: 73,
     head: [['#', 'Produto', 'Peso Total']],
-    body: products.map((p, idx) => [
-      String(idx + 1),
-      toASCII(p.product),
-      formatWeight(p.totalWeight),
-    ]),
+    body: products.map((p, idx) => {
+      let display = formatWeight(p.totalWeight);
+      if (getUnitForProduct) {
+        const unit = getUnitForProduct(p.product);
+        if (!WEIGHT_UNITS.includes(unit)) {
+          display = `${p.orderCount} ${unit}${p.orderCount > 1 ? 's' : ''}`;
+        }
+      }
+      return [
+        String(idx + 1),
+        toASCII(p.product),
+        display,
+      ];
+    }),
     foot: [['', 'TOTAL', formatWeight(totalWeight)]],
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 10 },
@@ -325,6 +338,8 @@ function generateDeliveryPDF(
 }
 
 export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCardsProps) {
+  const { getUnitForProduct } = useProductUnits();
+  
   if (trucks.length === 0) {
     return (
       <Card>
@@ -342,7 +357,7 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
       setTimeout(() => {
         // Loading manifest
         const loadingDoc = generateLoadingPDF(
-          routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent
+          routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
         );
         loadingDoc.save(`romaneio-carga-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
         
@@ -407,7 +422,7 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
           
           const handleDownloadLoading = () => {
             const doc = generateLoadingPDF(
-              routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent
+              routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
             );
             doc.save(`romaneio-carga-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
           };
@@ -419,20 +434,34 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
             doc.save(`romaneio-entrega-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
           };
           
+          const printViaIframe = (doc: jsPDF) => {
+            const blob = doc.output('blob');
+            const url = URL.createObjectURL(blob);
+            const iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.src = url;
+            document.body.appendChild(iframe);
+            iframe.onload = () => {
+              iframe.contentWindow?.print();
+              setTimeout(() => {
+                document.body.removeChild(iframe);
+                URL.revokeObjectURL(url);
+              }, 1000);
+            };
+          };
+
           const handlePrintLoading = () => {
             const doc = generateLoadingPDF(
-              routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent
+              routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
             );
-            doc.autoPrint();
-            window.open(doc.output('bloburl'), '_blank');
+            printViaIframe(doc);
           };
           
           const handlePrintDelivery = () => {
             const doc = generateDeliveryPDF(
               routeName, date, truckData.truck, truckData.orders, truckData.totalWeight, truckData.departureTime
             );
-            doc.autoPrint();
-            window.open(doc.output('bloburl'), '_blank');
+            printViaIframe(doc);
           };
           
           return (
@@ -535,7 +564,11 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
                       <div key={idx} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-muted/30">
                         <span className="truncate flex-1">{product.product}</span>
                         <Badge variant="secondary" className="ml-2 shrink-0">
-                          {formatWeight(product.totalWeight)}
+                          {(() => {
+                            const unit = getUnitForProduct(product.product);
+                            if (WEIGHT_UNITS.includes(unit)) return formatWeight(product.totalWeight);
+                            return `${product.orderCount} ${unit}${product.orderCount > 1 ? 's' : ''}`;
+                          })()}
                         </Badge>
                       </div>
                     ))}
