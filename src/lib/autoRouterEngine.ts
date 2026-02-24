@@ -174,7 +174,7 @@ export function autoComposeRoute(
   // Step 2: Group orders by city
   const cityOrderMap = new Map<string, GeocodedOrder[]>();
   for (const order of geocodedOrders) {
-    const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+    const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
     const existing = cityOrderMap.get(city) || [];
     existing.push(order);
     cityOrderMap.set(city, existing);
@@ -249,7 +249,7 @@ export function autoComposeRoute(
         if (assignedOrders.length >= maxDel) break;
         if (currentWeight + order.weight_kg > capacity) continue;
 
-        const orderCity = normalizeCityName(order.geocoded.city || '');
+        const orderCity = normalizeCityName(order.city || order.geocoded.city || '');
         if (orderCity !== exceptionCity) continue; // MUST match exception city
 
         const nh = normalizeNeighborhood(order.geocoded.neighborhood || '');
@@ -286,7 +286,7 @@ export function autoComposeRoute(
     const citiesInTruck = new Set<string>();
     const complementCities: string[] = [];
     for (const order of assignedOrders) {
-      const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+      const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
       citiesInTruck.add(city);
       if (city !== rule.anchorCity && !complementCities.includes(city)) {
         complementCities.push(city);
@@ -346,7 +346,7 @@ export function autoComposeRoute(
 
     const citiesInTruck = new Set<string>();
     for (const order of assignedOrders) {
-      const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+      const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
       citiesInTruck.add(city);
     }
 
@@ -386,7 +386,7 @@ export function autoComposeRoute(
     // Take orders from remaining, grouped by city
     const remainingByCity = new Map<string, GeocodedOrder[]>();
     for (const o of remainingOrders) {
-      const city = normalizeCityName(o.geocoded.city || 'desconhecida');
+      const city = normalizeCityName(o.city || o.geocoded.city || 'desconhecida');
       const existing = remainingByCity.get(city) || [];
       existing.push(o);
       remainingByCity.set(city, existing);
@@ -405,7 +405,7 @@ export function autoComposeRoute(
 
     const citiesInTruck = new Set<string>();
     for (const order of assignedOrders) {
-      const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+      const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
       citiesInTruck.add(city);
     }
 
@@ -511,7 +511,7 @@ export function validateComposition(
       );
 
       for (const order of comp.orders) {
-        const city = normalizeCityName((order as any).geocoded?.city || parseAddress(order.address).city || 'desconhecida');
+        const city = normalizeCityName(order.city || (order as any).geocoded?.city || parseAddress(order.address).city || 'desconhecida');
         const nh = normalizeNeighborhood((order as any).geocoded?.neighborhood || parseAddress(order.address).neighborhood || '');
 
         if (!allowedCities.has(city)) {
@@ -530,8 +530,7 @@ export function validateComposition(
     // 4. Check city alternation in sequence
     if (comp.orders.length > 2) {
       const citySequence = comp.orders.map(o => {
-        const parsed = parseAddress(o.address);
-        return normalizeCityName(parsed.city || 'desconhecida');
+        return normalizeCityName(o.city || (o as any).geocoded?.city || parseAddress(o.address).city || 'desconhecida');
       }).filter(c => c !== 'desconhecida');
 
       const visitedCities = new Set<string>();
@@ -570,7 +569,7 @@ function optimizeDeliverySequence(
   // Step 1: Group by city
   const cityGroups = new Map<string, GeocodedOrder[]>();
   for (const order of orders) {
-    const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+    const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
     const existing = cityGroups.get(city) || [];
     existing.push(order);
     cityGroups.set(city, existing);
