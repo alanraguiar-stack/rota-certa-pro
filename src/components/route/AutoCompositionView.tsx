@@ -2,7 +2,7 @@
  * Componente de visualização da composição automática de caminhões
  */
 
-import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -213,6 +213,31 @@ export function AutoCompositionView({
           </div>
         </CardContent>
       </Card>
+      
+      {/* Reasoning / History insights */}
+      {result.reasoning && result.reasoning.length > 0 && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Brain className="h-4 w-4 text-primary" />
+              Decisões baseadas no histórico ({result.reasoning.length})
+            </CardTitle>
+            <CardDescription>
+              O sistema aplicou padrões aprendidos das rotas anteriores do analista
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-40 overflow-y-auto space-y-1.5">
+              {result.reasoning.map((reason, idx) => (
+                <div key={idx} className="flex items-start gap-2 text-sm rounded border border-primary/20 bg-background px-3 py-2">
+                  <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                  <span>{reason}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
       
       {/* Warnings */}
       {result.warnings.length > 0 && (
