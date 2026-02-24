@@ -20,7 +20,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { Truck } from '@/types';
+import { Truck, ParsedOrder } from '@/types';
 import { cn } from '@/lib/utils';
 import { 
   analyzeFleetRequirements, 
@@ -33,6 +33,7 @@ interface IntelligentFleetPanelProps {
   trucks: Truck[];
   totalWeight: number;
   totalOrders: number;
+  orders?: ParsedOrder[];
   selectedTruckIds: string[];
   onSelectionChange: (truckIds: string[]) => void;
   onConfirm: () => void;
@@ -51,6 +52,7 @@ export function IntelligentFleetPanel({
   trucks,
   totalWeight,
   totalOrders,
+  orders = [],
   selectedTruckIds,
   onSelectionChange,
   onConfirm,
@@ -61,8 +63,8 @@ export function IntelligentFleetPanel({
 
   // Análise inteligente da frota
   const fleetAnalysis = useMemo(() => 
-    analyzeFleetRequirements(totalWeight, trucks, 10),
-    [totalWeight, trucks]
+    analyzeFleetRequirements(totalWeight, trucks, 10, orders),
+    [totalWeight, trucks, orders]
   );
 
   // Auto-aplicar recomendação quando disponível e nenhum caminhão selecionado

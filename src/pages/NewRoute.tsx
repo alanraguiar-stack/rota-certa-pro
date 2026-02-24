@@ -333,6 +333,7 @@ export default function NewRoute() {
                   trucks={activeTrucks}
                   totalWeight={totalWeight}
                   totalOrders={validOrders.length}
+                  orders={orders}
                   selectedTruckIds={selectedTruckIds}
                   onSelectionChange={setSelectedTruckIds}
                   onConfirm={handleConfirmFleet}
