@@ -13,6 +13,7 @@
  */
 
 import { Truck, ParsedOrder } from '@/types';
+import { ANCHOR_RULES, findAnchorRule } from '@/lib/anchorRules';
 
 // ============================================
 // TIPOS E INTERFACES
@@ -82,7 +83,8 @@ export interface DistributionValidation {
 export function analyzeFleetRequirements(
   totalWeight: number,
   availableTrucks: Truck[],
-  safetyMarginPercent: number = 10
+  safetyMarginPercent: number = 10,
+  orders: ParsedOrder[] = []
 ): FleetAnalysis {
   const reasoning: string[] = [];
   
@@ -107,6 +109,50 @@ export function analyzeFleetRequirements(
     };
   }
 
+  // ============================================
+  // PASSO TERRITORIAL: Detectar cidades dos pedidos e forçar caminhões âncora
+  // ============================================
+  const anchorTrucks: Truck[] = [];
+  
+  if (orders.length > 0) {
+    // Extrair cidades únicas dos pedidos (normalizadas)
+    const orderCities = new Set<string>();
+    for (const order of orders) {
+      if (order.city) {
+        const normalized = order.city
+          .toLowerCase()
+          .trim()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
+        if (normalized) orderCities.add(normalized);
+      }
+    }
+
+    if (orderCities.size > 0) {
+      reasoning.push(`🏙️ Cidades detectadas nos pedidos: ${[...orderCities].join(', ')}`);
+    }
+
+    // Para cada regra âncora, verificar se a cidade está nos pedidos
+    for (const rule of ANCHOR_RULES) {
+      if (!rule.anchorCity || rule.isSupport) continue;
+      
+      if (orderCities.has(rule.anchorCity)) {
+        // Encontrar o caminhão correspondente na frota
+        const matchingTruck = availableTrucks.find(t => {
+          const prefix = t.plate.replace(/[\s-]/g, '').toUpperCase().substring(0, 3);
+          return prefix === rule.platePrefix;
+        });
+        
+        if (matchingTruck && !anchorTrucks.some(at => at.id === matchingTruck.id)) {
+          anchorTrucks.push(matchingTruck);
+          reasoning.push(
+            `🔒 ${rule.anchorCity} detectado nos pedidos → ${matchingTruck.plate} (${rule.label}) incluído obrigatoriamente`
+          );
+        }
+      }
+    }
+  }
+
   // Passo 2: Ordenar caminhões por capacidade (maior primeiro)
   const sortedTrucks = [...availableTrucks].sort(
     (a, b) => Number(b.capacity_kg) - Number(a.capacity_kg)
@@ -117,41 +163,44 @@ export function analyzeFleetRequirements(
     `Maior caminhão disponível: ${sortedTrucks[0].plate} (${formatWeight(largestTruckCapacity)})`
   );
 
-  // Passo 3: Verificar se um único caminhão é suficiente
-  if (totalWeightWithMargin <= largestTruckCapacity) {
+  // Se temos caminhões âncora obrigatórios, começar com eles
+  const selectedTrucks: Truck[] = [...anchorTrucks];
+  let remainingWeight = totalWeightWithMargin - anchorTrucks.reduce(
+    (sum, t) => sum + Number(t.capacity_kg), 0
+  );
+
+  // Se os âncoras já cobrem o peso, não precisamos de mais
+  if (remainingWeight <= 0 && anchorTrucks.length > 0) {
+    const totalSelectedCapacity = selectedTrucks.reduce(
+      (sum, t) => sum + Number(t.capacity_kg), 0
+    );
+    const utilizationPercent = Math.round((totalWeight / totalSelectedCapacity) * 100);
     reasoning.push(
-      `✓ Um único caminhão é suficiente para a carga`
+      `✓ Caminhões âncora são suficientes: ${selectedTrucks.length} caminhões com ${utilizationPercent}% de ocupação`
     );
     return {
       totalWeight,
       totalWeightWithMargin,
       safetyMarginPercent,
-      minimumTrucksRequired: 1,
-      recommendedTrucks: [sortedTrucks[0]],
+      minimumTrucksRequired: selectedTrucks.length,
+      recommendedTrucks: selectedTrucks,
       reasoning,
       isOptimal: true,
     };
   }
 
-  // Passo 4: Calcular quantos caminhões são necessários
-  reasoning.push(
-    `✗ A carga NÃO cabe em um único caminhão`
-  );
-  
-  // Usar algoritmo de bin-packing: preencher caminhões do maior para o menor
-  const selectedTrucks: Truck[] = [];
-  let remainingWeight = totalWeightWithMargin;
-  let attemptIndex = 0;
-
-  while (remainingWeight > 0 && attemptIndex < sortedTrucks.length * 2) {
-    // Encontrar o próximo caminhão que ainda pode ser usado
-    for (const truck of sortedTrucks) {
-      // Contar quantas vezes este caminhão já foi selecionado
-      const timesSelected = selectedTrucks.filter(t => t.id === truck.id).length;
-      
-      // Para simplificar, cada caminhão só pode ser usado uma vez
-      // (em cenário real, poderia haver múltiplos do mesmo modelo)
-      if (timesSelected === 0) {
+  // Passo 3: Preencher capacidade restante com bin-packing
+  if (remainingWeight > 0) {
+    if (anchorTrucks.length > 0) {
+      reasoning.push(`Preenchendo capacidade restante: ${formatWeight(Math.max(0, remainingWeight))}`);
+    }
+    
+    let attemptIndex = 0;
+    while (remainingWeight > 0 && attemptIndex < sortedTrucks.length * 2) {
+      for (const truck of sortedTrucks) {
+        // Pular caminhões já selecionados (âncora)
+        if (selectedTrucks.some(t => t.id === truck.id)) continue;
+        
         selectedTrucks.push(truck);
         remainingWeight -= Number(truck.capacity_kg);
         reasoning.push(
@@ -159,12 +208,11 @@ export function analyzeFleetRequirements(
         );
         break;
       }
-    }
-    attemptIndex++;
-    
-    // Se já usamos todos os caminhões disponíveis
-    if (selectedTrucks.length >= sortedTrucks.length) {
-      break;
+      attemptIndex++;
+      
+      if (selectedTrucks.length >= sortedTrucks.length) {
+        break;
+      }
     }
   }
 
