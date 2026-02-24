@@ -1,9 +1,10 @@
 /**
  * Componente de visualização da composição automática de caminhões
- * Exibe CORREDORES REGIONAIS por caminhão e bloqueia confirmação se houver violações
+ * Exibe CIDADE PRINCIPAL + COMPLEMENTOS por caminhão
+ * Bloqueia confirmação se houver violações territoriais
  */
 
-import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert, Navigation } from 'lucide-react';
+import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -75,7 +76,8 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
     .slice(0, 3);
 
   const cities = composition.cities || [];
-  const corridorName = composition.corridorName;
+  const primaryCity = composition.primaryCity;
+  const complementCities = composition.complementCities || [];
   
   return (
     <Card className={cn(hasViolation && 'border-destructive/50 bg-destructive/5')}>
@@ -103,11 +105,16 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Corridor name */}
-        {corridorName && (
+        {/* Primary city highlight */}
+        {primaryCity && (
           <div className="flex items-center gap-2 rounded-lg bg-primary/10 border border-primary/20 px-3 py-2">
-            <Navigation className="h-4 w-4 text-primary" />
-            <span className="text-sm font-semibold text-primary">{corridorName}</span>
+            <MapPin className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-primary capitalize">
+              {primaryCity}
+            </span>
+            <Badge variant="outline" className="text-xs border-primary/30 text-primary ml-auto">
+              Principal
+            </Badge>
           </div>
         )}
 
@@ -116,7 +123,7 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
               <MapPin className="h-3 w-3" />
-              Cidades ({cities.length})
+              Cidades ({cities.filter(c => c !== 'barueri').length}{cities.includes('barueri') ? ' + hub' : ''})
             </p>
             <div className="flex flex-wrap gap-1">
               {cities.map((city) => (
@@ -126,19 +133,25 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
                   className={cn(
                     "text-xs capitalize",
                     city === 'barueri' && "bg-muted/80 text-muted-foreground border-muted",
-                    hasViolation && city !== 'barueri' && "bg-destructive/10 text-destructive border-destructive/30"
+                    city === primaryCity && city !== 'barueri' && "bg-primary/15 text-primary border-primary/30",
+                    complementCities.includes(city) && "bg-accent/50 text-accent-foreground border-accent/30",
+                    hasViolation && city !== 'barueri' && city !== primaryCity && !complementCities.includes(city) && "bg-destructive/10 text-destructive border-destructive/30"
                   )}
                 >
                   {city}
                   {city === 'barueri' && ' (hub)'}
+                  {complementCities.includes(city) && ' (complemento)'}
                 </Badge>
               ))}
             </div>
-            {corridorName && !hasViolation && (
-              <p className="text-xs text-success">✓ Agrupamento conforme padrão do analista</p>
+            {!hasViolation && complementCities.length > 0 && (
+              <p className="text-xs text-success">✓ Complementos são cidades vizinhas</p>
+            )}
+            {!hasViolation && cities.filter(c => c !== 'barueri').length === 1 && (
+              <p className="text-xs text-success">✓ Caminhão exclusivo por cidade</p>
             )}
             {hasViolation && (
-              <p className="text-xs text-destructive">⚠ Mistura fora do padrão operacional</p>
+              <p className="text-xs text-destructive">⚠ Mistura sem coerência territorial</p>
             )}
           </div>
         )}
@@ -222,9 +235,9 @@ export function AutoCompositionView({
     }
   }
 
-  // Count corridors
-  const corridorCount = new Set(
-    activeCompositions.filter(c => c.corridorName).map(c => c.corridorName)
+  // Count unique primary cities
+  const primaryCityCount = new Set(
+    activeCompositions.filter(c => c.primaryCity).map(c => c.primaryCity)
   ).size;
   
   return (
@@ -236,11 +249,11 @@ export function AutoCompositionView({
             <div>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-primary" />
-                Composição por Corredores Regionais
+                Composição Territorial por Cidade
               </CardTitle>
               <CardDescription>
-                Agrupamento baseado nos padrões históricos do analista
-                {corridorCount > 0 && ` • ${corridorCount} corredor(es) identificado(s)`}
+                Agrupamento cidade-primeiro com encaixe inteligente de vizinhas
+                {primaryCityCount > 0 && ` • ${primaryCityCount} cidade(s) principal(is)`}
               </CardDescription>
             </div>
             <EfficiencyBadge efficiency={summary.efficiency} />
@@ -274,10 +287,10 @@ export function AutoCompositionView({
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2 text-destructive">
               <ShieldAlert className="h-5 w-5" />
-              Rota incoerente com padrão operacional histórico
+              Violações de coerência territorial
             </CardTitle>
             <CardDescription className="text-destructive/80">
-              A composição contém misturas de cidades que o analista nunca fez. Corrija antes de confirmar.
+              A composição contém misturas de cidades sem coerência. Corrija antes de confirmar.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -293,16 +306,16 @@ export function AutoCompositionView({
         </Card>
       )}
       
-      {/* Reasoning / History insights */}
+      {/* Reasoning */}
       {result.reasoning && result.reasoning.length > 0 && (
         <Card className="border-primary/20 bg-primary/5">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Brain className="h-4 w-4 text-primary" />
-              Raciocínio de corredores ({result.reasoning.length})
+              Raciocínio da composição ({result.reasoning.length})
             </CardTitle>
             <CardDescription>
-              Decisões baseadas nos corredores regionais do analista
+              Decisões baseadas em volume por cidade e coerência territorial
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -334,7 +347,7 @@ export function AutoCompositionView({
       <div>
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <Truck className="h-5 w-5" />
-          Distribuição por Corredores ({activeCompositions.length})
+          Distribuição por Cidade ({activeCompositions.length})
         </h3>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {activeCompositions.map((composition, index) => (
@@ -350,14 +363,14 @@ export function AutoCompositionView({
       
       {/* Unassigned Orders */}
       {result.unassignedOrders.length > 0 && (
-        <Card className="border-destructive/30">
+        <Card className="border-destructive/30 bg-warning/5">
           <CardHeader>
             <CardTitle className="text-base text-destructive flex items-center gap-2">
               <AlertCircle className="h-4 w-4" />
               Pedidos Não Atribuídos ({result.unassignedOrders.length})
             </CardTitle>
             <CardDescription>
-              Estes pedidos excedem a capacidade disponível
+              Frota insuficiente para manter coerência territorial. Considere adicionar mais caminhões.
             </CardDescription>
           </CardHeader>
           <CardContent>
