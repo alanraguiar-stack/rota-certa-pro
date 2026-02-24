@@ -1,136 +1,115 @@
 
 
-# Motor de Aprendizado com Base Historica do Analista
+# Reestruturacao do Motor de Roteirizacao - Logica Territorial Rigida
 
-## Visao Geral
+## Problema Atual
 
-O sistema ja importa e armazena padroes historicos na tabela `route_history_patterns`, mas o motor de roteirizacao (`autoRouterEngine.ts` e `distribution.ts`) **ignora completamente** esses dados. Este plano cria um modulo de inteligencia que extrai padroes das bases historicas e os injeta no processo de composicao automatica.
+O motor atual tem dois defeitos graves:
 
-## Arquitetura
+1. **`assignClustersToTrucks`** usa bin-packing generico: ao atribuir clusters a caminhoes, ele escolhe "o caminhao com mais espaco", quebrando a integridade territorial. Um cluster de Barueri pode ser dividido entre 2 caminhoes junto com pedidos de Osasco.
+
+2. **Complemento de vizinhas sem restricao**: na camada 3.5, cidades pequenas sao adicionadas sem verificar se o peso total cabe no caminhao, causando misturas indevidas.
+
+3. **Sem validacao de bloqueio**: nao existe verificacao antes de confirmar se a composicao respeita os padroes historicos.
+
+## Solucao
+
+Reescrever as funcoes criticas para impor logica territorial rigida: **uma cidade por caminhao, esgotando volume antes de passar para a proxima**.
+
+### Arquivo 1: `src/lib/autoRouterEngine.ts`
+
+**Reescrever `clusterOrdersByCity`** - Nova logica:
 
 ```text
-route_history_patterns (DB)
-        |
-        v
- [historyPatternEngine.ts]  <-- NOVO modulo
-   - Extrai padroes de cidade-caminhao
-   - Calcula co-ocorrencia de cidades
-   - Identifica preferencias de agrupamento
-        |
-        v
- [autoRouterEngine.ts]  <-- MODIFICADO
-   - Recebe padroes como parametro opcional
-   - Usa padroes para influenciar clustering
-   - Gera explicacoes de decisao
-        |
-        v
- [NewRoute.tsx]  <-- MODIFICADO
-   - Busca padroes do DB antes de roteirizar
-   - Passa padroes ao motor
-   - Exibe explicacoes ao usuario
+1. Agrupar TODOS os pedidos por cidade
+2. Ordenar cidades por volume (maior primeiro)
+3. Para cada cidade (em ordem):
+   a. Se o volume cabe em 1 caminhao -> 1 cluster exclusivo
+   b. Se precisa de N caminhoes -> dividir em N clusters (mesma cidade)
+   c. Marcar como alocada
+4. Sobra controlada (SOMENTE se historico permitir):
+   a. Para cada cluster com espaco sobrando
+   b. Verificar se historico tem combinacao permitida
+   c. Se sim E cabe no peso -> adicionar cidade pequena
+   d. Se nao -> deixar o espaco vazio (melhor vazio que misturado)
+5. Orfas SEM historico -> cluster proprio (mesmo que sub-utilizado)
 ```
 
-## Detalhamento Tecnico
+**Reescrever `assignClustersToTrucks`** - Nova logica:
 
-### 1. Novo arquivo: `src/lib/historyPatternEngine.ts`
-
-Motor de extracao de padroes a partir dos dados historicos. Funcoes principais:
-
-**`extractCityPatterns(patterns: HistoryRow[])`** - Analisa todos os registros e gera:
-- **Mapa de co-ocorrencia**: quais cidades aparecem juntas no mesmo caminhao (ex: "Cotia + Embu = 85% das vezes")
-- **Mapa de exclusao**: quais cidades raramente se misturam (ex: "Barueri + Osasco = apenas 5%")
-- **Caminhoes por cidade**: quantos caminhoes cada cidade costuma usar (ex: "Osasco = 2 caminhoes em 70% dos casos")
-- **Cidades dedicadas**: cidades que quase sempre tem caminhao exclusivo (ex: "Barueri = dedicado em 90%")
-- **Ordem de prioridade**: quais cidades sao atribuidas primeiro
-
-**`findSimilarScenario(currentCities, currentWeight, patterns)`** - Compara o cenario atual com cenarios historicos e retorna o mais similar, com score de similaridade.
-
-**`generateRoutingHints(patterns, currentOrders)`** - Retorna sugestoes concretas:
-```typescript
-interface RoutingHint {
-  type: 'dedicate_truck' | 'combine_cities' | 'split_city' | 'priority_order';
-  cities: string[];
-  confidence: number; // 0-100, baseado em frequencia historica
-  reasoning: string;  // Ex: "Em 85% das rotas anteriores, Cotia e Embu ficaram juntas"
-}
+```text
+Em vez de bin-packing generico:
+1. Cada cluster ja representa 1 caminhao logico
+2. Mapear cluster[0] -> truck[0], cluster[1] -> truck[1]...
+3. Ordenar: cluster mais pesado -> caminhao com mais capacidade
+4. Respeitar capacidade como limite rigido
+5. NUNCA mover pedidos entre clusters para "otimizar"
 ```
 
-### 2. Modificacao: `src/lib/autoRouterEngine.ts`
-
-**Funcao `autoComposeRoute`** - Adicionar parametro opcional `historyHints`:
+**Adicionar `validateComposition`** - Nova funcao:
 
 ```typescript
-export function autoComposeRoute(
-  orders: ParsedOrder[],
-  availableTrucks: Truck[],
-  config: Partial<AutoRouterConfig> = {},
-  historyHints?: RoutingHint[]  // NOVO
-): AutoRouterResult
+function validateComposition(
+  compositions: TruckComposition[],
+  historyHints?: RoutingHint[]
+): { valid: boolean; violations: string[] }
 ```
 
-**Funcao `clusterOrdersByCity`** - Modificar a logica de clustering para:
+Verifica:
+- Quantas cidades distintas em cada caminhao
+- Se a mistura e historicamente permitida
+- Se ainda existem cidades nao alocadas
+- Gera lista de violacoes para exibir ao usuario
 
-1. **Antes de atribuir cidades grandes**: verificar se o historico sugere cidade dedicada. Se sim e a confianca > 70%, reservar um cluster exclusivo.
-2. **Na camada 3.5 (complemento com vizinhas)**: priorizar combinacoes que aparecem no historico. Se "Cotia + Embu" tem 85% de co-ocorrencia, priorizar Embu como complemento de Cotia sobre outras vizinhas.
-3. **Na camada 4 (orfas)**: usar o historico para decidir em qual caminhao colocar as orfas (preferir combinacoes historicas).
+### Arquivo 2: `src/lib/historyPatternEngine.ts`
 
-A logica matematica (capacidade, peso) continua sendo respeitada como limite rigido. O historico apenas influencia a **preferencia** de agrupamento.
+**Adicionar `getCityExclusionMap`** - Retorna pares de cidades que NUNCA devem ficar juntas (co-ocorrencia < 10% no historico):
 
-**Novo campo no `AutoRouterResult`**:
 ```typescript
-export interface AutoRouterResult {
-  // ... campos existentes
-  reasoning: string[];  // NOVO - explicacoes das decisoes
-}
+export function getCityExclusionMap(
+  patterns: ExtractedPatterns
+): Map<string, Set<string>>
 ```
 
-### 3. Modificacao: `src/pages/NewRoute.tsx`
+**Adicionar `isValidCityCombination`** - Verificacao rapida:
 
-**Ao carregar pedidos** (`handleAutoDataReady`):
-1. Buscar padroes do DB (`route_history_patterns`) para o usuario atual
-2. Extrair hints via `generateRoutingHints()`
-3. Passar hints para `autoComposeRoute()`
-
-**Na UI** (`AutoCompositionView`):
-- Exibir as explicacoes de decisao (campo `reasoning`) como cards informativos
-- Exemplo: "Esta composicao segue o padrao observado em 80% das rotas anteriores para Barueri"
-
-### 4. Novo hook: `src/hooks/useHistoryPatterns.ts`
-
-Hook para buscar e cachear padroes historicos:
 ```typescript
-export function useHistoryPatterns() {
-  // Busca route_history_patterns do usuario
-  // Extrai padroes via historyPatternEngine
-  // Retorna { hints, isLoading, patternsCount }
-}
+export function isValidCityCombination(
+  cities: string[],
+  patterns: ExtractedPatterns
+): { valid: boolean; reason: string }
 ```
 
-### 5. Aprendizado continuo
+### Arquivo 3: `src/components/route/AutoCompositionView.tsx`
 
-**Quando o usuario ajusta manualmente uma rota** (ja existe o fluxo de edicao em `TruckRouteEditor.tsx`):
-- Ao confirmar a rota final, salvar a composicao como novo registro em `route_history_patterns`
-- Isso acontece automaticamente no fluxo de criacao de rota existente (`handleCreateRoute`)
+**Adicionar exibicao de cidades por caminhao**: Cada card de caminhao mostra as cidades que contem, com destaque visual se houver mistura fora do padrao.
 
-Nao e necessaria nova tabela -- a tabela `route_history_patterns` ja possui todos os campos necessarios (truck_label, city, sequence_order, client_name, address).
+**Adicionar validacao visual**: Se a composicao tiver violacoes, exibir alerta vermelho e bloquear o botao "Confirmar e Criar Rota" com mensagem:
 
-### 6. Limites de seguranca
+```
+"Rota incoerente com padrao operacional historico"
+```
 
-O motor de padroes respeita limites rigidos:
-- Confianca minima de 60% para aplicar um padrao
-- Capacidade fisica do caminhao nunca e violada
-- Se o cenario atual diverge muito do historico (< 40% similaridade), ignora padroes e usa logica pura
-- Padroes com menos de 3 ocorrencias sao ignorados (evita aprender de dados insuficientes)
+### Arquivo 4: `src/pages/NewRoute.tsx`
 
-## Resumo de arquivos
+**Integrar validacao**: Antes de permitir `handleCreateRoute`, executar `validateComposition`. Se houver violacoes, bloquear e mostrar as razoes.
 
-| Arquivo | Acao | Descricao |
-|---------|------|-----------|
-| `src/lib/historyPatternEngine.ts` | CRIAR | Motor de extracao de padroes |
-| `src/hooks/useHistoryPatterns.ts` | CRIAR | Hook para buscar padroes do DB |
-| `src/lib/autoRouterEngine.ts` | MODIFICAR | Receber e aplicar hints historicos |
-| `src/pages/NewRoute.tsx` | MODIFICAR | Integrar padroes no fluxo |
-| `src/components/route/AutoCompositionView.tsx` | MODIFICAR | Exibir explicacoes de decisao |
+## Regras Rigidas Implementadas
 
-Nenhuma mudanca de schema no banco de dados -- usa a tabela `route_history_patterns` existente.
+| Regra | Implementacao |
+|-------|--------------|
+| Uma cidade por caminhao | Cluster exclusivo por cidade |
+| Esgotar volume antes de passar | Cidade so "libera" quando todos pedidos alocados |
+| Mistura so com historico | `isValidCityCombination` antes de complementar |
+| Bloqueio de rota ruim | `validateComposition` impede confirmacao |
+| Explicacao da decisao | Campo `reasoning` em cada cluster |
+
+## Resumo de Arquivos
+
+| Arquivo | Acao |
+|---------|------|
+| `src/lib/autoRouterEngine.ts` | Reescrever `clusterOrdersByCity` e `assignClustersToTrucks`, adicionar `validateComposition` |
+| `src/lib/historyPatternEngine.ts` | Adicionar `getCityExclusionMap` e `isValidCityCombination` |
+| `src/components/route/AutoCompositionView.tsx` | Exibir cidades por caminhao, bloquear confirmacao se houver violacoes |
+| `src/pages/NewRoute.tsx` | Integrar validacao antes de criar rota |
 
