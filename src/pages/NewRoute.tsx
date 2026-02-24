@@ -15,6 +15,7 @@ import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel'
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
+import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
 import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
@@ -26,6 +27,7 @@ export default function NewRoute() {
   const navigate = useNavigate();
   const { createRoute } = useRoutes();
   const { activeTrucks } = useTrucks();
+  const { getHintsForOrders, patternsCount } = useHistoryPatterns();
   const { toast } = useToast();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
@@ -81,12 +83,22 @@ export default function NewRoute() {
     
     // Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
+      // Generate history hints for the current orders
+      const hints = getHintsForOrders(parsedOrders);
+      
       const result = autoComposeRoute(parsedOrders, activeTrucks, {
         strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
-      });
+      }, hints.length > 0 ? hints : undefined);
       setAutoResult(result);
+      
+      if (hints.length > 0) {
+        toast({
+          title: 'Padrões históricos aplicados',
+          description: `${hints.length} padrões do analista foram considerados na composição`,
+        });
+      }
       
       // Auto-select trucks used in composition
       const usedTruckIds = result.compositions

@@ -7,6 +7,7 @@
 import { Truck, ParsedOrder, RoutingStrategy } from '@/types';
 import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, areCitiesNeighbors, getNeighborCities, getCityDistanceFromCD, CITY_NEIGHBORS } from './geocoding';
 import { ParsedItemDetail } from './itemDetailParser';
+import { RoutingHint } from './historyPatternEngine';
 
 export interface AutoRouterConfig {
   strategy: RoutingStrategy;
@@ -31,6 +32,7 @@ export interface AutoRouterResult {
   trucksUsed: number;
   averageOccupancy: number;
   warnings: string[];
+  reasoning: string[];
 }
 
 interface GeocodedOrder extends ParsedOrder {
@@ -154,10 +156,12 @@ export function recommendTrucks(
 export function autoComposeRoute(
   orders: ParsedOrder[],
   availableTrucks: Truck[],
-  config: Partial<AutoRouterConfig> = {}
+  config: Partial<AutoRouterConfig> = {},
+  historyHints?: RoutingHint[]
 ): AutoRouterResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const warnings: string[] = [];
+  const reasoning: string[] = [];
   
   if (orders.length === 0) {
     return {
@@ -168,6 +172,7 @@ export function autoComposeRoute(
       trucksUsed: 0,
       averageOccupancy: 0,
       warnings: ['Nenhum pedido para roteirizar'],
+      reasoning: [],
     };
   }
   
@@ -187,6 +192,7 @@ export function autoComposeRoute(
       trucksUsed: 0,
       averageOccupancy: 0,
       warnings: ['Nenhum caminhão disponível para a carga'],
+      reasoning: [],
     };
   }
   
@@ -211,8 +217,8 @@ export function autoComposeRoute(
     };
   });
   
-  // Step 3: Cluster orders by CITY (regionalization) instead of angle
-  const clusters = clusterOrdersByCity(geocodedOrders, selectedTrucks.length, cfg.strategy);
+  // Step 3: Cluster orders by CITY (regionalization) with history hints
+  const clusters = clusterOrdersByCity(geocodedOrders, selectedTrucks.length, cfg.strategy, historyHints, reasoning);
   
   // Step 4: Assign clusters to trucks respecting capacity
   const compositions = assignClustersToTrucks(clusters, selectedTrucks, cfg);
@@ -234,6 +240,10 @@ export function autoComposeRoute(
   const totalCapacity = compositions.reduce((sum, c) => sum + Number(c.truck.capacity_kg), 0);
   const averageOccupancy = totalCapacity > 0 ? (totalCapacityUsed / totalCapacity) * 100 : 0;
   
+  if (historyHints && historyHints.length > 0) {
+    reasoning.push(`${historyHints.length} padrões históricos foram considerados nesta composição`);
+  }
+  
   return {
     compositions,
     unassignedOrders,
@@ -242,6 +252,7 @@ export function autoComposeRoute(
     trucksUsed: compositions.filter(c => c.orders.length > 0).length,
     averageOccupancy: Math.round(averageOccupancy),
     warnings,
+    reasoning,
   };
 }
 
@@ -256,7 +267,9 @@ export function autoComposeRoute(
 function clusterOrdersByCity(
   orders: GeocodedOrder[],
   numClusters: number,
-  strategy: RoutingStrategy
+  strategy: RoutingStrategy,
+  historyHints?: RoutingHint[],
+  reasoning?: string[]
 ): GeocodedOrder[][] {
   if (orders.length === 0 || numClusters <= 0) return [];
 
@@ -295,6 +308,54 @@ function clusterOrdersByCity(
   }
   cities.sort((a, b) => b.weight - a.weight);
 
+  // HISTORY-AWARE: Build lookup maps from hints
+  const dedicatedCities = new Set<string>();
+  const combinePairs = new Map<string, Set<string>>(); // city -> cities it should combine with
+  const splitCities = new Set<string>();
+
+  if (historyHints && historyHints.length > 0) {
+    for (const hint of historyHints) {
+      if (hint.confidence < 60) continue; // safety threshold
+      
+      if (hint.type === 'dedicate_truck') {
+        for (const c of hint.cities) {
+          const norm = normalizeCityName(c);
+          dedicatedCities.add(norm);
+        }
+        reasoning?.push(hint.reasoning);
+      } else if (hint.type === 'combine_cities' && hint.cities.length >= 2) {
+        const normCities = hint.cities.map(c => normalizeCityName(c));
+        for (const c of normCities) {
+          if (!combinePairs.has(c)) combinePairs.set(c, new Set());
+          for (const other of normCities) {
+            if (other !== c) combinePairs.get(c)!.add(other);
+          }
+        }
+        reasoning?.push(hint.reasoning);
+      } else if (hint.type === 'split_city') {
+        for (const c of hint.cities) splitCities.add(normalizeCityName(c));
+        reasoning?.push(hint.reasoning);
+      }
+    }
+  }
+
+  // CAMADA 2.5 HISTORY: Reclassify based on history
+  // If history says a city should be dedicated, treat as 'grande' even if small
+  for (const ci of cities) {
+    if (dedicatedCities.has(ci.city) && ci.classification === 'pequena') {
+      ci.classification = 'grande';
+      reasoning?.push(`"${ci.city}" promovida a cidade grande (padrão histórico de caminhão dedicado)`);
+    }
+  }
+
+  // Re-sort: dedicated cities first, then by weight
+  cities.sort((a, b) => {
+    const aDedicated = dedicatedCities.has(a.city) ? 1 : 0;
+    const bDedicated = dedicatedCities.has(b.city) ? 1 : 0;
+    if (aDedicated !== bDedicated) return bDedicated - aDedicated;
+    return b.weight - a.weight;
+  });
+
   // CAMADA 3: Assign large cities
   const clusters: GeocodedOrder[][] = Array.from({ length: numClusters }, () => []);
   const clusterWeights = new Array(numClusters).fill(0);
@@ -308,6 +369,9 @@ function clusterOrdersByCity(
     
     if (trucksNeeded > 1 && clusterIdx + trucksNeeded <= numClusters) {
       // Split into blocks
+      if (splitCities.has(ci.city)) {
+        reasoning?.push(`"${ci.city}" dividida em ${trucksNeeded} caminhões (padrão histórico)`);
+      }
       const sorted = [...ci.orders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
       const blocks: GeocodedOrder[][] = Array.from({ length: trucksNeeded }, () => []);
       const blockWeights = new Array(trucksNeeded).fill(0);
@@ -338,32 +402,69 @@ function clusterOrdersByCity(
   }
 
   // CAMADA 3.5: Complement with small neighboring cities
+  // History-aware: prioritize historically combined cities
   for (let i = 0; i < Math.min(clusterIdx, numClusters); i++) {
     const primaryCity = clusterPrimaryCities[i];
     if (!primaryCity) continue;
 
+    // Get neighbors, but sort: historically combined first, then by distance
+    const historyCombineSet = combinePairs.get(primaryCity) || new Set();
     const neighbors = getNeighborCities(primaryCity)
-      .sort((a, b) => getCityDistanceFromCD(a) - getCityDistanceFromCD(b));
+      .sort((a, b) => {
+        const aHistoric = historyCombineSet.has(normalizeCityName(a)) ? 0 : 1;
+        const bHistoric = historyCombineSet.has(normalizeCityName(b)) ? 0 : 1;
+        if (aHistoric !== bHistoric) return aHistoric - bHistoric;
+        return getCityDistanceFromCD(a) - getCityDistanceFromCD(b);
+      });
 
-    for (const neighbor of neighbors) {
-      const nci = cities.find(c => c.city === neighbor && !c.assigned && c.classification === 'pequena');
+    // Also check non-neighbor cities that history says should combine
+    const historicNonNeighbors = Array.from(historyCombineSet)
+      .filter(c => !neighbors.includes(c));
+
+    const candidateCities = [...neighbors, ...historicNonNeighbors];
+
+    for (const neighbor of candidateCities) {
+      const normNeighbor = normalizeCityName(neighbor);
+      const nci = cities.find(c => c.city === normNeighbor && !c.assigned && c.classification === 'pequena');
       if (!nci) continue;
+      
+      if (historyCombineSet.has(normNeighbor)) {
+        reasoning?.push(`"${normNeighbor}" combinada com "${primaryCity}" (padrão histórico)`);
+      }
+      
       clusters[i].push(...nci.orders);
       clusterWeights[i] += nci.weight;
       nci.assigned = true;
     }
   }
 
-  // CAMADA 4: Orphans
+  // CAMADA 4: Orphans - history-aware placement
   const orphans = cities.filter(c => !c.assigned);
   for (const orphan of orphans) {
-    // Find cluster with least weight
-    let minI = 0;
-    for (let i = 1; i < numClusters; i++) {
-      if (clusterWeights[i] < clusterWeights[minI]) minI = i;
+    // Check if history suggests a preferred cluster
+    let bestCluster = -1;
+    
+    if (combinePairs.has(orphan.city)) {
+      const preferred = combinePairs.get(orphan.city)!;
+      for (let i = 0; i < numClusters; i++) {
+        if (preferred.has(clusterPrimaryCities[i])) {
+          bestCluster = i;
+          reasoning?.push(`"${orphan.city}" colocada com "${clusterPrimaryCities[i]}" (padrão histórico)`);
+          break;
+        }
+      }
     }
-    clusters[minI].push(...orphan.orders);
-    clusterWeights[minI] += orphan.weight;
+    
+    if (bestCluster === -1) {
+      // Fallback: find cluster with least weight
+      bestCluster = 0;
+      for (let i = 1; i < numClusters; i++) {
+        if (clusterWeights[i] < clusterWeights[bestCluster]) bestCluster = i;
+      }
+    }
+    
+    clusters[bestCluster].push(...orphan.orders);
+    clusterWeights[bestCluster] += orphan.weight;
     orphan.assigned = true;
   }
 
