@@ -25,6 +25,8 @@ export interface AnchorRule {
 export interface NeighborhoodException {
   /** Bairro permitido */
   neighborhood: string;
+  /** Cidade de origem do bairro (OBRIGATÓRIO para evitar homônimos) */
+  city: string;
   /** Máximo de entregas desse bairro */
   maxDeliveries: number;
   /** Posição especial na sequência (após qual bairro?) */
@@ -51,8 +53,8 @@ export const ANCHOR_RULES: AnchorRule[] = [
     maxDeliveries: 24,
     allowedFillCities: [],
     neighborhoodExceptions: [
-      { neighborhood: 'jaguare', maxDeliveries: 2 },
-      { neighborhood: 'parque imperial', maxDeliveries: 2 },
+      { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2 },
+      { neighborhood: 'parque imperial', city: 'sao paulo', maxDeliveries: 2 },
     ],
     label: 'Caminhão B — Osasco',
     isSupport: false,
@@ -63,8 +65,8 @@ export const ANCHOR_RULES: AnchorRule[] = [
     maxDeliveries: 24,
     allowedFillCities: [],
     neighborhoodExceptions: [
-      { neighborhood: 'metalurgicos', maxDeliveries: 2, insertAfterNeighborhood: 'jardim novo horizonte' },
-      { neighborhood: 'vila do conde', maxDeliveries: 2 },
+      { neighborhood: 'metalurgicos', city: 'osasco', maxDeliveries: 2, insertAfterNeighborhood: 'jardim novo horizonte' },
+      { neighborhood: 'vila do conde', city: 'barueri', maxDeliveries: 2 },
     ],
     label: 'Caminhão C — Carapicuíba',
     isSupport: false,

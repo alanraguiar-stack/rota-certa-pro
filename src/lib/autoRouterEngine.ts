@@ -238,15 +238,19 @@ export function autoComposeRoute(
       }
     }
 
-    // 4b: Neighborhood exceptions (bairros de outras cidades)
+    // 4b: Neighborhood exceptions (bairros de cidades específicas)
     for (const exception of rule.neighborhoodExceptions) {
       let exceptionCount = 0;
-      // Search ALL orders for matching neighborhood
+      const exceptionCity = normalizeCityName(exception.city);
+      // Search ALL orders for matching neighborhood AND city
       for (const order of geocodedOrders) {
         if (assignedOrderKeys.has(orderKey(order))) continue;
         if (exceptionCount >= exception.maxDeliveries) break;
         if (assignedOrders.length >= maxDel) break;
         if (currentWeight + order.weight_kg > capacity) continue;
+
+        const orderCity = normalizeCityName(order.geocoded.city || '');
+        if (orderCity !== exceptionCity) continue; // MUST match exception city
 
         const nh = normalizeNeighborhood(order.geocoded.neighborhood || '');
         if (nh === normalizeNeighborhood(exception.neighborhood)) {
@@ -254,7 +258,7 @@ export function autoComposeRoute(
           assignedOrderKeys.add(orderKey(order));
           currentWeight += order.weight_kg;
           exceptionCount++;
-          reasoning.push(`Exceção bairro: ${order.client_name} (${exception.neighborhood}) → ${truck.plate}`);
+          reasoning.push(`Exceção bairro: ${order.client_name} (${exception.neighborhood}, ${exception.city}) → ${truck.plate}`);
         }
       }
     }
@@ -499,20 +503,26 @@ export function validateComposition(
       const allowedCities = new Set([
         rule.anchorCity,
         ...rule.allowedFillCities,
+        // Include cities from neighborhood exceptions
+        ...rule.neighborhoodExceptions.map(e => normalizeCityName(e.city)),
       ]);
-      const exceptionNeighborhoods = new Set(
-        rule.neighborhoodExceptions.map(e => normalizeNeighborhood(e.neighborhood))
+      const exceptionNeighborhoods = new Map(
+        rule.neighborhoodExceptions.map(e => [normalizeNeighborhood(e.neighborhood), normalizeCityName(e.city)])
       );
 
       for (const order of comp.orders) {
         const city = normalizeCityName((order as any).geocoded?.city || parseAddress(order.address).city || 'desconhecida');
         const nh = normalizeNeighborhood((order as any).geocoded?.neighborhood || parseAddress(order.address).neighborhood || '');
 
-        if (!allowedCities.has(city) && !exceptionNeighborhoods.has(nh)) {
-          violations.push(
-            `${comp.truck.plate}: cidade "${city}" não é permitida (âncora: ${rule.anchorCity})`
-          );
-          break; // One violation per truck is enough
+        if (!allowedCities.has(city)) {
+          // Check if it's a valid neighborhood exception (must match both neighborhood AND city)
+          const exceptionCity = exceptionNeighborhoods.get(nh);
+          if (!exceptionCity || exceptionCity !== city) {
+            violations.push(
+              `${comp.truck.plate}: cidade "${city}" não é permitida (âncora: ${rule.anchorCity})`
+            );
+            break;
+          }
         }
       }
     }
