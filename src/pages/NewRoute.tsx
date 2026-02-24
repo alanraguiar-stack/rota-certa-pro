@@ -27,7 +27,7 @@ export default function NewRoute() {
   const navigate = useNavigate();
   const { createRoute } = useRoutes();
   const { activeTrucks } = useTrucks();
-  const { getHintsForOrders, patternsCount } = useHistoryPatterns();
+  const { getHintsForOrders, patternsCount, extractedPatterns } = useHistoryPatterns();
   const { toast } = useToast();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
@@ -90,7 +90,7 @@ export default function NewRoute() {
         strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
-      }, hints.length > 0 ? hints : undefined);
+      }, hints.length > 0 ? hints : undefined, extractedPatterns);
       setAutoResult(result);
       
       if (hints.length > 0) {

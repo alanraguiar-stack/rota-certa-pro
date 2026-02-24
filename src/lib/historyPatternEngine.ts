@@ -70,7 +70,6 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
 
   // Group by route (using route_date as route identifier)
   const routeMap = new Map<string, Map<string, Set<string>>>();
-  // routeDate -> truckLabel -> Set<city>
 
   for (const row of patterns) {
     const routeKey = row.route_date || 'unknown';
@@ -91,33 +90,24 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
   const getOrCreateProfile = (city: string): CityProfile => {
     if (!cityProfiles.has(city)) {
       cityProfiles.set(city, {
-        city,
-        totalAppearances: 0,
-        dedicatedTruckRate: 0,
-        avgTrucksUsed: 0,
-        trucksPerRoute: new Map(),
-        coOccurrences: new Map(),
-        priorityScore: 0,
+        city, totalAppearances: 0, dedicatedTruckRate: 0,
+        avgTrucksUsed: 0, trucksPerRoute: new Map(),
+        coOccurrences: new Map(), priorityScore: 0,
       });
     }
     return cityProfiles.get(city)!;
   };
 
-  // Analyze each route
   for (const [routeKey, truckMap] of routeMap) {
-    // Which cities appear in which trucks for this route
-    const citiesInTruck = new Map<string, string[]>(); // city -> [truckLabels]
-    const truckCities = new Map<string, Set<string>>(); // truck -> cities
+    const citiesInTruck = new Map<string, string[]>();
 
     for (const [truckLabel, cities] of truckMap) {
-      truckCities.set(truckLabel, cities);
       for (const city of cities) {
         if (!citiesInTruck.has(city)) citiesInTruck.set(city, []);
         citiesInTruck.get(city)!.push(truckLabel);
       }
     }
 
-    // Update city profiles
     for (const [city, trucks] of citiesInTruck) {
       const profile = getOrCreateProfile(city);
       profile.totalAppearances++;
@@ -140,9 +130,8 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
 
   // Calculate derived metrics
   for (const [, profile] of cityProfiles) {
-    // Dedicated truck rate: how often this city is the ONLY city in a truck
     let dedicatedCount = 0;
-    for (const [routeKey, truckMap] of routeMap) {
+    for (const [, truckMap] of routeMap) {
       for (const [, cities] of truckMap) {
         if (cities.has(profile.city) && cities.size === 1) {
           dedicatedCount++;
@@ -152,12 +141,10 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
     profile.dedicatedTruckRate = profile.totalAppearances > 0
       ? dedicatedCount / profile.totalAppearances : 0;
 
-    // Avg trucks used
     const truckCounts = Array.from(profile.trucksPerRoute.values());
     profile.avgTrucksUsed = truckCounts.length > 0
       ? truckCounts.reduce((a, b) => a + b, 0) / truckCounts.length : 1;
 
-    // Priority score: cities that appear more often get higher priority
     profile.priorityScore = profile.totalAppearances;
   }
 
@@ -174,14 +161,11 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
       const profileB = cityProfiles.get(cityB);
       if (!profileB) continue;
 
-      // How many routes had both cities (in any truck)
       const bothAppearRoutes = Math.min(profileA.totalAppearances, profileB.totalAppearances);
       const separateCount = bothAppearRoutes - togetherCount;
 
       coOccurrences.push({
-        cityA,
-        cityB,
-        togetherCount,
+        cityA, cityB, togetherCount,
         separateCount: Math.max(0, separateCount),
         coOccurrenceRate: bothAppearRoutes > 0 ? togetherCount / bothAppearRoutes : 0,
       });
@@ -191,6 +175,76 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
   coOccurrences.sort((a, b) => b.coOccurrenceRate - a.coOccurrenceRate);
 
   return { cityProfiles, coOccurrences, routeCount, totalRecords: patterns.length };
+}
+
+/**
+ * Get city exclusion map: pairs of cities that NEVER should be together
+ * (co-occurrence < 10% in history)
+ */
+export function getCityExclusionMap(
+  patterns: ExtractedPatterns
+): Map<string, Set<string>> {
+  const exclusions = new Map<string, Set<string>>();
+
+  for (const co of patterns.coOccurrences) {
+    // Cities that almost never appear together (< 10% co-occurrence)
+    // AND have enough data points
+    if (co.coOccurrenceRate < 0.10 && (co.togetherCount + co.separateCount) >= MIN_OCCURRENCES) {
+      if (!exclusions.has(co.cityA)) exclusions.set(co.cityA, new Set());
+      if (!exclusions.has(co.cityB)) exclusions.set(co.cityB, new Set());
+      exclusions.get(co.cityA)!.add(co.cityB);
+      exclusions.get(co.cityB)!.add(co.cityA);
+    }
+  }
+
+  return exclusions;
+}
+
+/**
+ * Validate if a combination of cities is historically acceptable
+ */
+export function isValidCityCombination(
+  cities: string[],
+  patterns: ExtractedPatterns
+): { valid: boolean; reason: string } {
+  if (cities.length <= 1) return { valid: true, reason: '' };
+
+  const normalized = cities.map(c => normalizeCity(c));
+  const exclusions = getCityExclusionMap(patterns);
+
+  // Check each pair
+  for (let i = 0; i < normalized.length; i++) {
+    for (let j = i + 1; j < normalized.length; j++) {
+      const cityA = normalized[i];
+      const cityB = normalized[j];
+
+      // Check exclusion
+      const excl = exclusions.get(cityA);
+      if (excl && excl.has(cityB)) {
+        return {
+          valid: false,
+          reason: `"${cityA}" e "${cityB}" nunca ficam juntas no histórico operacional`,
+        };
+      }
+
+      // Check if we have history data and this combo never happened
+      const profileA = patterns.cityProfiles.get(cityA);
+      const profileB = patterns.cityProfiles.get(cityB);
+      if (profileA && profileB &&
+          profileA.totalAppearances >= MIN_OCCURRENCES &&
+          profileB.totalAppearances >= MIN_OCCURRENCES) {
+        const coCount = profileA.coOccurrences.get(cityB) || 0;
+        if (coCount === 0) {
+          return {
+            valid: false,
+            reason: `"${cityA}" e "${cityB}" nunca foram combinadas em ${Math.min(profileA.totalAppearances, profileB.totalAppearances)} rotas históricas`,
+          };
+        }
+      }
+    }
+  }
+
+  return { valid: true, reason: '' };
 }
 
 /**
@@ -216,7 +270,6 @@ export function findSimilarScenario(
   let bestDate: string | null = null;
 
   for (const [routeDate, { cities }] of routeMap) {
-    // Jaccard similarity
     const intersection = new Set([...normalizedCurrent].filter(c => cities.has(c)));
     const union = new Set([...normalizedCurrent, ...cities]);
     const similarity = union.size > 0 ? (intersection.size / union.size) * 100 : 0;
@@ -242,7 +295,6 @@ export function generateRoutingHints(
 
   if (routeCount < 1) return hints;
 
-  // Get current cities
   const currentCities = new Set<string>();
   for (const order of currentOrders) {
     const city = normalizeCity(order.city || null);
@@ -258,9 +310,7 @@ export function generateRoutingHints(
       const confidence = Math.round(profile.dedicatedTruckRate * 100);
       if (confidence >= MIN_CONFIDENCE) {
         hints.push({
-          type: 'dedicate_truck',
-          cities: [city],
-          confidence,
+          type: 'dedicate_truck', cities: [city], confidence,
           reasoning: `Em ${confidence}% das ${profile.totalAppearances} rotas anteriores, ${city} teve caminhão dedicado`,
         });
       }
@@ -275,15 +325,13 @@ export function generateRoutingHints(
     const confidence = Math.round(co.coOccurrenceRate * 100);
     if (confidence >= MIN_CONFIDENCE) {
       hints.push({
-        type: 'combine_cities',
-        cities: [co.cityA, co.cityB],
-        confidence,
+        type: 'combine_cities', cities: [co.cityA, co.cityB], confidence,
         reasoning: `Em ${confidence}% das rotas anteriores, ${co.cityA} e ${co.cityB} ficaram no mesmo caminhão`,
       });
     }
   }
 
-  // 3. Split city hints (city that often needs multiple trucks)
+  // 3. Split city hints
   for (const city of currentCities) {
     const profile = cityProfiles.get(city);
     if (!profile || profile.totalAppearances < MIN_OCCURRENCES) continue;
@@ -292,9 +340,7 @@ export function generateRoutingHints(
       const confidence = Math.min(90, Math.round((profile.avgTrucksUsed / 3) * 100));
       if (confidence >= MIN_CONFIDENCE) {
         hints.push({
-          type: 'split_city',
-          cities: [city],
-          confidence,
+          type: 'split_city', cities: [city], confidence,
           reasoning: `${city} usa em média ${profile.avgTrucksUsed.toFixed(1)} caminhões por rota`,
         });
       }
@@ -316,8 +362,6 @@ export function generateRoutingHints(
     });
   }
 
-  // Sort by confidence descending
   hints.sort((a, b) => b.confidence - a.confidence);
-
   return hints;
 }
