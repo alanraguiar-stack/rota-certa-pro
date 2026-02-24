@@ -1,8 +1,9 @@
 /**
  * Componente de visualização da composição automática de caminhões
+ * Exibe cidades por caminhão e bloqueia confirmação se houver violações territoriais
  */
 
-import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain } from 'lucide-react';
+import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -45,7 +46,7 @@ function EfficiencyBadge({ efficiency }: { efficiency: 'excellent' | 'good' | 'f
   );
 }
 
-function TruckCompositionCard({ composition, index }: { composition: TruckComposition; index: number }) {
+function TruckCompositionCard({ composition, index, hasViolation }: { composition: TruckComposition; index: number; hasViolation: boolean }) {
   const truckColors = [
     'text-blue-600 bg-blue-100',
     'text-green-600 bg-green-100',
@@ -56,7 +57,6 @@ function TruckCompositionCard({ composition, index }: { composition: TruckCompos
   
   const colorClass = truckColors[index % truckColors.length];
   
-  // Get unique products for quick view
   const productSummary = new Map<string, number>();
   composition.orders.forEach(order => {
     if (order.items && order.items.length > 0) {
@@ -73,9 +73,11 @@ function TruckCompositionCard({ composition, index }: { composition: TruckCompos
   const topProducts = Array.from(productSummary.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
+
+  const cities = composition.cities || [];
   
   return (
-    <Card>
+    <Card className={cn(hasViolation && 'border-destructive/50 bg-destructive/5')}>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -100,6 +102,37 @@ function TruckCompositionCard({ composition, index }: { composition: TruckCompos
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* City tags */}
+        {cities.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              Cidades ({cities.length})
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {cities.map((city) => (
+                <Badge 
+                  key={city} 
+                  variant="secondary" 
+                  className={cn(
+                    "text-xs capitalize",
+                    cities.length === 1 && "bg-success/10 text-success border-success/30",
+                    cities.length >= 3 && hasViolation && "bg-destructive/10 text-destructive border-destructive/30"
+                  )}
+                >
+                  {city}
+                </Badge>
+              ))}
+            </div>
+            {cities.length === 1 && (
+              <p className="text-xs text-success">✓ Cidade exclusiva</p>
+            )}
+            {cities.length >= 3 && hasViolation && (
+              <p className="text-xs text-destructive">⚠ Mistura fora do padrão</p>
+            )}
+          </div>
+        )}
+
         {/* Capacity bar */}
         <div className="space-y-1">
           <div className="flex justify-between text-sm">
@@ -108,10 +141,7 @@ function TruckCompositionCard({ composition, index }: { composition: TruckCompos
               {formatWeight(composition.totalWeight)} / {formatWeight(Number(composition.truck.capacity_kg))}
             </span>
           </div>
-          <Progress 
-            value={composition.occupancyPercent} 
-            className="h-2"
-          />
+          <Progress value={composition.occupancyPercent} className="h-2" />
         </div>
         
         {/* Quick stats */}
@@ -171,8 +201,17 @@ export function AutoCompositionView({
   isProcessing 
 }: AutoCompositionViewProps) {
   const summary = getRoutingSummary(result);
-  
   const activeCompositions = result.compositions.filter(c => c.orders.length > 0);
+  const hasViolations = result.validation && !result.validation.valid;
+  
+  // Build set of truck plates with violations for card highlighting
+  const violatedTrucks = new Set<string>();
+  if (hasViolations && result.validation.violations) {
+    for (const v of result.validation.violations) {
+      const match = v.match(/Caminhão\s+(\S+)/);
+      if (match) violatedTrucks.add(match[1]);
+    }
+  }
   
   return (
     <div className="space-y-6">
@@ -183,10 +222,10 @@ export function AutoCompositionView({
             <div>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-primary" />
-                Composição Automática Concluída
+                Composição Territorial Concluída
               </CardTitle>
               <CardDescription>
-                O sistema analisou todos os pedidos e definiu a melhor distribuição
+                Divisão cidade-por-cidade seguindo padrão operacional do analista
               </CardDescription>
             </div>
             <EfficiencyBadge efficiency={summary.efficiency} />
@@ -213,6 +252,31 @@ export function AutoCompositionView({
           </div>
         </CardContent>
       </Card>
+
+      {/* Validation Violations - BLOCKING */}
+      {hasViolations && (
+        <Card className="border-destructive/50 bg-destructive/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-destructive">
+              <ShieldAlert className="h-5 w-5" />
+              Rota incoerente com padrão operacional histórico
+            </CardTitle>
+            <CardDescription className="text-destructive/80">
+              A composição contém misturas de cidades que o analista nunca fez. Corrija antes de confirmar.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1.5">
+              {result.validation.violations.map((violation, idx) => (
+                <div key={idx} className="flex items-start gap-2 text-sm rounded border border-destructive/30 bg-background px-3 py-2">
+                  <AlertCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                  <span>{violation}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
       
       {/* Reasoning / History insights */}
       {result.reasoning && result.reasoning.length > 0 && (
@@ -220,10 +284,10 @@ export function AutoCompositionView({
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Brain className="h-4 w-4 text-primary" />
-              Decisões baseadas no histórico ({result.reasoning.length})
+              Raciocínio territorial ({result.reasoning.length})
             </CardTitle>
             <CardDescription>
-              O sistema aplicou padrões aprendidos das rotas anteriores do analista
+              Decisões baseadas no padrão operacional do analista
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -255,7 +319,7 @@ export function AutoCompositionView({
       <div>
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <Truck className="h-5 w-5" />
-          Distribuição por Caminhão ({activeCompositions.length})
+          Distribuição Territorial ({activeCompositions.length})
         </h3>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {activeCompositions.map((composition, index) => (
@@ -263,6 +327,7 @@ export function AutoCompositionView({
               key={composition.truck.id} 
               composition={composition} 
               index={index}
+              hasViolation={violatedTrucks.has(composition.truck.plate)}
             />
           ))}
         </div>
@@ -305,11 +370,16 @@ export function AutoCompositionView({
         <Button 
           size="lg" 
           onClick={onConfirm} 
-          disabled={isProcessing || activeCompositions.length === 0}
+          disabled={isProcessing || activeCompositions.length === 0 || hasViolations}
           className="min-w-[200px]"
         >
           {isProcessing ? (
             'Processando...'
+          ) : hasViolations ? (
+            <>
+              <ShieldAlert className="mr-2 h-5 w-5" />
+              Composição Bloqueada
+            </>
           ) : (
             <>
               <CheckCircle2 className="mr-2 h-5 w-5" />

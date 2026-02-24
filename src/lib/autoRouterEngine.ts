@@ -1,19 +1,21 @@
 /**
- * Motor de Roteamento Automático
- * Substitui o roteirista humano, fazendo a composição automática de caminhões
- * baseada em geografia e peso.
+ * Motor de Roteamento Automático - Lógica Territorial Rígida
+ * 
+ * REGRA ABSOLUTA: Roteirização é TERRITORIAL, não geométrica.
+ * Uma cidade por caminhão. Esgotar volume antes de passar para a próxima.
+ * Mistura de cidades SÓ é permitida quando o histórico do analista confirma.
  */
 
 import { Truck, ParsedOrder, RoutingStrategy } from '@/types';
-import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, areCitiesNeighbors, getNeighborCities, getCityDistanceFromCD, CITY_NEIGHBORS } from './geocoding';
+import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, areCitiesNeighbors, getCityDistanceFromCD } from './geocoding';
 import { ParsedItemDetail } from './itemDetailParser';
-import { RoutingHint } from './historyPatternEngine';
+import { RoutingHint, ExtractedPatterns, isValidCityCombination, getCityExclusionMap } from './historyPatternEngine';
 
 export interface AutoRouterConfig {
   strategy: RoutingStrategy;
-  safetyMarginPercent: number; // e.g., 10 for 10% safety margin
-  maxOccupancyPercent: number; // e.g., 95 for max 95% occupancy
-  balanceOrders: boolean; // Try to balance order count between trucks
+  safetyMarginPercent: number;
+  maxOccupancyPercent: number;
+  balanceOrders: boolean;
 }
 
 export interface TruckComposition {
@@ -22,6 +24,13 @@ export interface TruckComposition {
   totalWeight: number;
   occupancyPercent: number;
   estimatedDeliveries: number;
+  /** Cities assigned to this truck (for validation) */
+  cities: string[];
+}
+
+export interface CompositionValidation {
+  valid: boolean;
+  violations: string[];
 }
 
 export interface AutoRouterResult {
@@ -33,12 +42,22 @@ export interface AutoRouterResult {
   averageOccupancy: number;
   warnings: string[];
   reasoning: string[];
+  validation: CompositionValidation;
 }
 
 interface GeocodedOrder extends ParsedOrder {
   geocoded: GeocodedAddress;
   distanceFromCD: number;
-  angle: number; // Angle from CD (for sector clustering)
+  angle: number;
+}
+
+/** A territorial cluster: one logical truck load, ideally one city */
+interface TerritorialCluster {
+  primaryCity: string;
+  cities: Set<string>;
+  orders: GeocodedOrder[];
+  weight: number;
+  reasoning: string[];
 }
 
 const DEFAULT_CONFIG: AutoRouterConfig = {
@@ -57,7 +76,6 @@ export function mergeItemsIntoOrders(
 ): ParsedOrder[] {
   if (itemDetails.length === 0) return orders;
   
-  // Group items by pedido_id
   const itemsByPedido = new Map<string, ParsedItemDetail[]>();
   itemDetails.forEach(item => {
     const existing = itemsByPedido.get(item.pedido_id) || [];
@@ -65,7 +83,6 @@ export function mergeItemsIntoOrders(
     itemsByPedido.set(item.pedido_id, existing);
   });
   
-  // Merge into orders
   return orders.map(order => {
     const orderItems = order.pedido_id ? itemsByPedido.get(order.pedido_id) : null;
     
@@ -78,11 +95,7 @@ export function mergeItemsIntoOrders(
       
       const totalWeight = items.reduce((sum, item) => sum + item.weight_kg, 0);
       
-      return {
-        ...order,
-        items,
-        weight_kg: totalWeight, // Override with detailed weight
-      };
+      return { ...order, items, weight_kg: totalWeight };
     }
     
     return order;
@@ -91,7 +104,6 @@ export function mergeItemsIntoOrders(
 
 /**
  * Calculate which trucks to use based on total weight
- * Uses bin-packing algorithm for optimal truck selection
  */
 export function recommendTrucks(
   availableTrucks: Truck[],
@@ -102,7 +114,6 @@ export function recommendTrucks(
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const weightWithMargin = totalWeight * (1 + cfg.safetyMarginPercent / 100);
   
-  // Sort trucks by capacity descending
   const sortedTrucks = [...availableTrucks].sort(
     (a, b) => Number(b.capacity_kg) - Number(a.capacity_kg)
   );
@@ -111,19 +122,13 @@ export function recommendTrucks(
   let remainingWeight = weightWithMargin;
   let remainingOrders = totalOrders;
   
-  // First pass: select trucks based on weight
   for (const truck of sortedTrucks) {
     if (remainingWeight <= 0) break;
     
     const effectiveCapacity = Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
     
-    // Check if truck has max deliveries limit
     if (truck.max_deliveries && remainingOrders > 0) {
-      const ordersThisTruck = Math.min(
-        remainingOrders,
-        truck.max_deliveries
-      );
-      
+      const ordersThisTruck = Math.min(remainingOrders, truck.max_deliveries);
       if (ordersThisTruck > 0) {
         selected.push(truck);
         remainingWeight -= effectiveCapacity;
@@ -135,7 +140,6 @@ export function recommendTrucks(
     }
   }
   
-  // If we still have weight, add more trucks
   while (remainingWeight > 0 && selected.length < sortedTrucks.length) {
     for (const truck of sortedTrucks) {
       if (!selected.find(t => t.id === truck.id)) {
@@ -150,14 +154,71 @@ export function recommendTrucks(
 }
 
 /**
- * Main auto-routing function - composes trucks and assigns orders
- * This replaces the human router's decision-making process
+ * Validate a composition against territorial rules and history
+ */
+export function validateComposition(
+  compositions: TruckComposition[],
+  extractedPatterns?: ExtractedPatterns
+): CompositionValidation {
+  const violations: string[] = [];
+  
+  for (const comp of compositions) {
+    if (comp.orders.length === 0) continue;
+    
+    const cities = comp.cities;
+    if (cities.length <= 1) continue;
+    
+    // Check if this city mixture is historically valid
+    if (extractedPatterns) {
+      const check = isValidCityCombination(cities, extractedPatterns);
+      if (!check.valid) {
+        violations.push(
+          `Caminhão ${comp.truck.plate}: ${check.reason}`
+        );
+      }
+      
+      // Check exclusion map
+      const exclusions = getCityExclusionMap(extractedPatterns);
+      for (const cityA of cities) {
+        const excluded = exclusions.get(cityA);
+        if (!excluded) continue;
+        for (const cityB of cities) {
+          if (cityA !== cityB && excluded.has(cityB)) {
+            violations.push(
+              `Caminhão ${comp.truck.plate}: "${cityA}" e "${cityB}" NUNCA ficam juntas no histórico`
+            );
+          }
+        }
+      }
+    } else {
+      // No history available - flag any truck with 3+ cities as suspicious
+      if (cities.length >= 3) {
+        violations.push(
+          `Caminhão ${comp.truck.plate}: ${cities.length} cidades misturadas (${cities.join(', ')}). Sem histórico para validar.`
+        );
+      }
+    }
+  }
+  
+  return { valid: violations.length === 0, violations };
+}
+
+/**
+ * Main auto-routing function - TERRITORIAL LOGIC
+ * 
+ * Flow:
+ * 1. Group ALL orders by city
+ * 2. Order cities by volume (largest first)
+ * 3. Allocate trucks city-by-city, exhausting each city before moving on
+ * 4. Controlled overflow: only mix cities if history confirms the pattern
+ * 5. Validate result against historical patterns
  */
 export function autoComposeRoute(
   orders: ParsedOrder[],
   availableTrucks: Truck[],
   config: Partial<AutoRouterConfig> = {},
-  historyHints?: RoutingHint[]
+  historyHints?: RoutingHint[],
+  extractedPatterns?: ExtractedPatterns
 ): AutoRouterResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const warnings: string[] = [];
@@ -165,14 +226,10 @@ export function autoComposeRoute(
   
   if (orders.length === 0) {
     return {
-      compositions: [],
-      unassignedOrders: [],
-      totalWeight: 0,
-      totalOrders: 0,
-      trucksUsed: 0,
-      averageOccupancy: 0,
-      warnings: ['Nenhum pedido para roteirizar'],
-      reasoning: [],
+      compositions: [], unassignedOrders: [], totalWeight: 0,
+      totalOrders: 0, trucksUsed: 0, averageOccupancy: 0,
+      warnings: ['Nenhum pedido para roteirizar'], reasoning: [],
+      validation: { valid: true, violations: [] },
     };
   }
   
@@ -180,48 +237,47 @@ export function autoComposeRoute(
   const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
   const totalOrders = validOrders.length;
   
-  // Step 1: Determine which trucks to use
   const selectedTrucks = recommendTrucks(availableTrucks, totalWeight, totalOrders, cfg);
   
   if (selectedTrucks.length === 0) {
     return {
-      compositions: [],
-      unassignedOrders: validOrders,
-      totalWeight,
-      totalOrders,
-      trucksUsed: 0,
-      averageOccupancy: 0,
-      warnings: ['Nenhum caminhão disponível para a carga'],
-      reasoning: [],
+      compositions: [], unassignedOrders: validOrders, totalWeight,
+      totalOrders, trucksUsed: 0, averageOccupancy: 0,
+      warnings: ['Nenhum caminhão disponível para a carga'], reasoning: [],
+      validation: { valid: true, violations: [] },
     };
   }
   
-  // Step 2: Geocode orders and calculate geographic metrics
+  // Step 1: Geocode orders
   const cd = getDistributionCenterCoords();
   const geocodedOrders: GeocodedOrder[] = validOrders.map(order => {
     const geocoded = parseAddress(order.address);
     const distanceFromCD = calculateDistance(
-      cd.lat, cd.lng,
-      geocoded.estimatedLat, geocoded.estimatedLng
+      cd.lat, cd.lng, geocoded.estimatedLat, geocoded.estimatedLng
     );
     const angle = Math.atan2(
       geocoded.estimatedLat - cd.lat,
       geocoded.estimatedLng - cd.lng
     ) * (180 / Math.PI);
-    
-    return {
-      ...order,
-      geocoded,
-      distanceFromCD,
-      angle,
-    };
+    return { ...order, geocoded, distanceFromCD, angle };
   });
   
-  // Step 3: Cluster orders by CITY (regionalization) with history hints
-  const clusters = clusterOrdersByCity(geocodedOrders, selectedTrucks.length, cfg.strategy, historyHints, reasoning);
+  // Step 2: Build territorial clusters (CITY-FIRST logic)
+  const clusters = buildTerritorialClusters(
+    geocodedOrders, selectedTrucks, cfg, historyHints, extractedPatterns, reasoning
+  );
   
-  // Step 4: Assign clusters to trucks respecting capacity
-  const compositions = assignClustersToTrucks(clusters, selectedTrucks, cfg);
+  // Step 3: Map clusters directly to trucks (NO bin-packing)
+  const compositions = mapClustersToTrucks(clusters, selectedTrucks, cfg, reasoning);
+  
+  // Step 4: Optimize delivery sequence within each truck
+  compositions.forEach(comp => {
+    if (comp.orders.length > 1) {
+      optimizeDeliverySequence(
+        comp.orders as GeocodedOrder[], cd.lat, cd.lng, cfg.strategy
+      );
+    }
+  });
   
   // Collect unassigned orders
   const assignedOrderIds = new Set(
@@ -244,36 +300,48 @@ export function autoComposeRoute(
     reasoning.push(`${historyHints.length} padrões históricos foram considerados nesta composição`);
   }
   
+  // Step 5: Validate composition against territorial rules
+  const validation = validateComposition(compositions, extractedPatterns);
+  if (!validation.valid) {
+    warnings.push('⚠️ Composição contém misturas de cidades fora do padrão operacional');
+  }
+  
   return {
-    compositions,
-    unassignedOrders,
-    totalWeight,
-    totalOrders,
+    compositions, unassignedOrders, totalWeight, totalOrders,
     trucksUsed: compositions.filter(c => c.orders.length > 0).length,
     averageOccupancy: Math.round(averageOccupancy),
-    warnings,
-    reasoning,
+    warnings, reasoning, validation,
   };
 }
 
-/**
- * Cluster orders by city using layered territorial logic:
- * 1. Group by city
- * 2. Classify cities as grande/pequena
- * 3. Assign large cities to clusters
- * 3.5. Complement with small neighboring cities
- * 4. Handle orphans
- */
-function clusterOrdersByCity(
-  orders: GeocodedOrder[],
-  numClusters: number,
-  strategy: RoutingStrategy,
-  historyHints?: RoutingHint[],
-  reasoning?: string[]
-): GeocodedOrder[][] {
-  if (orders.length === 0 || numClusters <= 0) return [];
+// ================================================================
+// TERRITORIAL CLUSTERING - City-First, Capacity-Bounded
+// ================================================================
 
-  // CAMADA 1: Group orders by city
+/**
+ * Build territorial clusters following strict city-first logic:
+ * 1. Group all orders by city
+ * 2. Sort cities by volume (largest first), with history priority
+ * 3. Create exclusive clusters per city
+ * 4. If a city needs multiple trucks, split into sub-clusters
+ * 5. Controlled overflow only if history permits
+ */
+function buildTerritorialClusters(
+  orders: GeocodedOrder[],
+  trucks: Truck[],
+  config: AutoRouterConfig,
+  historyHints?: RoutingHint[],
+  extractedPatterns?: ExtractedPatterns,
+  reasoning?: string[]
+): TerritorialCluster[] {
+  const numTrucks = trucks.length;
+  // Use max truck capacity as reference for cluster sizing
+  const truckCapacities = trucks
+    .map(t => Number(t.capacity_kg) * (config.maxOccupancyPercent / 100))
+    .sort((a, b) => b - a);
+  const maxTruckCapacity = truckCapacities[0] || 5000;
+
+  // === STEP 1: Group ALL orders by city ===
   const cityOrderMap = new Map<string, GeocodedOrder[]>();
   for (const order of orders) {
     const city = normalizeCityName(order.geocoded.city || 'desconhecida');
@@ -282,46 +350,29 @@ function clusterOrdersByCity(
     cityOrderMap.set(city, existing);
   }
 
-  // CAMADA 2: Volume per city
-  const totalWeight = orders.reduce((s, o) => s + o.weight_kg, 0);
-  const avgClusterCapacity = totalWeight / numClusters;
-  const SMALL_THRESHOLD = 0.30;
-
-  interface CityInfo {
+  // === STEP 2: Build city info and sort ===
+  interface CityBlock {
     city: string;
     orders: GeocodedOrder[];
     weight: number;
-    classification: 'grande' | 'pequena';
     assigned: boolean;
   }
 
-  const cities: CityInfo[] = [];
+  const cityBlocks: CityBlock[] = [];
   for (const [city, cityOrders] of cityOrderMap) {
     const weight = cityOrders.reduce((s, o) => s + o.weight_kg, 0);
-    cities.push({
-      city,
-      orders: cityOrders,
-      weight,
-      classification: weight >= avgClusterCapacity * SMALL_THRESHOLD ? 'grande' : 'pequena',
-      assigned: false,
-    });
+    cityBlocks.push({ city, orders: cityOrders, weight, assigned: false });
   }
-  cities.sort((a, b) => b.weight - a.weight);
 
-  // HISTORY-AWARE: Build lookup maps from hints
+  // Parse history hints
   const dedicatedCities = new Set<string>();
-  const combinePairs = new Map<string, Set<string>>(); // city -> cities it should combine with
-  const splitCities = new Set<string>();
+  const combinePairs = new Map<string, Set<string>>();
 
-  if (historyHints && historyHints.length > 0) {
+  if (historyHints) {
     for (const hint of historyHints) {
-      if (hint.confidence < 60) continue; // safety threshold
-      
+      if (hint.confidence < 60) continue;
       if (hint.type === 'dedicate_truck') {
-        for (const c of hint.cities) {
-          const norm = normalizeCityName(c);
-          dedicatedCities.add(norm);
-        }
+        for (const c of hint.cities) dedicatedCities.add(normalizeCityName(c));
         reasoning?.push(hint.reasoning);
       } else if (hint.type === 'combine_cities' && hint.cities.length >= 2) {
         const normCities = hint.cities.map(c => normalizeCityName(c));
@@ -332,169 +383,295 @@ function clusterOrdersByCity(
           }
         }
         reasoning?.push(hint.reasoning);
-      } else if (hint.type === 'split_city') {
-        for (const c of hint.cities) splitCities.add(normalizeCityName(c));
-        reasoning?.push(hint.reasoning);
       }
     }
   }
 
-  // CAMADA 2.5 HISTORY: Reclassify based on history
-  // If history says a city should be dedicated, treat as 'grande' even if small
-  for (const ci of cities) {
-    if (dedicatedCities.has(ci.city) && ci.classification === 'pequena') {
-      ci.classification = 'grande';
-      reasoning?.push(`"${ci.city}" promovida a cidade grande (padrão histórico de caminhão dedicado)`);
-    }
-  }
-
-  // Re-sort: dedicated cities first, then by weight
-  cities.sort((a, b) => {
-    const aDedicated = dedicatedCities.has(a.city) ? 1 : 0;
-    const bDedicated = dedicatedCities.has(b.city) ? 1 : 0;
-    if (aDedicated !== bDedicated) return bDedicated - aDedicated;
+  // Sort: dedicated cities first, then by weight descending
+  cityBlocks.sort((a, b) => {
+    const aDed = dedicatedCities.has(a.city) ? 1 : 0;
+    const bDed = dedicatedCities.has(b.city) ? 1 : 0;
+    if (aDed !== bDed) return bDed - aDed;
     return b.weight - a.weight;
   });
 
-  // CAMADA 3: Assign large cities
-  const clusters: GeocodedOrder[][] = Array.from({ length: numClusters }, () => []);
-  const clusterWeights = new Array(numClusters).fill(0);
-  const clusterPrimaryCities: string[] = new Array(numClusters).fill('');
-  let clusterIdx = 0;
+  reasoning?.push(`Mapa territorial: ${cityBlocks.map(c => `${c.city}(${(c.weight/1000).toFixed(1)}t)`).join(', ')}`);
 
-  for (const ci of cities) {
-    if (ci.classification === 'pequena' || ci.assigned) continue;
-    
-    const trucksNeeded = Math.ceil(ci.weight / avgClusterCapacity);
-    
-    if (trucksNeeded > 1 && clusterIdx + trucksNeeded <= numClusters) {
-      // Split into blocks
-      if (splitCities.has(ci.city)) {
-        reasoning?.push(`"${ci.city}" dividida em ${trucksNeeded} caminhões (padrão histórico)`);
-      }
-      const sorted = [...ci.orders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
-      const blocks: GeocodedOrder[][] = Array.from({ length: trucksNeeded }, () => []);
-      const blockWeights = new Array(trucksNeeded).fill(0);
-      
-      for (const order of sorted) {
-        let minI = 0;
-        for (let i = 1; i < trucksNeeded; i++) {
-          if (blockWeights[i] < blockWeights[minI]) minI = i;
-        }
-        blocks[minI].push(order);
-        blockWeights[minI] += order.weight_kg;
-      }
-      
-      for (const block of blocks) {
-        if (clusterIdx >= numClusters) break;
-        clusters[clusterIdx].push(...block);
-        clusterWeights[clusterIdx] += block.reduce((s, o) => s + o.weight_kg, 0);
-        clusterPrimaryCities[clusterIdx] = ci.city;
-        clusterIdx++;
-      }
-    } else if (clusterIdx < numClusters) {
-      clusters[clusterIdx].push(...ci.orders);
-      clusterWeights[clusterIdx] += ci.weight;
-      clusterPrimaryCities[clusterIdx] = ci.city;
-      clusterIdx++;
-    }
-    ci.assigned = true;
-  }
+  // === STEP 3: Create EXCLUSIVE clusters, one city at a time ===
+  const clusters: TerritorialCluster[] = [];
 
-  // CAMADA 3.5: Complement with small neighboring cities
-  // History-aware: prioritize historically combined cities
-  for (let i = 0; i < Math.min(clusterIdx, numClusters); i++) {
-    const primaryCity = clusterPrimaryCities[i];
-    if (!primaryCity) continue;
+  for (const block of cityBlocks) {
+    if (block.assigned) continue;
 
-    // Get neighbors, but sort: historically combined first, then by distance
-    const historyCombineSet = combinePairs.get(primaryCity) || new Set();
-    const neighbors = getNeighborCities(primaryCity)
-      .sort((a, b) => {
-        const aHistoric = historyCombineSet.has(normalizeCityName(a)) ? 0 : 1;
-        const bHistoric = historyCombineSet.has(normalizeCityName(b)) ? 0 : 1;
-        if (aHistoric !== bHistoric) return aHistoric - bHistoric;
-        return getCityDistanceFromCD(a) - getCityDistanceFromCD(b);
+    // How many trucks does this city need?
+    const trucksNeeded = Math.ceil(block.weight / maxTruckCapacity);
+
+    if (trucksNeeded <= 1) {
+      // Single cluster for this city
+      clusters.push({
+        primaryCity: block.city,
+        cities: new Set([block.city]),
+        orders: [...block.orders],
+        weight: block.weight,
+        reasoning: [`Cidade exclusiva: ${block.city} (${(block.weight/1000).toFixed(1)}t)`],
       });
-
-    // Also check non-neighbor cities that history says should combine
-    const historicNonNeighbors = Array.from(historyCombineSet)
-      .filter(c => !neighbors.includes(c));
-
-    const candidateCities = [...neighbors, ...historicNonNeighbors];
-
-    for (const neighbor of candidateCities) {
-      const normNeighbor = normalizeCityName(neighbor);
-      const nci = cities.find(c => c.city === normNeighbor && !c.assigned && c.classification === 'pequena');
-      if (!nci) continue;
+    } else {
+      // Split city into N sub-clusters, balanced by weight
+      reasoning?.push(`"${block.city}" dividida em ${trucksNeeded} caminhões (${(block.weight/1000).toFixed(1)}t total)`);
       
-      if (historyCombineSet.has(normNeighbor)) {
-        reasoning?.push(`"${normNeighbor}" combinada com "${primaryCity}" (padrão histórico)`);
+      // Sort orders by distance from CD for geographic coherence within city
+      const sorted = [...block.orders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+      const subClusters: GeocodedOrder[][] = Array.from({ length: trucksNeeded }, () => []);
+      const subWeights = new Array(trucksNeeded).fill(0);
+
+      for (const order of sorted) {
+        // Find sub-cluster with least weight
+        let minIdx = 0;
+        for (let i = 1; i < trucksNeeded; i++) {
+          if (subWeights[i] < subWeights[minIdx]) minIdx = i;
+        }
+        subClusters[minIdx].push(order);
+        subWeights[minIdx] += order.weight_kg;
       }
-      
-      clusters[i].push(...nci.orders);
-      clusterWeights[i] += nci.weight;
-      nci.assigned = true;
+
+      for (let i = 0; i < trucksNeeded; i++) {
+        clusters.push({
+          primaryCity: block.city,
+          cities: new Set([block.city]),
+          orders: subClusters[i],
+          weight: subWeights[i],
+          reasoning: [`${block.city} - bloco ${i + 1}/${trucksNeeded} (${(subWeights[i]/1000).toFixed(1)}t)`],
+        });
+      }
     }
+
+    block.assigned = true;
   }
 
-  // CAMADA 4: Orphans - history-aware placement
-  const orphans = cities.filter(c => !c.assigned);
-  for (const orphan of orphans) {
-    // Check if history suggests a preferred cluster
-    let bestCluster = -1;
-    
-    if (combinePairs.has(orphan.city)) {
-      const preferred = combinePairs.get(orphan.city)!;
-      for (let i = 0; i < numClusters; i++) {
-        if (preferred.has(clusterPrimaryCities[i])) {
-          bestCluster = i;
-          reasoning?.push(`"${orphan.city}" colocada com "${clusterPrimaryCities[i]}" (padrão histórico)`);
+  // === STEP 4: CONTROLLED OVERFLOW ===
+  // Only for clusters with significant remaining capacity AND historical permission
+  const exclusionMap = extractedPatterns ? getCityExclusionMap(extractedPatterns) : new Map();
+  
+  // Find small unassigned cities that could complement existing clusters
+  // But ONLY if they're too small for their own truck AND history permits
+  const smallOrphans = cityBlocks.filter(b => !b.assigned);
+  // (All cities should be assigned at this point since Step 3 creates clusters for ALL)
+  // This handles any edge case
+
+  for (const orphan of smallOrphans) {
+    if (orphan.assigned) continue;
+
+    let bestCluster: TerritorialCluster | null = null;
+    let bestReason = '';
+
+    // Try to find a cluster where this city historically belongs
+    for (const cluster of clusters) {
+      const historySet = combinePairs.get(orphan.city);
+      if (historySet && historySet.has(cluster.primaryCity)) {
+        // Check exclusion
+        const excluded = exclusionMap.get(orphan.city);
+        if (excluded && Array.from(cluster.cities).some(c => excluded.has(c))) continue;
+
+        // Check weight
+        if (cluster.weight + orphan.weight <= maxTruckCapacity) {
+          bestCluster = cluster;
+          bestReason = `combinada com "${cluster.primaryCity}" (padrão histórico)`;
           break;
         }
       }
     }
-    
-    if (bestCluster === -1) {
-      // Fallback: find cluster with least weight
-      bestCluster = 0;
-      for (let i = 1; i < numClusters; i++) {
-        if (clusterWeights[i] < clusterWeights[bestCluster]) bestCluster = i;
-      }
+
+    if (bestCluster) {
+      bestCluster.orders.push(...orphan.orders);
+      bestCluster.weight += orphan.weight;
+      bestCluster.cities.add(orphan.city);
+      bestCluster.reasoning.push(`"${orphan.city}" ${bestReason}`);
+      reasoning?.push(`"${orphan.city}" ${bestReason}`);
+      orphan.assigned = true;
     }
-    
-    clusters[bestCluster].push(...orphan.orders);
-    clusterWeights[bestCluster] += orphan.weight;
-    orphan.assigned = true;
+    // If no historical match: the city already has its own cluster from Step 3
   }
 
-  // Sort within each cluster using nearest-neighbor with proximity bonuses
-  const cd = getDistributionCenterCoords();
-  clusters.forEach(cluster => {
-    optimizeClusterByProximity(cluster, cd.lat, cd.lng, strategy);
-  });
+  // Limit clusters to available trucks
+  if (clusters.length > numTrucks) {
+    reasoning?.push(`${clusters.length} clusters para ${numTrucks} caminhões - consolidando menores`);
+    // Merge smallest clusters into compatible ones
+    while (clusters.length > numTrucks) {
+      // Find smallest cluster
+      clusters.sort((a, b) => a.weight - b.weight);
+      const smallest = clusters[0];
+      
+      // Find best merge target (historically compatible, has capacity)
+      let merged = false;
+      for (let i = 1; i < clusters.length; i++) {
+        const target = clusters[i];
+        const combinedWeight = target.weight + smallest.weight;
+        if (combinedWeight > maxTruckCapacity) continue;
+
+        // Check if combination is historically valid
+        const allCities = [...target.cities, ...smallest.cities];
+        if (extractedPatterns) {
+          const check = isValidCityCombination(allCities, extractedPatterns);
+          if (!check.valid) continue;
+        }
+
+        // Check exclusion
+        let excluded = false;
+        for (const cityA of smallest.cities) {
+          const excl = exclusionMap.get(cityA);
+          if (excl && Array.from(target.cities).some(c => excl.has(c))) {
+            excluded = true;
+            break;
+          }
+        }
+        if (excluded) continue;
+
+        // Merge
+        target.orders.push(...smallest.orders);
+        target.weight += smallest.weight;
+        for (const c of smallest.cities) target.cities.add(c);
+        target.reasoning.push(`Consolidada com "${smallest.primaryCity}" (${(smallest.weight/1000).toFixed(1)}t)`);
+        reasoning?.push(`"${smallest.primaryCity}" consolidada com "${target.primaryCity}" por limite de caminhões`);
+        clusters.splice(0, 1);
+        merged = true;
+        break;
+      }
+
+      if (!merged) {
+        // Force merge into least-loaded cluster (last resort)
+        clusters.sort((a, b) => a.weight - b.weight);
+        const target = clusters[1] || clusters[0];
+        if (target !== smallest) {
+          target.orders.push(...smallest.orders);
+          target.weight += smallest.weight;
+          for (const c of smallest.cities) target.cities.add(c);
+          target.reasoning.push(`FORÇADO: "${smallest.primaryCity}" consolidada (falta de caminhões)`);
+          reasoning?.push(`⚠️ "${smallest.primaryCity}" forçada para "${target.primaryCity}" (falta de caminhões)`);
+          clusters.splice(clusters.indexOf(smallest), 1);
+        } else {
+          break; // Can't merge with itself
+        }
+      }
+    }
+  }
 
   return clusters;
 }
 
+// ================================================================
+// DIRECT CLUSTER-TO-TRUCK MAPPING (NO BIN-PACKING)
+// ================================================================
+
 /**
- * Optimize cluster sequence using nearest-neighbor with proximity bonuses.
- * Allows natural city-border crossings.
+ * Map territorial clusters directly to trucks.
+ * Heaviest cluster -> largest truck. NO order shuffling between clusters.
  */
-function optimizeClusterByProximity(
-  cluster: GeocodedOrder[], 
-  startLat: number, 
+function mapClustersToTrucks(
+  clusters: TerritorialCluster[],
+  trucks: Truck[],
+  config: AutoRouterConfig,
+  reasoning?: string[]
+): TruckComposition[] {
+  // Sort clusters by weight descending
+  const sortedClusters = [...clusters].sort((a, b) => b.weight - a.weight);
+  
+  // Sort trucks by capacity descending
+  const sortedTrucks = [...trucks].sort(
+    (a, b) => Number(b.capacity_kg) - Number(a.capacity_kg)
+  );
+
+  const compositions: TruckComposition[] = [];
+  const usedTruckIds = new Set<string>();
+
+  for (let i = 0; i < sortedClusters.length; i++) {
+    const cluster = sortedClusters[i];
+    
+    // Find best available truck (largest remaining that fits)
+    let selectedTruck: Truck | null = null;
+    for (const truck of sortedTrucks) {
+      if (usedTruckIds.has(truck.id)) continue;
+      selectedTruck = truck;
+      break;
+    }
+
+    if (!selectedTruck) {
+      // No more trucks available - orders become unassigned
+      reasoning?.push(`⚠️ Sem caminhão para cluster de "${cluster.primaryCity}" (${(cluster.weight/1000).toFixed(1)}t)`);
+      continue;
+    }
+
+    usedTruckIds.add(selectedTruck.id);
+
+    const capacity = Number(selectedTruck.capacity_kg);
+    const maxWeight = capacity * (config.maxOccupancyPercent / 100);
+
+    // Add orders that fit (respect capacity)
+    const fittingOrders: ParsedOrder[] = [];
+    let currentWeight = 0;
+    const overflowOrders: ParsedOrder[] = [];
+
+    for (const order of cluster.orders) {
+      if (currentWeight + order.weight_kg <= maxWeight) {
+        fittingOrders.push(order);
+        currentWeight += order.weight_kg;
+      } else {
+        overflowOrders.push(order);
+      }
+    }
+
+    if (overflowOrders.length > 0) {
+      reasoning?.push(`⚠️ ${overflowOrders.length} pedidos de "${cluster.primaryCity}" excederam capacidade do caminhão ${selectedTruck.plate}`);
+    }
+
+    compositions.push({
+      truck: selectedTruck,
+      orders: fittingOrders,
+      totalWeight: currentWeight,
+      occupancyPercent: Math.round((currentWeight / capacity) * 100),
+      estimatedDeliveries: fittingOrders.length,
+      cities: Array.from(cluster.cities),
+    });
+  }
+
+  // Add empty compositions for remaining trucks
+  for (const truck of sortedTrucks) {
+    if (!usedTruckIds.has(truck.id)) {
+      compositions.push({
+        truck,
+        orders: [],
+        totalWeight: 0,
+        occupancyPercent: 0,
+        estimatedDeliveries: 0,
+        cities: [],
+      });
+    }
+  }
+
+  return compositions;
+}
+
+// ================================================================
+// DELIVERY SEQUENCE OPTIMIZATION (within single truck territory)
+// ================================================================
+
+/**
+ * Optimize delivery sequence using nearest-neighbor with proximity bonuses.
+ * "Closest" is always RELATIVE to the truck's territory.
+ */
+function optimizeDeliverySequence(
+  orders: GeocodedOrder[],
+  startLat: number,
   startLng: number,
   strategy: RoutingStrategy
 ): void {
-  if (cluster.length <= 1) return;
+  if (orders.length <= 1) return;
 
   let curLat = startLat;
   let curLng = startLng;
 
-  // For start_far, begin from farthest point
+  // For finalizacao_proxima, start from farthest point
   if (strategy === 'finalizacao_proxima') {
-    const farthest = [...cluster].sort((a, b) => b.distanceFromCD - a.distanceFromCD)[0];
+    const farthest = [...orders].sort((a, b) => b.distanceFromCD - a.distanceFromCD)[0];
     if (farthest) {
       curLat = farthest.geocoded.estimatedLat;
       curLng = farthest.geocoded.estimatedLng;
@@ -502,7 +679,7 @@ function optimizeClusterByProximity(
   }
 
   const result: GeocodedOrder[] = [];
-  const remaining = [...cluster];
+  const remaining = [...orders];
   let curCity = '';
   let curNeighborhood = '';
   let curStreet = '';
@@ -522,6 +699,7 @@ function optimizeClusterByProximity(
       const cNeighborhood = (c.geocoded.neighborhood || '').toLowerCase();
       const cStreet = c.geocoded.street || '';
 
+      // Proximity bonuses (within truck's territory)
       if (curStreet && cStreet && curStreet === cStreet && curCity === cCity) {
         dist *= 0.15;
       } else if (curNeighborhood && cNeighborhood && curNeighborhood === cNeighborhood && curCity === cCity) {
@@ -547,104 +725,8 @@ function optimizeClusterByProximity(
     curStreet = chosen.geocoded.street || '';
   }
 
-  cluster.length = 0;
-  cluster.push(...result);
-}
-
-/**
- * Assign geographic clusters to trucks respecting capacity constraints
- */
-function assignClustersToTrucks(
-  clusters: GeocodedOrder[][],
-  trucks: Truck[],
-  config: AutoRouterConfig
-): TruckComposition[] {
-  const compositions: TruckComposition[] = trucks.map(truck => ({
-    truck,
-    orders: [],
-    totalWeight: 0,
-    occupancyPercent: 0,
-    estimatedDeliveries: 0,
-  }));
-  
-  // Sort clusters by total weight descending for better bin-packing
-  const clustersWithWeight = clusters.map((cluster, index) => ({
-    cluster,
-    index,
-    totalWeight: cluster.reduce((sum, o) => sum + o.weight_kg, 0),
-  })).sort((a, b) => b.totalWeight - a.totalWeight);
-  
-  // Assign each cluster to the truck with most remaining capacity
-  for (const { cluster } of clustersWithWeight) {
-    const remainingOrders = [...cluster];
-    
-    while (remainingOrders.length > 0) {
-      // Find truck with most remaining capacity
-      let bestComposition: TruckComposition | null = null;
-      let bestRemainingCapacity = -1;
-      
-      for (const comp of compositions) {
-        const maxCapacity = Number(comp.truck.capacity_kg) * (config.maxOccupancyPercent / 100);
-        const remainingCapacity = maxCapacity - comp.totalWeight;
-        
-        const canFitMoreOrders = !comp.truck.max_deliveries || 
-          comp.orders.length < comp.truck.max_deliveries;
-        
-        if (canFitMoreOrders && remainingCapacity > bestRemainingCapacity) {
-          bestComposition = comp;
-          bestRemainingCapacity = remainingCapacity;
-        }
-      }
-      
-      if (!bestComposition || bestRemainingCapacity <= 0) {
-        // No truck can fit more orders
-        break;
-      }
-      
-      // Add orders that fit
-      const ordersToAdd: GeocodedOrder[] = [];
-      const stillRemaining: GeocodedOrder[] = [];
-      
-      for (const order of remainingOrders) {
-        const maxCapacity = Number(bestComposition.truck.capacity_kg) * (config.maxOccupancyPercent / 100);
-        const canFitWeight = bestComposition.totalWeight + order.weight_kg <= maxCapacity;
-        const canFitOrders = !bestComposition.truck.max_deliveries || 
-          (bestComposition.orders.length + ordersToAdd.length) < bestComposition.truck.max_deliveries;
-        
-        if (canFitWeight && canFitOrders) {
-          ordersToAdd.push(order);
-          bestComposition.totalWeight += order.weight_kg;
-        } else {
-          stillRemaining.push(order);
-        }
-      }
-      
-      // Add orders to composition
-      for (const order of ordersToAdd) {
-        bestComposition.orders.push(order);
-      }
-      
-      remainingOrders.length = 0;
-      remainingOrders.push(...stillRemaining);
-      
-      // If no orders were added, force add one to prevent infinite loop
-      if (ordersToAdd.length === 0 && remainingOrders.length > 0) {
-        const forced = remainingOrders.shift()!;
-        bestComposition.orders.push(forced);
-        bestComposition.totalWeight += forced.weight_kg;
-      }
-    }
-  }
-  
-  // Calculate final metrics
-  for (const comp of compositions) {
-    comp.occupancyPercent = Math.round(
-      (comp.totalWeight / Number(comp.truck.capacity_kg)) * 100
-    );
-    comp.estimatedDeliveries = comp.orders.length;
-  }
-  
-  return compositions;
+  orders.length = 0;
+  orders.push(...result);
 }
 
 /**
