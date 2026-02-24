@@ -1,51 +1,45 @@
 
 
-# Aceitar CSV no Detalhe das Vendas
+# Fix CSV Encoding for Correct Venda ID Matching
 
-## Problema
+## Problem
 
-O lado direito ("Detalhe das Vendas") so aceita arquivos `.xlsx`, `.xls` e `.pdf`. O usuario precisa carregar um CSV com formato hierarquico ADV (separado por ponto-e-virgula), que contem a mesma estrutura: `Cliente:`, `Venda N:`, `Codigo/Descricao/Qtde./Unitario/Total`.
+When the CSV "Detalhe das Vendas" is read with `file.text()`, the character `º` in `Venda Nº:` and `NFe Nº:` becomes `\ufffd` (replacement character) because the file is encoded in Windows-1252, not UTF-8. This causes:
 
-## Solucao
+1. `isADVExcelFormat` may fail to detect the ADV format (regex `venda\s*n[º°]?\s*:\s*` doesn't match `Venda N\ufffd:`)
+2. `parseADVDetailExcel` can't extract the Venda ID from the broken text
+3. Without correct Venda IDs, the merge between "Vendas do Dia" (column B) and "Detalhe das Vendas" fails
 
-Adicionar suporte a CSV no fluxo de upload. Como a biblioteca XLSX ja sabe ler CSV, basta:
+## Solution
 
-1. Expandir a deteccao de tipo de arquivo para incluir `.csv`
-2. Tratar CSV como planilha (ler com XLSX e reutilizar os parsers existentes)
-3. Atualizar o `accept` dos inputs de upload
+One change in one file:
 
-### Arquivo 1: `src/lib/pdfParser.ts`
+### `src/components/route/DualFileUpload.tsx`
 
-Alterar `isExcelFile` para tambem aceitar `.csv`:
+In the CSV reading block (lines 140-146), replace `file.text()` with the existing `decodeFileContent()` from `@/lib/encoding.ts`, which already handles Windows-1252 and ISO-8859-1 fallback:
 
-```typescript
-export function isExcelFile(file: File): boolean {
-  return /\.(xlsx?|csv)$/i.test(file.name) || ...
-}
+```text
+Before:  const text = await file.text();
+After:   const text = await decodeFileContent(file);
 ```
 
-### Arquivo 2: `src/components/route/DualFileUpload.tsx`
+This ensures `Venda Nº:` is correctly decoded, the regex matches, `278351` is extracted as the `pedido_id`, and the merge with column B of "Vendas do Dia" works via `normalizeVendaId`.
 
-Duas mudancas:
+## Why This Works
 
-1. Alterar os dois `accept` de `".xlsx,.xls,.pdf"` para `".xlsx,.xls,.pdf,.csv"`
-2. No `processFile`, quando o arquivo for CSV, ler com `XLSX.read(text, { type: 'string' })` para que o separador `;` seja interpretado corretamente -- ou ler como ArrayBuffer (ja funciona com XLSX para CSV)
+The existing `decodeFileContent` in `encoding.ts` already:
+- Tries UTF-8 first
+- Detects `\ufffd` as encoding issue
+- Falls back to ISO-8859-1 then Windows-1252
+- Returns correctly decoded text with proper `º` character
 
-Na verdade, `XLSX.read` com `type: 'array'` ja le CSV corretamente quando o arquivo tem extensao `.csv`. A unica mudanca necessaria e garantir que o CSV entre no bloco `isExcelFile`, que ja faz `XLSX.read` e testa `isADVExcelFormat` / `isItinerarioExcelFormat`.
+Once the text is correct, the existing flow works:
+1. CSV split by `;` produces cells like `["Venda Nº:", "", "", "", "", "278351", "NFe Nº:", ...]`
+2. `parseADVDetailExcel` joins with space: `"Venda Nº:     278351 NFe Nº:  52112"`
+3. Regex `venda\s*n[º°]?\s*:\s*(\d+)` captures `278351`
+4. `mergeItinerarioWithADV` matches this with column B via `normalizeVendaId`
 
-### Arquivo 3: `src/lib/advParser.ts`
-
-Ajustar `isADVExcelFormat` para lidar com CSV semicolon: quando o XLSX le um CSV separado por `;`, cada celula pode conter o conteudo completo da linha em vez de estar separada. Adicionar um fallback que, se as primeiras linhas tiverem poucas colunas mas o texto contiver `Cliente :` e `Venda N`, ainda detecte como ADV.
-
-Ajustar `parseADVDetailExcel` para funcionar com linhas CSV onde os separadores `;` ficam em celulas separadas (ou como texto concatenado dependendo de como XLSX interpreta o `;`).
-
-Como o CSV usa `;` como separador e XLSX pode nao detectar automaticamente, adicionar tratamento especial: se o arquivo for `.csv`, ler o conteudo como texto, fazer split manual por `;`, e converter para o array de arrays que `isADVExcelFormat` e `parseADVDetailExcel` esperam.
-
-## Resumo de Mudancas
-
-| Arquivo | Acao |
-|---------|------|
-| `src/lib/pdfParser.ts` | Adicionar `.csv` em `isExcelFile` |
-| `src/components/route/DualFileUpload.tsx` | Aceitar `.csv` no input, adicionar bloco de parsing CSV com split por `;` antes do fluxo Excel |
-| `src/lib/advParser.ts` | Nenhuma mudanca necessaria -- os parsers ja funcionam com array de arrays |
+| Arquivo | Mudanca |
+|---------|---------|
+| `src/components/route/DualFileUpload.tsx` | Import `decodeFileContent`, usar no lugar de `file.text()` no bloco CSV |
 
