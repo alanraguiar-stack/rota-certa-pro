@@ -1,16 +1,24 @@
 /**
- * Motor de Roteamento Automático - Lógica CIDADE-PRIMEIRO
+ * Motor de Roteamento Automático — Regras Operacionais Fixas
  * 
- * REGRA: Cidade como unidade primária. Volume como critério.
- * Encaixe inteligente só com vizinhas. Sem force merge.
- * Barueri (CD) é distribuída entre todos os caminhões.
- * Sequenciamento: cidade > CEP > bairro > rua (blocos contínuos).
+ * LÓGICA: Caminhões âncora por território (placa fixa → cidade fixa).
+ * Sem inferência. Sem otimização automática de agrupamento.
+ * Executa EXATAMENTE as regras definidas em anchorRules.ts.
+ * 
+ * Fluxo:
+ * 1. Lê pedidos, agrupa por cidade
+ * 2. Identifica caminhões âncora pela placa
+ * 3. Aloca cidade âncora → caminhão âncora
+ * 4. Encaixa cidades permitidas se houver sobra
+ * 5. Excedentes → caminhão de apoio (EEF)
+ * 6. Sequenciamento: cidade > CEP > bairro > rua (blocos contínuos)
  */
 
 import { Truck, ParsedOrder, RoutingStrategy } from '@/types';
-import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, areCitiesNeighbors } from './geocoding';
+import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName } from './geocoding';
 import { ParsedItemDetail } from './itemDetailParser';
-import { RoutingHint, ExtractedPatterns, isValidCityCombination } from './historyPatternEngine';
+import { RoutingHint, ExtractedPatterns } from './historyPatternEngine';
+import { findAnchorRule, AnchorRule, normalizeNeighborhood } from './anchorRules';
 
 export interface AutoRouterConfig {
   strategy: RoutingStrategy;
@@ -28,6 +36,8 @@ export interface TruckComposition {
   cities: string[];
   primaryCity?: string;
   complementCities?: string[];
+  anchorRule?: AnchorRule;
+  overflowOrders?: ParsedOrder[];
 }
 
 export interface CompositionValidation {
@@ -52,17 +62,6 @@ interface GeocodedOrder extends ParsedOrder {
   distanceFromCD: number;
   angle: number;
 }
-
-interface CityCluster {
-  primaryCity: string;
-  complementCities: string[];
-  cities: Set<string>;
-  orders: GeocodedOrder[];
-  weight: number;
-  reasoning: string[];
-}
-
-const HUB_CITY = 'barueri';
 
 const DEFAULT_CONFIG: AutoRouterConfig = {
   strategy: 'padrao',
@@ -114,120 +113,16 @@ export function recommendTrucks(
   totalOrders: number,
   config: Partial<AutoRouterConfig> = {}
 ): Truck[] {
-  const cfg = { ...DEFAULT_CONFIG, ...config };
-  const weightWithMargin = totalWeight * (1 + cfg.safetyMarginPercent / 100);
-  
-  const sortedTrucks = [...availableTrucks].sort(
-    (a, b) => Number(b.capacity_kg) - Number(a.capacity_kg)
-  );
-  
-  const selected: Truck[] = [];
-  let remainingWeight = weightWithMargin;
-  let remainingOrders = totalOrders;
-  
-  for (const truck of sortedTrucks) {
-    if (remainingWeight <= 0) break;
-    
-    const effectiveCapacity = Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
-    
-    if (truck.max_deliveries && remainingOrders > 0) {
-      const ordersThisTruck = Math.min(remainingOrders, truck.max_deliveries);
-      if (ordersThisTruck > 0) {
-        selected.push(truck);
-        remainingWeight -= effectiveCapacity;
-        remainingOrders -= ordersThisTruck;
-      }
-    } else {
-      selected.push(truck);
-      remainingWeight -= effectiveCapacity;
-    }
-  }
-  
-  while (remainingWeight > 0 && selected.length < sortedTrucks.length) {
-    for (const truck of sortedTrucks) {
-      if (!selected.find(t => t.id === truck.id)) {
-        selected.push(truck);
-        remainingWeight -= Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
-        break;
-      }
-    }
-  }
-  
-  return selected;
+  // For anchor-based routing, always use ALL active trucks
+  return [...availableTrucks];
 }
 
-/**
- * Validate composition: check for city alternation and invalid mixtures
- */
-export function validateComposition(
-  compositions: TruckComposition[],
-  extractedPatterns?: ExtractedPatterns
-): CompositionValidation {
-  const violations: string[] = [];
-  
-  for (const comp of compositions) {
-    if (comp.orders.length === 0) continue;
-    
-    const cities = comp.cities.filter(c => c !== HUB_CITY);
-    
-    // Check city alternation in sequence
-    if (comp.orders.length > 2) {
-      const citySequence = comp.orders.map(o => {
-        const parsed = parseAddress(o.address);
-        return normalizeCityName(parsed.city || 'desconhecida');
-      }).filter(c => c !== HUB_CITY && c !== 'desconhecida');
-
-      let hasAlternation = false;
-      const visitedCities = new Set<string>();
-      let lastCity = '';
-      for (const city of citySequence) {
-        if (city !== lastCity) {
-          if (visitedCities.has(city)) {
-            hasAlternation = true;
-            break;
-          }
-          if (lastCity) visitedCities.add(lastCity);
-          lastCity = city;
-        }
-      }
-      if (hasAlternation) {
-        violations.push(`Caminhão ${comp.truck.plate}: Alternância de cidades na sequência de entregas`);
-      }
-    }
-    
-    if (cities.length <= 1) continue;
-    
-    // Check non-neighbor cities without history
-    if (cities.length > 2) {
-      let nonNeighborCount = 0;
-      for (let i = 0; i < cities.length; i++) {
-        for (let j = i + 1; j < cities.length; j++) {
-          if (!areCitiesNeighbors(cities[i], cities[j])) {
-            nonNeighborCount++;
-          }
-        }
-      }
-      if (nonNeighborCount > 1 && !extractedPatterns) {
-        violations.push(
-          `Caminhão ${comp.truck.plate}: ${cities.length} cidades não-vizinhas misturadas (${cities.join(', ')})`
-        );
-      }
-    }
-    
-    // Historical validation
-    if (extractedPatterns) {
-      const check = isValidCityCombination(cities, extractedPatterns);
-      if (!check.valid) {
-        violations.push(`Caminhão ${comp.truck.plate}: ${check.reason}`);
-      }
-    }
-  }
-  
-  return { valid: violations.length === 0, violations };
-}
+// ================================================================
+// MAIN ENTRY POINT
+// ================================================================
 
 /**
- * Main auto-routing function - CITY-FIRST LOGIC
+ * Main auto-routing function — ANCHOR-BASED RULES
  */
 export function autoComposeRoute(
   orders: ParsedOrder[],
@@ -253,18 +148,16 @@ export function autoComposeRoute(
   const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
   const totalOrders = validOrders.length;
   
-  const selectedTrucks = recommendTrucks(availableTrucks, totalWeight, totalOrders, cfg);
-  
-  if (selectedTrucks.length === 0) {
+  if (availableTrucks.length === 0) {
     return {
       compositions: [], unassignedOrders: validOrders, totalWeight,
       totalOrders, trucksUsed: 0, averageOccupancy: 0,
-      warnings: ['Nenhum caminhão disponível para a carga'], reasoning: [],
+      warnings: ['Nenhum caminhão disponível'], reasoning: [],
       validation: { valid: true, violations: [] },
     };
   }
   
-  // Step 1: Geocode orders
+  // Step 1: Geocode all orders
   const cd = getDistributionCenterCoords();
   const geocodedOrders: GeocodedOrder[] = validOrders.map(order => {
     const geocoded = parseAddress(order.address);
@@ -277,49 +170,285 @@ export function autoComposeRoute(
     ) * (180 / Math.PI);
     return { ...order, geocoded, distanceFromCD, angle };
   });
+
+  // Step 2: Group orders by city
+  const cityOrderMap = new Map<string, GeocodedOrder[]>();
+  for (const order of geocodedOrders) {
+    const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+    const existing = cityOrderMap.get(city) || [];
+    existing.push(order);
+    cityOrderMap.set(city, existing);
+  }
+
+  // Log city summary
+  for (const [city, cityOrders] of cityOrderMap) {
+    const weight = cityOrders.reduce((s, o) => s + o.weight_kg, 0);
+    reasoning.push(`${city}: ${cityOrders.length} entregas (${(weight / 1000).toFixed(1)}t)`);
+  }
+
+  // Step 3: Identify anchor trucks and non-anchor trucks
+  const anchorTrucks: { truck: Truck; rule: AnchorRule }[] = [];
+  const nonAnchorTrucks: Truck[] = [];
+
+  for (const truck of availableTrucks) {
+    const rule = findAnchorRule(truck.plate);
+    if (rule) {
+      anchorTrucks.push({ truck, rule });
+      reasoning.push(`${truck.plate} → ${rule.label}`);
+    } else {
+      nonAnchorTrucks.push(truck);
+    }
+  }
+
+  // Step 4: Allocate orders to anchor trucks
+  const compositions: TruckComposition[] = [];
+  const assignedOrderKeys = new Set<string>();
+  const overflowOrders: GeocodedOrder[] = [];
+
+  const orderKey = (o: ParsedOrder) => o.pedido_id || `${o.client_name}::${o.address}`;
+
+  // Find the support truck
+  const supportEntry = anchorTrucks.find(a => a.rule.isSupport);
+
+  for (const { truck, rule } of anchorTrucks) {
+    if (rule.isSupport) continue; // Handle support truck last
+
+    const capacity = Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+    const maxDel = rule.maxDeliveries;
+    const assignedOrders: GeocodedOrder[] = [];
+    let currentWeight = 0;
+
+    // 4a: Anchor city orders (MANDATORY)
+    const anchorOrders = cityOrderMap.get(rule.anchorCity) || [];
+    const sortedAnchor = [...anchorOrders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+
+    for (const order of sortedAnchor) {
+      const key = orderKey(order);
+      if (assignedOrderKeys.has(key)) continue;
+
+      if (currentWeight + order.weight_kg <= capacity && assignedOrders.length < maxDel) {
+        assignedOrders.push(order);
+        assignedOrderKeys.add(key);
+        currentWeight += order.weight_kg;
+      } else {
+        // Overflow → support truck
+        overflowOrders.push(order);
+        assignedOrderKeys.add(key); // Mark so it doesn't get double-counted
+        reasoning.push(`Excedente de ${rule.anchorCity}: ${order.client_name} → Caminhão de apoio`);
+      }
+    }
+
+    // 4b: Neighborhood exceptions (bairros de outras cidades)
+    for (const exception of rule.neighborhoodExceptions) {
+      let exceptionCount = 0;
+      // Search ALL orders for matching neighborhood
+      for (const order of geocodedOrders) {
+        if (assignedOrderKeys.has(orderKey(order))) continue;
+        if (exceptionCount >= exception.maxDeliveries) break;
+        if (assignedOrders.length >= maxDel) break;
+        if (currentWeight + order.weight_kg > capacity) continue;
+
+        const nh = normalizeNeighborhood(order.geocoded.neighborhood || '');
+        if (nh === normalizeNeighborhood(exception.neighborhood)) {
+          assignedOrders.push(order);
+          assignedOrderKeys.add(orderKey(order));
+          currentWeight += order.weight_kg;
+          exceptionCount++;
+          reasoning.push(`Exceção bairro: ${order.client_name} (${exception.neighborhood}) → ${truck.plate}`);
+        }
+      }
+    }
+
+    // 4c: Allowed fill cities (if capacity remains)
+    for (const fillCity of rule.allowedFillCities) {
+      if (assignedOrders.length >= maxDel) break;
+
+      const fillOrders = cityOrderMap.get(fillCity) || [];
+      const sortedFill = [...fillOrders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+
+      for (const order of sortedFill) {
+        const key = orderKey(order);
+        if (assignedOrderKeys.has(key)) continue;
+        if (assignedOrders.length >= maxDel) break;
+        if (currentWeight + order.weight_kg > capacity) continue;
+
+        assignedOrders.push(order);
+        assignedOrderKeys.add(key);
+        currentWeight += order.weight_kg;
+      }
+    }
+
+    // Build cities list
+    const citiesInTruck = new Set<string>();
+    const complementCities: string[] = [];
+    for (const order of assignedOrders) {
+      const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+      citiesInTruck.add(city);
+      if (city !== rule.anchorCity && !complementCities.includes(city)) {
+        complementCities.push(city);
+      }
+    }
+
+    compositions.push({
+      truck,
+      orders: assignedOrders,
+      totalWeight: currentWeight,
+      occupancyPercent: Math.round((currentWeight / Number(truck.capacity_kg)) * 100),
+      estimatedDeliveries: assignedOrders.length,
+      cities: Array.from(citiesInTruck),
+      primaryCity: rule.anchorCity,
+      complementCities: complementCities.length > 0 ? complementCities : undefined,
+      anchorRule: rule,
+    });
+
+    reasoning.push(
+      `${truck.plate} (${rule.label}): ${assignedOrders.length} entregas, ${(currentWeight / 1000).toFixed(1)}t`
+    );
+  }
+
+  // Step 5: Support truck (EEF) — gets its own cities + all overflow
+  if (supportEntry) {
+    const { truck, rule } = supportEntry;
+    const capacity = Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+    const maxDel = rule.maxDeliveries;
+    const assignedOrders: GeocodedOrder[] = [];
+    let currentWeight = 0;
+
+    // 5a: Support's own cities
+    for (const city of rule.allowedFillCities) {
+      const cityOrders = cityOrderMap.get(city) || [];
+      for (const order of cityOrders) {
+        const key = orderKey(order);
+        if (assignedOrderKeys.has(key)) continue;
+        if (assignedOrders.length >= maxDel) break;
+        if (currentWeight + order.weight_kg > capacity) continue;
+
+        assignedOrders.push(order);
+        assignedOrderKeys.add(key);
+        currentWeight += order.weight_kg;
+      }
+    }
+
+    // 5b: Overflow from anchor trucks
+    for (const order of overflowOrders) {
+      const key = orderKey(order);
+      // overflow orders were already marked in assignedOrderKeys, but we need to re-check
+      if (assignedOrders.length >= maxDel) break;
+      if (currentWeight + order.weight_kg > capacity) continue;
+
+      assignedOrders.push(order);
+      currentWeight += order.weight_kg;
+    }
+
+    const citiesInTruck = new Set<string>();
+    for (const order of assignedOrders) {
+      const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+      citiesInTruck.add(city);
+    }
+
+    compositions.push({
+      truck,
+      orders: assignedOrders,
+      totalWeight: currentWeight,
+      occupancyPercent: Math.round((currentWeight / Number(truck.capacity_kg)) * 100),
+      estimatedDeliveries: assignedOrders.length,
+      cities: Array.from(citiesInTruck),
+      primaryCity: 'apoio',
+      anchorRule: rule,
+    });
+
+    reasoning.push(
+      `${truck.plate} (Apoio): ${assignedOrders.length} entregas, ${(currentWeight / 1000).toFixed(1)}t`
+    );
+  }
+
+  // Step 5c: Non-anchor trucks — receive remaining unassigned orders
+  const remainingOrders = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
   
-  // Step 2: Build city-first clusters
-  const clusters = buildCityFirstClusters(
-    geocodedOrders, selectedTrucks, cfg, extractedPatterns, reasoning
-  );
-  
-  // Step 3: Map clusters to trucks
-  const compositions = mapClustersToTrucks(clusters, selectedTrucks, cfg, reasoning);
-  
-  // Step 4: Optimize delivery sequence (city > CEP > bairro > rua)
-  compositions.forEach(comp => {
+  for (const truck of nonAnchorTrucks) {
+    if (remainingOrders.length === 0) {
+      // Empty composition
+      compositions.push({
+        truck, orders: [], totalWeight: 0, occupancyPercent: 0,
+        estimatedDeliveries: 0, cities: [],
+      });
+      continue;
+    }
+
+    const capacity = Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+    const assignedOrders: GeocodedOrder[] = [];
+    let currentWeight = 0;
+
+    // Take orders from remaining, grouped by city
+    const remainingByCity = new Map<string, GeocodedOrder[]>();
+    for (const o of remainingOrders) {
+      const city = normalizeCityName(o.geocoded.city || 'desconhecida');
+      const existing = remainingByCity.get(city) || [];
+      existing.push(o);
+      remainingByCity.set(city, existing);
+    }
+
+    for (const [, cityOrders] of remainingByCity) {
+      for (const order of cityOrders) {
+        if (assignedOrderKeys.has(orderKey(order))) continue;
+        if (currentWeight + order.weight_kg > capacity) continue;
+
+        assignedOrders.push(order);
+        assignedOrderKeys.add(orderKey(order));
+        currentWeight += order.weight_kg;
+      }
+    }
+
+    const citiesInTruck = new Set<string>();
+    for (const order of assignedOrders) {
+      const city = normalizeCityName(order.geocoded.city || 'desconhecida');
+      citiesInTruck.add(city);
+    }
+
+    compositions.push({
+      truck,
+      orders: assignedOrders,
+      totalWeight: currentWeight,
+      occupancyPercent: Math.round((currentWeight / Number(truck.capacity_kg)) * 100),
+      estimatedDeliveries: assignedOrders.length,
+      cities: Array.from(citiesInTruck),
+    });
+
+    if (assignedOrders.length > 0) {
+      reasoning.push(`${truck.plate} (extra): ${assignedOrders.length} entregas`);
+    }
+  }
+
+  // Step 6: Sequence optimization (city > CEP > bairro > rua)
+  for (const comp of compositions) {
     if (comp.orders.length > 1) {
       optimizeDeliverySequence(
-        comp.orders as GeocodedOrder[], cd.lat, cd.lng, cfg.strategy
+        comp.orders as GeocodedOrder[],
+        cd.lat, cd.lng, cfg.strategy,
+        comp.anchorRule
       );
     }
-  });
-  
-  // Collect unassigned orders
-  const assignedOrderIds = new Set(
-    compositions.flatMap(c => c.orders.map(o => o.pedido_id || `${o.client_name}::${o.address}`))
-  );
-  const unassignedOrders = validOrders.filter(
-    o => !assignedOrderIds.has(o.pedido_id || `${o.client_name}::${o.address}`)
-  );
-  
-  if (unassignedOrders.length > 0) {
-    warnings.push(`${unassignedOrders.length} pedidos não puderam ser atribuídos — frota insuficiente para manter coerência territorial`);
   }
-  
+
+  // Collect truly unassigned
+  const allAssigned = new Set(
+    compositions.flatMap(c => c.orders.map(o => orderKey(o)))
+  );
+  const unassignedOrders = validOrders.filter(o => !allAssigned.has(orderKey(o)));
+
+  if (unassignedOrders.length > 0) {
+    warnings.push(`${unassignedOrders.length} pedidos não puderam ser atribuídos`);
+  }
+
   const totalCapacityUsed = compositions.reduce((sum, c) => sum + c.totalWeight, 0);
   const totalCapacity = compositions.reduce((sum, c) => sum + Number(c.truck.capacity_kg), 0);
   const averageOccupancy = totalCapacity > 0 ? (totalCapacityUsed / totalCapacity) * 100 : 0;
-  
-  if (historyHints && historyHints.length > 0) {
-    reasoning.push(`${historyHints.length} padrões históricos foram considerados nesta composição`);
-  }
-  
-  const validation = validateComposition(compositions, extractedPatterns);
+
+  const validation = validateComposition(compositions);
   if (!validation.valid) {
-    warnings.push('⚠️ Composição contém violações de coerência territorial');
+    warnings.push('⚠️ Composição contém violações de regras operacionais');
   }
-  
+
   return {
     compositions, unassignedOrders, totalWeight, totalOrders,
     trucksUsed: compositions.filter(c => c.orders.length > 0).length,
@@ -329,352 +458,102 @@ export function autoComposeRoute(
 }
 
 // ================================================================
-// CITY-FIRST CLUSTERING
+// VALIDATION — Regras operacionais fixas
 // ================================================================
 
-/**
- * Build clusters with CITY as primary unit.
- * 
- * 1. Group orders by city, normalize names
- * 2. Order cities by volume (count desc, weight desc)
- * 3. Allocate exclusive trucks per city (largest first)
- * 4. Intelligent fitting: small cities -> trucks with spare capacity
- *    ONLY if neighbor + historical co-occurrence
- * 5. NO force merge. Excess clusters -> unassigned with warning.
- */
-function buildCityFirstClusters(
-  orders: GeocodedOrder[],
-  trucks: Truck[],
-  config: AutoRouterConfig,
-  extractedPatterns?: ExtractedPatterns,
-  reasoning?: string[]
-): CityCluster[] {
-  const numTrucks = trucks.length;
-  const truckCapacities = trucks
-    .map(t => Number(t.capacity_kg) * (config.maxOccupancyPercent / 100))
-    .sort((a, b) => b - a);
-  const maxTruckCapacity = truckCapacities[0] || 5000;
+export function validateComposition(
+  compositions: TruckComposition[],
+  extractedPatterns?: ExtractedPatterns
+): CompositionValidation {
+  const violations: string[] = [];
 
-  // === ETAPA 1: Agrupar pedidos por cidade ===
-  const cityOrderMap = new Map<string, GeocodedOrder[]>();
-  for (const order of orders) {
-    const city = normalizeCityName(order.geocoded.city || 'desconhecida');
-    const existing = cityOrderMap.get(city) || [];
-    existing.push(order);
-    cityOrderMap.set(city, existing);
-  }
+  for (const comp of compositions) {
+    if (comp.orders.length === 0) continue;
+    const rule = comp.anchorRule || findAnchorRule(comp.truck.plate);
 
-  // === ETAPA 1b: Separar hub (Barueri) ===
-  const hubOrders = cityOrderMap.get(HUB_CITY) || [];
-  cityOrderMap.delete(HUB_CITY);
+    // 1. Check delivery limit
+    if (rule && comp.orders.length > rule.maxDeliveries) {
+      violations.push(
+        `${comp.truck.plate}: ${comp.orders.length} entregas excedem o limite de ${rule.maxDeliveries}`
+      );
+    }
 
-  // === ETAPA 2: Ordenar cidades por volume ===
-  const cityStats: { city: string; count: number; weight: number; orders: GeocodedOrder[] }[] = [];
-  for (const [city, cityOrders] of cityOrderMap) {
-    const weight = cityOrders.reduce((s, o) => s + o.weight_kg, 0);
-    cityStats.push({ city, count: cityOrders.length, weight, orders: cityOrders });
-  }
-  // Sort: count desc, then weight desc
-  cityStats.sort((a, b) => b.count - a.count || b.weight - a.weight);
+    // 2. Check weight limit
+    const capacity = Number(comp.truck.capacity_kg);
+    if (comp.totalWeight > capacity) {
+      violations.push(
+        `${comp.truck.plate}: peso ${(comp.totalWeight / 1000).toFixed(1)}t excede capacidade de ${(capacity / 1000).toFixed(1)}t`
+      );
+    }
 
-  reasoning?.push(`Cidades por volume: ${cityStats.map(c => `${c.city}(${c.count}ped/${(c.weight/1000).toFixed(1)}t)`).join(', ')}`);
-  if (hubOrders.length > 0) {
-    const hubWeight = hubOrders.reduce((s, o) => s + o.weight_kg, 0);
-    reasoning?.push(`Hub (${HUB_CITY}): ${hubOrders.length} entregas (${(hubWeight/1000).toFixed(1)}t) — serão distribuídas entre caminhões`);
-  }
-
-  // === ETAPA 3: Alocar caminhões exclusivos por cidade ===
-  const clusters: CityCluster[] = [];
-  const allocatedCities = new Set<string>();
-
-  for (const cityStat of cityStats) {
-    const { city, weight: cityWeight, orders: cityOrders } = cityStat;
-    
-    // How many trucks does this city need?
-    const trucksNeeded = Math.max(1, Math.ceil(cityWeight / maxTruckCapacity));
-    const cityCap = city.charAt(0).toUpperCase() + city.slice(1);
-
-    if (trucksNeeded === 1) {
-      clusters.push({
-        primaryCity: city,
-        complementCities: [],
-        cities: new Set([city]),
-        orders: [...cityOrders],
-        weight: cityWeight,
-        reasoning: [`${cityCap}: ${cityOrders.length} entregas (${(cityWeight/1000).toFixed(1)}t)`],
-      });
-    } else {
-      // Split city into N blocks by proximity to CD
-      reasoning?.push(`${cityCap} dividida em ${trucksNeeded} caminhões (${(cityWeight/1000).toFixed(1)}t total)`);
-      const sorted = [...cityOrders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
-      const subClusters: GeocodedOrder[][] = Array.from({ length: trucksNeeded }, () => []);
-      const subWeights = new Array(trucksNeeded).fill(0);
-
-      for (const order of sorted) {
-        let minIdx = 0;
-        for (let i = 1; i < trucksNeeded; i++) {
-          if (subWeights[i] < subWeights[minIdx]) minIdx = i;
-        }
-        subClusters[minIdx].push(order);
-        subWeights[minIdx] += order.weight_kg;
+    // 3. Check anchor city usage
+    if (rule && !rule.isSupport && rule.anchorCity) {
+      const hasAnchorCity = comp.cities.some(c => c === rule.anchorCity);
+      if (!hasAnchorCity && comp.orders.length > 0) {
+        violations.push(
+          `${comp.truck.plate}: deveria conter entregas de ${rule.anchorCity} (cidade âncora)`
+        );
       }
 
-      for (let i = 0; i < trucksNeeded; i++) {
-        clusters.push({
-          primaryCity: city,
-          complementCities: [],
-          cities: new Set([city]),
-          orders: subClusters[i],
-          weight: subWeights[i],
-          reasoning: [`${cityCap} bloco ${i + 1}/${trucksNeeded} (${(subWeights[i]/1000).toFixed(1)}t)`],
-        });
-      }
-    }
+      // Check for unauthorized cities
+      const allowedCities = new Set([
+        rule.anchorCity,
+        ...rule.allowedFillCities,
+      ]);
+      const exceptionNeighborhoods = new Set(
+        rule.neighborhoodExceptions.map(e => normalizeNeighborhood(e.neighborhood))
+      );
 
-    allocatedCities.add(city);
-  }
+      for (const order of comp.orders) {
+        const city = normalizeCityName((order as any).geocoded?.city || parseAddress(order.address).city || 'desconhecida');
+        const nh = normalizeNeighborhood((order as any).geocoded?.neighborhood || parseAddress(order.address).neighborhood || '');
 
-  // === ETAPA 4: Encaixe inteligente de cidades pequenas ===
-  // For small cities: try to fit into existing clusters with spare capacity
-  // ONLY if neighbor AND (historical co-occurrence OR no history data)
-  
-  // Identify which clusters are "small" (could be absorbed)
-  // Sort clusters by weight to find small ones
-  const smallThreshold = maxTruckCapacity * 0.25; // Cities using <25% of a truck
-  
-  // Separate small clusters that could be absorbed
-  const mainClusters: CityCluster[] = [];
-  const smallClusters: CityCluster[] = [];
-  
-  for (const cluster of clusters) {
-    if (cluster.weight < smallThreshold && cluster.orders.length <= 5) {
-      smallClusters.push(cluster);
-    } else {
-      mainClusters.push(cluster);
-    }
-  }
-
-  // Try to fit each small cluster into a main cluster
-  const absorbedSmall = new Set<number>();
-  
-  for (let si = 0; si < smallClusters.length; si++) {
-    const small = smallClusters[si];
-    let fitted = false;
-
-    for (const main of mainClusters) {
-      // Check capacity
-      if (main.weight + small.weight > maxTruckCapacity) continue;
-
-      // Check neighbor
-      const isNeighbor = areCitiesNeighbors(main.primaryCity, small.primaryCity);
-      if (!isNeighbor) continue;
-
-      // Check historical compatibility
-      if (extractedPatterns) {
-        const testCities = [...main.cities, ...small.cities].filter(c => c !== HUB_CITY);
-        const check = isValidCityCombination(Array.from(new Set(testCities)), extractedPatterns);
-        if (!check.valid) continue;
-      }
-
-      // Fit!
-      main.orders.push(...small.orders);
-      main.weight += small.weight;
-      for (const c of small.cities) main.cities.add(c);
-      main.complementCities.push(small.primaryCity);
-      const smallCap = small.primaryCity.charAt(0).toUpperCase() + small.primaryCity.slice(1);
-      main.reasoning.push(`+ Complemento: ${smallCap} (${small.orders.length} entregas, vizinha)`);
-      reasoning?.push(`${smallCap} encaixada em ${main.primaryCity} (vizinha, cabe no peso)`);
-      fitted = true;
-      absorbedSmall.add(si);
-      break;
-    }
-  }
-
-  // Rebuild final cluster list: main + unabsorbed small
-  const finalClusters: CityCluster[] = [...mainClusters];
-  for (let si = 0; si < smallClusters.length; si++) {
-    if (!absorbedSmall.has(si)) {
-      finalClusters.push(smallClusters[si]);
-    }
-  }
-
-  // === ETAPA 4b: If still more clusters than trucks, try compatible merges (NO force merge) ===
-  if (finalClusters.length > numTrucks) {
-    reasoning?.push(`${finalClusters.length} clusters para ${numTrucks} caminhões — tentando consolidação compatível`);
-
-    // Sort by weight asc to try merging smallest first
-    finalClusters.sort((a, b) => a.weight - b.weight);
-
-    let attempts = 0;
-    while (finalClusters.length > numTrucks && attempts < finalClusters.length * 2) {
-      attempts++;
-      const smallest = finalClusters[0];
-
-      let merged = false;
-      for (let i = 1; i < finalClusters.length; i++) {
-        const target = finalClusters[i];
-        if (target.weight + smallest.weight > maxTruckCapacity) continue;
-
-        // Must be neighbor
-        if (!areCitiesNeighbors(target.primaryCity, smallest.primaryCity)) continue;
-
-        // Must be historically compatible
-        if (extractedPatterns) {
-          const allCities = [...target.cities, ...smallest.cities].filter(c => c !== HUB_CITY);
-          const check = isValidCityCombination(Array.from(new Set(allCities)), extractedPatterns);
-          if (!check.valid) continue;
-        }
-
-        target.orders.push(...smallest.orders);
-        target.weight += smallest.weight;
-        for (const c of smallest.cities) target.cities.add(c);
-        target.complementCities.push(smallest.primaryCity);
-        target.reasoning.push(`Consolidada com "${smallest.primaryCity}" (${(smallest.weight/1000).toFixed(1)}t, vizinha)`);
-        reasoning?.push(`"${smallest.primaryCity}" consolidada com "${target.primaryCity}" (vizinhas)`);
-        finalClusters.splice(0, 1);
-        merged = true;
-        break;
-      }
-
-      if (!merged) {
-        // NO FORCE MERGE — move smallest to end and try next
-        // If we've cycled through all, stop
-        const moved = finalClusters.shift()!;
-        finalClusters.push(moved);
-        
-        // Check if we've rotated all the way around
-        if (attempts >= finalClusters.length * 2) break;
-      }
-    }
-
-    if (finalClusters.length > numTrucks) {
-      const excess = finalClusters.length - numTrucks;
-      reasoning?.push(`⚠️ ${excess} cluster(s) excedente(s) — pedidos serão marcados como não atribuídos`);
-    }
-  }
-
-  // === ETAPA 5: Distribuir hub orders (Barueri) proporcionalmente ===
-  if (hubOrders.length > 0 && finalClusters.length > 0) {
-    reasoning?.push(`Distribuindo ${hubOrders.length} entregas do hub (${HUB_CITY}) entre ${Math.min(finalClusters.length, numTrucks)} caminhões`);
-    
-    const sortedHub = [...hubOrders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
-
-    for (const order of sortedHub) {
-      // Find cluster with most remaining capacity (only consider first N clusters that will get trucks)
-      const eligibleClusters = finalClusters.slice(0, numTrucks);
-      let bestIdx = 0;
-      let bestRemaining = -Infinity;
-      for (let i = 0; i < eligibleClusters.length; i++) {
-        const remaining = maxTruckCapacity - eligibleClusters[i].weight;
-        if (remaining > bestRemaining) {
-          bestRemaining = remaining;
-          bestIdx = i;
+        if (!allowedCities.has(city) && !exceptionNeighborhoods.has(nh)) {
+          violations.push(
+            `${comp.truck.plate}: cidade "${city}" não é permitida (âncora: ${rule.anchorCity})`
+          );
+          break; // One violation per truck is enough
         }
       }
+    }
 
-      if (bestRemaining >= order.weight_kg) {
-        eligibleClusters[bestIdx].orders.push(order);
-        eligibleClusters[bestIdx].weight += order.weight_kg;
-        eligibleClusters[bestIdx].cities.add(HUB_CITY);
+    // 4. Check city alternation in sequence
+    if (comp.orders.length > 2) {
+      const citySequence = comp.orders.map(o => {
+        const parsed = parseAddress(o.address);
+        return normalizeCityName(parsed.city || 'desconhecida');
+      }).filter(c => c !== 'desconhecida');
+
+      const visitedCities = new Set<string>();
+      let lastCity = '';
+      for (const city of citySequence) {
+        if (city !== lastCity) {
+          if (visitedCities.has(city)) {
+            violations.push(
+              `${comp.truck.plate}: alternância de cidades na sequência (${city} aparece mais de uma vez)`
+            );
+            break;
+          }
+          if (lastCity) visitedCities.add(lastCity);
+          lastCity = city;
+        }
       }
     }
   }
 
-  return finalClusters;
-}
-
-// ================================================================
-// CLUSTER-TO-TRUCK MAPPING
-// ================================================================
-
-function mapClustersToTrucks(
-  clusters: CityCluster[],
-  trucks: Truck[],
-  config: AutoRouterConfig,
-  reasoning?: string[]
-): TruckComposition[] {
-  // Only map up to numTrucks clusters; excess become unassigned
-  const sortedClusters = [...clusters].sort((a, b) => b.weight - a.weight);
-  const sortedTrucks = [...trucks].sort(
-    (a, b) => Number(b.capacity_kg) - Number(a.capacity_kg)
-  );
-
-  const compositions: TruckComposition[] = [];
-  const usedTruckIds = new Set<string>();
-
-  for (let i = 0; i < Math.min(sortedClusters.length, sortedTrucks.length); i++) {
-    const cluster = sortedClusters[i];
-    let selectedTruck: Truck | null = null;
-    for (const truck of sortedTrucks) {
-      if (usedTruckIds.has(truck.id)) continue;
-      selectedTruck = truck;
-      break;
-    }
-
-    if (!selectedTruck) {
-      reasoning?.push(`⚠️ Sem caminhão para cluster de "${cluster.primaryCity}"`);
-      continue;
-    }
-
-    usedTruckIds.add(selectedTruck.id);
-
-    const capacity = Number(selectedTruck.capacity_kg);
-    const maxWeight = capacity * (config.maxOccupancyPercent / 100);
-
-    const fittingOrders: ParsedOrder[] = [];
-    let currentWeight = 0;
-
-    for (const order of cluster.orders) {
-      if (currentWeight + order.weight_kg <= maxWeight) {
-        fittingOrders.push(order);
-        currentWeight += order.weight_kg;
-      }
-    }
-
-    compositions.push({
-      truck: selectedTruck,
-      orders: fittingOrders,
-      totalWeight: currentWeight,
-      occupancyPercent: Math.round((currentWeight / capacity) * 100),
-      estimatedDeliveries: fittingOrders.length,
-      cities: Array.from(cluster.cities),
-      primaryCity: cluster.primaryCity,
-      complementCities: cluster.complementCities.length > 0 ? cluster.complementCities : undefined,
-    });
-  }
-
-  // If there are excess clusters beyond truck count, those orders become unassigned
-  // (they won't appear in compositions, so they'll be caught by the unassigned check)
-
-  // Empty compositions for remaining trucks
-  for (const truck of sortedTrucks) {
-    if (!usedTruckIds.has(truck.id)) {
-      compositions.push({
-        truck, orders: [], totalWeight: 0, occupancyPercent: 0,
-        estimatedDeliveries: 0, cities: [],
-      });
-    }
-  }
-
-  return compositions;
+  return { valid: violations.length === 0, violations };
 }
 
 // ================================================================
 // DELIVERY SEQUENCE: CITY > CEP > BAIRRO > RUA (blocos contínuos)
 // ================================================================
 
-/**
- * Optimizes delivery sequence ensuring:
- * 1. All deliveries of same city in continuous block
- * 2. Cities ordered by proximity to CD (or farthest first for finalizacao_proxima)
- * 3. Within each city block: CEP (5 digits) > neighborhood > street
- * 4. NO city alternation allowed
- */
 function optimizeDeliverySequence(
   orders: GeocodedOrder[],
   startLat: number,
   startLng: number,
-  strategy: RoutingStrategy
+  strategy: RoutingStrategy,
+  anchorRule?: AnchorRule
 ): void {
   if (orders.length <= 1) return;
 
@@ -687,45 +566,77 @@ function optimizeDeliverySequence(
     cityGroups.set(city, existing);
   }
 
-  // Step 2: Order cities
-  // Calculate average distance from CD for each city group
+  // Step 2: Order cities — anchor city ALWAYS first
   const cityDistances: { city: string; avgDist: number; orders: GeocodedOrder[] }[] = [];
   for (const [city, cityOrders] of cityGroups) {
     const avgDist = cityOrders.reduce((s, o) => s + o.distanceFromCD, 0) / cityOrders.length;
     cityDistances.push({ city, avgDist, orders: cityOrders });
   }
 
-  if (strategy === 'finalizacao_proxima') {
-    // Start from farthest, end closest (closest to CD last)
-    cityDistances.sort((a, b) => b.avgDist - a.avgDist);
-  } else {
-    // Default: closest to CD first
-    cityDistances.sort((a, b) => a.avgDist - b.avgDist);
-  }
+  // Anchor city first, then by distance
+  const anchorCity = anchorRule?.anchorCity || '';
+  cityDistances.sort((a, b) => {
+    if (a.city === anchorCity) return -1;
+    if (b.city === anchorCity) return 1;
+    if (strategy === 'finalizacao_proxima') return b.avgDist - a.avgDist;
+    return a.avgDist - b.avgDist;
+  });
 
   // Step 3: Within each city block, sort by CEP > neighborhood > street
   const result: GeocodedOrder[] = [];
-  
+
   for (const cityGroup of cityDistances) {
     const cityOrders = cityGroup.orders;
-    
-    // Sort within city: CEP prefix (5 digits) -> neighborhood -> street -> nearest neighbor
-    cityOrders.sort((a, b) => {
-      const cepA = (a.geocoded.zipCode || '').replace(/\D/g, '').substring(0, 5);
-      const cepB = (b.geocoded.zipCode || '').replace(/\D/g, '').substring(0, 5);
-      if (cepA !== cepB) return cepA.localeCompare(cepB);
-      
-      const neighborhoodA = (a.geocoded.neighborhood || '').toLowerCase();
-      const neighborhoodB = (b.geocoded.neighborhood || '').toLowerCase();
-      if (neighborhoodA !== neighborhoodB) return neighborhoodA.localeCompare(neighborhoodB);
-      
-      const streetA = (a.geocoded.street || '').toLowerCase();
-      const streetB = (b.geocoded.street || '').toLowerCase();
-      if (streetA !== streetB) return streetA.localeCompare(streetB);
-      
-      return a.distanceFromCD - b.distanceFromCD;
-    });
-    
+
+    // Handle special neighborhood insertion rules
+    if (anchorRule) {
+      const insertionRules = anchorRule.neighborhoodExceptions.filter(e => e.insertAfterNeighborhood);
+      if (insertionRules.length > 0) {
+        // Sort normally first
+        cityOrders.sort((a, b) => sortWithinCity(a, b));
+
+        // Then apply insertion rules
+        for (const rule of insertionRules) {
+          const targetNh = normalizeNeighborhood(rule.insertAfterNeighborhood!);
+          const ruleNh = normalizeNeighborhood(rule.neighborhood);
+
+          // Find orders matching the rule neighborhood
+          const ruleOrders: GeocodedOrder[] = [];
+          const otherOrders: GeocodedOrder[] = [];
+          for (const o of cityOrders) {
+            if (normalizeNeighborhood(o.geocoded.neighborhood || '') === ruleNh) {
+              ruleOrders.push(o);
+            } else {
+              otherOrders.push(o);
+            }
+          }
+
+          if (ruleOrders.length > 0) {
+            // Find insertion point: after last order of targetNh
+            let insertIdx = -1;
+            for (let i = 0; i < otherOrders.length; i++) {
+              if (normalizeNeighborhood(otherOrders[i].geocoded.neighborhood || '') === targetNh) {
+                insertIdx = i;
+              }
+            }
+
+            cityOrders.length = 0;
+            if (insertIdx >= 0) {
+              cityOrders.push(...otherOrders.slice(0, insertIdx + 1));
+              cityOrders.push(...ruleOrders);
+              cityOrders.push(...otherOrders.slice(insertIdx + 1));
+            } else {
+              cityOrders.push(...otherOrders, ...ruleOrders);
+            }
+          }
+        }
+
+        result.push(...cityOrders);
+        continue;
+      }
+    }
+
+    cityOrders.sort((a, b) => sortWithinCity(a, b));
     result.push(...cityOrders);
   }
 
@@ -733,9 +644,26 @@ function optimizeDeliverySequence(
   orders.push(...result);
 }
 
-/**
- * Get summary statistics for display
- */
+function sortWithinCity(a: GeocodedOrder, b: GeocodedOrder): number {
+  const cepA = (a.geocoded.zipCode || '').replace(/\D/g, '').substring(0, 5);
+  const cepB = (b.geocoded.zipCode || '').replace(/\D/g, '').substring(0, 5);
+  if (cepA !== cepB) return cepA.localeCompare(cepB);
+
+  const nhA = (a.geocoded.neighborhood || '').toLowerCase();
+  const nhB = (b.geocoded.neighborhood || '').toLowerCase();
+  if (nhA !== nhB) return nhA.localeCompare(nhB);
+
+  const stA = (a.geocoded.street || '').toLowerCase();
+  const stB = (b.geocoded.street || '').toLowerCase();
+  if (stA !== stB) return stA.localeCompare(stB);
+
+  return a.distanceFromCD - b.distanceFromCD;
+}
+
+// ================================================================
+// SUMMARY
+// ================================================================
+
 export function getRoutingSummary(result: AutoRouterResult): {
   trucksActive: number;
   totalDeliveries: number;
@@ -745,15 +673,15 @@ export function getRoutingSummary(result: AutoRouterResult): {
 } {
   const trucksActive = result.compositions.filter(c => c.orders.length > 0).length;
   const totalDeliveries = result.compositions.reduce((sum, c) => sum + c.orders.length, 0);
-  
+
   const formatWeight = (w: number) => w >= 1000 ? `${(w / 1000).toFixed(1)}t` : `${w.toFixed(0)}kg`;
-  
+
   let efficiency: 'excellent' | 'good' | 'fair' | 'poor';
   if (result.averageOccupancy >= 80) efficiency = 'excellent';
   else if (result.averageOccupancy >= 65) efficiency = 'good';
   else if (result.averageOccupancy >= 50) efficiency = 'fair';
   else efficiency = 'poor';
-  
+
   return {
     trucksActive,
     totalDeliveries,
