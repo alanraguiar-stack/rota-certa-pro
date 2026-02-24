@@ -1,9 +1,9 @@
 /**
  * Componente de visualização da composição automática de caminhões
- * Exibe cidades por caminhão e bloqueia confirmação se houver violações territoriais
+ * Exibe CORREDORES REGIONAIS por caminhão e bloqueia confirmação se houver violações
  */
 
-import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert } from 'lucide-react';
+import { Truck, Package, Scale, TrendingUp, AlertCircle, CheckCircle2, Brain, MapPin, ShieldAlert, Navigation } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -75,6 +75,7 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
     .slice(0, 3);
 
   const cities = composition.cities || [];
+  const corridorName = composition.corridorName;
   
   return (
     <Card className={cn(hasViolation && 'border-destructive/50 bg-destructive/5')}>
@@ -102,6 +103,14 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Corridor name */}
+        {corridorName && (
+          <div className="flex items-center gap-2 rounded-lg bg-primary/10 border border-primary/20 px-3 py-2">
+            <Navigation className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-primary">{corridorName}</span>
+          </div>
+        )}
+
         {/* City tags */}
         {cities.length > 0 && (
           <div className="space-y-1.5">
@@ -116,19 +125,20 @@ function TruckCompositionCard({ composition, index, hasViolation }: { compositio
                   variant="secondary" 
                   className={cn(
                     "text-xs capitalize",
-                    cities.length === 1 && "bg-success/10 text-success border-success/30",
-                    cities.length >= 3 && hasViolation && "bg-destructive/10 text-destructive border-destructive/30"
+                    city === 'barueri' && "bg-muted/80 text-muted-foreground border-muted",
+                    hasViolation && city !== 'barueri' && "bg-destructive/10 text-destructive border-destructive/30"
                   )}
                 >
                   {city}
+                  {city === 'barueri' && ' (hub)'}
                 </Badge>
               ))}
             </div>
-            {cities.length === 1 && (
-              <p className="text-xs text-success">✓ Cidade exclusiva</p>
+            {corridorName && !hasViolation && (
+              <p className="text-xs text-success">✓ Agrupamento conforme padrão do analista</p>
             )}
-            {cities.length >= 3 && hasViolation && (
-              <p className="text-xs text-destructive">⚠ Mistura fora do padrão</p>
+            {hasViolation && (
+              <p className="text-xs text-destructive">⚠ Mistura fora do padrão operacional</p>
             )}
           </div>
         )}
@@ -204,7 +214,6 @@ export function AutoCompositionView({
   const activeCompositions = result.compositions.filter(c => c.orders.length > 0);
   const hasViolations = result.validation && !result.validation.valid;
   
-  // Build set of truck plates with violations for card highlighting
   const violatedTrucks = new Set<string>();
   if (hasViolations && result.validation.violations) {
     for (const v of result.validation.violations) {
@@ -212,6 +221,11 @@ export function AutoCompositionView({
       if (match) violatedTrucks.add(match[1]);
     }
   }
+
+  // Count corridors
+  const corridorCount = new Set(
+    activeCompositions.filter(c => c.corridorName).map(c => c.corridorName)
+  ).size;
   
   return (
     <div className="space-y-6">
@@ -222,10 +236,11 @@ export function AutoCompositionView({
             <div>
               <CardTitle className="flex items-center gap-2">
                 <TrendingUp className="h-5 w-5 text-primary" />
-                Composição Territorial Concluída
+                Composição por Corredores Regionais
               </CardTitle>
               <CardDescription>
-                Divisão cidade-por-cidade seguindo padrão operacional do analista
+                Agrupamento baseado nos padrões históricos do analista
+                {corridorCount > 0 && ` • ${corridorCount} corredor(es) identificado(s)`}
               </CardDescription>
             </div>
             <EfficiencyBadge efficiency={summary.efficiency} />
@@ -284,10 +299,10 @@ export function AutoCompositionView({
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
               <Brain className="h-4 w-4 text-primary" />
-              Raciocínio territorial ({result.reasoning.length})
+              Raciocínio de corredores ({result.reasoning.length})
             </CardTitle>
             <CardDescription>
-              Decisões baseadas no padrão operacional do analista
+              Decisões baseadas nos corredores regionais do analista
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -319,7 +334,7 @@ export function AutoCompositionView({
       <div>
         <h3 className="font-semibold mb-4 flex items-center gap-2">
           <Truck className="h-5 w-5" />
-          Distribuição Territorial ({activeCompositions.length})
+          Distribuição por Corredores ({activeCompositions.length})
         </h3>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {activeCompositions.map((composition, index) => (

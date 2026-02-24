@@ -1,7 +1,7 @@
 /**
  * Motor de Extração de Padrões Históricos
  * Analisa bases do analista logístico para aprender decisões de roteirização.
- * Extrai co-ocorrência de cidades, cidades dedicadas, prioridades e gera hints.
+ * Extrai CORREDORES REGIONAIS, co-ocorrência de cidades, prioridades e gera hints.
  */
 
 import { ParsedOrder } from '@/types';
@@ -37,22 +37,37 @@ interface CityCoOccurrence {
 interface CityProfile {
   city: string;
   totalAppearances: number;
-  dedicatedTruckRate: number; // 0-1: how often city has its own truck
+  dedicatedTruckRate: number;
   avgTrucksUsed: number;
-  trucksPerRoute: Map<string, number>; // routeDate -> numTrucks
-  coOccurrences: Map<string, number>; // otherCity -> count together
-  priorityScore: number; // higher = assigned first historically
+  trucksPerRoute: Map<string, number>;
+  coOccurrences: Map<string, number>;
+  priorityScore: number;
+}
+
+/**
+ * Regional Corridor: a recurring combination of cities that the analyst
+ * groups together in the same truck across multiple route dates.
+ */
+export interface RegionalCorridor {
+  id: string;
+  coreCity: string;
+  satelliteCities: string[];
+  allCities: Set<string>;
+  frequency: number;        // how many route-dates this corridor appeared
+  avgDeliveries: number;
+  confidence: number;        // 0-100
+  truckLabels: string[];     // historical truck labels used
 }
 
 export interface ExtractedPatterns {
   cityProfiles: Map<string, CityProfile>;
   coOccurrences: CityCoOccurrence[];
+  corridors: RegionalCorridor[];
   routeCount: number;
   totalRecords: number;
 }
 
-const MIN_OCCURRENCES = 3;
-const MIN_CONFIDENCE = 60;
+const MIN_CONFIDENCE = 40;
 
 function normalizeCity(city: string | null): string {
   if (!city) return 'desconhecida';
@@ -60,16 +75,21 @@ function normalizeCity(city: string | null): string {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
+// Hub city (CD location) - distributed across all trucks
+const HUB_CITY = 'barueri';
+
 /**
  * Extract patterns from historical routing data
  */
 export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
   if (patterns.length === 0) {
-    return { cityProfiles: new Map(), coOccurrences: [], routeCount: 0, totalRecords: 0 };
+    return { cityProfiles: new Map(), coOccurrences: [], corridors: [], routeCount: 0, totalRecords: 0 };
   }
 
   // Group by route (using route_date as route identifier)
   const routeMap = new Map<string, Map<string, Set<string>>>();
+  // Also track delivery counts per truck per route
+  const routeTruckDeliveries = new Map<string, Map<string, number>>();
 
   for (const row of patterns) {
     const routeKey = row.route_date || 'unknown';
@@ -80,6 +100,11 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
     const truckMap = routeMap.get(routeKey)!;
     if (!truckMap.has(row.truck_label)) truckMap.set(row.truck_label, new Set());
     truckMap.get(row.truck_label)!.add(city);
+
+    if (!routeTruckDeliveries.has(routeKey)) routeTruckDeliveries.set(routeKey, new Map());
+    const delivMap = routeTruckDeliveries.get(routeKey)!;
+    const key = row.truck_label;
+    delivMap.set(key, (delivMap.get(key) || 0) + 1);
   }
 
   const routeCount = routeMap.size;
@@ -174,26 +199,239 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
 
   coOccurrences.sort((a, b) => b.coOccurrenceRate - a.coOccurrenceRate);
 
-  return { cityProfiles, coOccurrences, routeCount, totalRecords: patterns.length };
+  // Extract regional corridors
+  const corridors = extractRegionalCorridors(routeMap, routeTruckDeliveries);
+
+  return { cityProfiles, coOccurrences, corridors, routeCount, totalRecords: patterns.length };
+}
+
+// ================================================================
+// REGIONAL CORRIDORS - Core of the analyst's logic
+// ================================================================
+
+/**
+ * Extract recurring regional corridors from history.
+ * A corridor is a set of cities that repeatedly appear together in the same truck.
+ */
+function extractRegionalCorridors(
+  routeMap: Map<string, Map<string, Set<string>>>,
+  routeTruckDeliveries: Map<string, Map<string, number>>
+): RegionalCorridor[] {
+  // Collect all truck-route city sets
+  interface TruckSnapshot {
+    truckLabel: string;
+    routeDate: string;
+    cities: Set<string>;
+    deliveryCount: number;
+  }
+
+  const snapshots: TruckSnapshot[] = [];
+
+  for (const [routeDate, truckMap] of routeMap) {
+    for (const [truckLabel, cities] of truckMap) {
+      const delivMap = routeTruckDeliveries.get(routeDate);
+      const deliveryCount = delivMap?.get(truckLabel) || cities.size;
+      snapshots.push({ truckLabel, routeDate, cities: new Set(cities), deliveryCount });
+    }
+  }
+
+  if (snapshots.length === 0) return [];
+
+  // Cluster snapshots into corridors using Jaccard similarity
+  // Two snapshots belong to the same corridor if Jaccard >= 0.4
+  // (ignoring hub city for comparison)
+  const JACCARD_THRESHOLD = 0.35;
+
+  const corridorGroups: TruckSnapshot[][] = [];
+  const assigned = new Set<number>();
+
+  for (let i = 0; i < snapshots.length; i++) {
+    if (assigned.has(i)) continue;
+
+    const group = [snapshots[i]];
+    assigned.add(i);
+
+    for (let j = i + 1; j < snapshots.length; j++) {
+      if (assigned.has(j)) continue;
+
+      // Calculate Jaccard WITHOUT hub city
+      const citiesA = new Set([...snapshots[i].cities].filter(c => c !== HUB_CITY));
+      const citiesB = new Set([...snapshots[j].cities].filter(c => c !== HUB_CITY));
+
+      if (citiesA.size === 0 || citiesB.size === 0) continue;
+
+      const intersection = new Set([...citiesA].filter(c => citiesB.has(c)));
+      const union = new Set([...citiesA, ...citiesB]);
+      const jaccard = union.size > 0 ? intersection.size / union.size : 0;
+
+      if (jaccard >= JACCARD_THRESHOLD) {
+        group.push(snapshots[j]);
+        assigned.add(j);
+      }
+    }
+
+    corridorGroups.push(group);
+  }
+
+  // Build corridor from each group
+  const corridors: RegionalCorridor[] = [];
+
+  for (const group of corridorGroups) {
+    // Count city frequency within the group
+    const cityFreq = new Map<string, number>();
+    const truckLabels = new Set<string>();
+    const routeDates = new Set<string>();
+    let totalDeliveries = 0;
+
+    for (const snap of group) {
+      truckLabels.add(snap.truckLabel);
+      routeDates.add(snap.routeDate);
+      totalDeliveries += snap.deliveryCount;
+
+      for (const city of snap.cities) {
+        cityFreq.set(city, (cityFreq.get(city) || 0) + 1);
+      }
+    }
+
+    // Core city = most frequent non-hub city
+    let coreCity = '';
+    let maxFreq = 0;
+    for (const [city, freq] of cityFreq) {
+      if (city === HUB_CITY) continue;
+      if (freq > maxFreq) {
+        maxFreq = freq;
+        coreCity = city;
+      }
+    }
+
+    if (!coreCity) continue;
+
+    // Satellite cities = all others (excluding hub if it's always present)
+    const allCities = new Set<string>();
+    const satelliteCities: string[] = [];
+    for (const [city] of cityFreq) {
+      allCities.add(city);
+      if (city !== coreCity && city !== HUB_CITY) {
+        satelliteCities.push(city);
+      }
+    }
+
+    // Always include hub in allCities
+    allCities.add(HUB_CITY);
+
+    const frequency = routeDates.size;
+    const confidence = Math.min(100, Math.round((frequency / Math.max(1, routeDates.size)) * 50 + group.length * 15));
+
+    corridors.push({
+      id: `${coreCity}-corridor`,
+      coreCity,
+      satelliteCities,
+      allCities,
+      frequency,
+      avgDeliveries: Math.round(totalDeliveries / group.length),
+      confidence: Math.min(100, confidence),
+      truckLabels: Array.from(truckLabels),
+    });
+  }
+
+  // Sort by frequency * confidence
+  corridors.sort((a, b) => (b.frequency * b.confidence) - (a.frequency * a.confidence));
+
+  return corridors;
 }
 
 /**
- * Get city exclusion map: pairs of cities that NEVER should be together
- * (co-occurrence < 10% in history)
+ * Match a set of order cities to the best historical corridor.
+ * Returns corridors ranked by Jaccard similarity.
+ */
+export function matchOrdersToCorridor(
+  orderCities: Set<string>,
+  corridors: RegionalCorridor[]
+): { corridor: RegionalCorridor; score: number }[] {
+  const normalizedOrderCities = new Set(
+    [...orderCities].map(c => normalizeCity(c)).filter(c => c !== 'desconhecida' && c !== HUB_CITY)
+  );
+
+  if (normalizedOrderCities.size === 0) return [];
+
+  const results: { corridor: RegionalCorridor; score: number }[] = [];
+
+  for (const corridor of corridors) {
+    const corridorCities = new Set(
+      [...corridor.allCities].filter(c => c !== HUB_CITY)
+    );
+
+    const intersection = new Set([...normalizedOrderCities].filter(c => corridorCities.has(c)));
+    const union = new Set([...normalizedOrderCities, ...corridorCities]);
+    const jaccard = union.size > 0 ? intersection.size / union.size : 0;
+
+    // Also check: what % of the order's cities are covered by this corridor?
+    const coverage = normalizedOrderCities.size > 0
+      ? intersection.size / normalizedOrderCities.size
+      : 0;
+
+    // Combined score: weighted Jaccard + coverage
+    const score = jaccard * 0.5 + coverage * 0.5;
+
+    if (score > 0.1) {
+      results.push({ corridor, score });
+    }
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return results;
+}
+
+/**
+ * Get city exclusion map: pairs of cities that NEVER appeared together in any truck
  */
 export function getCityExclusionMap(
   patterns: ExtractedPatterns
 ): Map<string, Set<string>> {
   const exclusions = new Map<string, Set<string>>();
-
+  
+  // Build set of all city pairs that DID appear together
+  const coOccurred = new Set<string>();
   for (const co of patterns.coOccurrences) {
-    // Cities that almost never appear together (< 10% co-occurrence)
-    // AND have enough data points
-    if (co.coOccurrenceRate < 0.10 && (co.togetherCount + co.separateCount) >= MIN_OCCURRENCES) {
-      if (!exclusions.has(co.cityA)) exclusions.set(co.cityA, new Set());
-      if (!exclusions.has(co.cityB)) exclusions.set(co.cityB, new Set());
-      exclusions.get(co.cityA)!.add(co.cityB);
-      exclusions.get(co.cityB)!.add(co.cityA);
+    if (co.togetherCount > 0) {
+      coOccurred.add([co.cityA, co.cityB].sort().join('::'));
+    }
+  }
+
+  // Also check corridors - cities in same corridor are always allowed
+  const corridorPairs = new Set<string>();
+  for (const corridor of patterns.corridors) {
+    const cities = Array.from(corridor.allCities);
+    for (let i = 0; i < cities.length; i++) {
+      for (let j = i + 1; j < cities.length; j++) {
+        corridorPairs.add([cities[i], cities[j]].sort().join('::'));
+      }
+    }
+  }
+
+  // Only exclude pairs that NEVER co-occurred AND are not in any corridor together
+  // AND both cities have enough history data
+  const allCities = Array.from(patterns.cityProfiles.keys());
+  for (let i = 0; i < allCities.length; i++) {
+    for (let j = i + 1; j < allCities.length; j++) {
+      const cityA = allCities[i];
+      const cityB = allCities[j];
+      if (cityA === HUB_CITY || cityB === HUB_CITY) continue;
+
+      const key = [cityA, cityB].sort().join('::');
+      const profileA = patterns.cityProfiles.get(cityA);
+      const profileB = patterns.cityProfiles.get(cityB);
+
+      // Both must have sufficient history
+      if (!profileA || !profileB) continue;
+      if (profileA.totalAppearances < 2 || profileB.totalAppearances < 2) continue;
+
+      if (!coOccurred.has(key) && !corridorPairs.has(key)) {
+        if (!exclusions.has(cityA)) exclusions.set(cityA, new Set());
+        if (!exclusions.has(cityB)) exclusions.set(cityB, new Set());
+        exclusions.get(cityA)!.add(cityB);
+        exclusions.get(cityB)!.add(cityA);
+      }
     }
   }
 
@@ -201,7 +439,8 @@ export function getCityExclusionMap(
 }
 
 /**
- * Validate if a combination of cities is historically acceptable
+ * Validate if a combination of cities is historically acceptable.
+ * Now uses CORRIDOR logic: cities are valid if they form part of a known corridor.
  */
 export function isValidCityCombination(
   cities: string[],
@@ -209,42 +448,61 @@ export function isValidCityCombination(
 ): { valid: boolean; reason: string } {
   if (cities.length <= 1) return { valid: true, reason: '' };
 
-  const normalized = cities.map(c => normalizeCity(c));
-  const exclusions = getCityExclusionMap(patterns);
+  const normalized = cities.map(c => normalizeCity(c)).filter(c => c !== HUB_CITY && c !== 'desconhecida');
+  if (normalized.length <= 1) return { valid: true, reason: '' };
 
-  // Check each pair
+  // Check if these cities appear together in ANY corridor
+  for (const corridor of patterns.corridors) {
+    const corridorCities = corridor.allCities;
+    const allInCorridor = normalized.every(c => corridorCities.has(c));
+    if (allInCorridor) {
+      return { valid: true, reason: `Corredor "${corridor.coreCity}" permite esta combinação` };
+    }
+  }
+
+  // Check if each pair has co-occurrence > 0 in history
   for (let i = 0; i < normalized.length; i++) {
     for (let j = i + 1; j < normalized.length; j++) {
       const cityA = normalized[i];
       const cityB = normalized[j];
 
-      // Check exclusion
-      const excl = exclusions.get(cityA);
-      if (excl && excl.has(cityB)) {
+      const profileA = patterns.cityProfiles.get(cityA);
+      if (!profileA) continue; // new city, no history - allow
+
+      const coCount = profileA.coOccurrences.get(cityB) || 0;
+      const profileB = patterns.cityProfiles.get(cityB);
+
+      // Only flag if BOTH cities have sufficient history AND never co-occurred
+      if (profileB && profileA.totalAppearances >= 2 && profileB.totalAppearances >= 2 && coCount === 0) {
         return {
           valid: false,
-          reason: `"${cityA}" e "${cityB}" nunca ficam juntas no histórico operacional`,
+          reason: `"${cityA}" e "${cityB}" nunca foram combinadas no histórico operacional`,
         };
-      }
-
-      // Check if we have history data and this combo never happened
-      const profileA = patterns.cityProfiles.get(cityA);
-      const profileB = patterns.cityProfiles.get(cityB);
-      if (profileA && profileB &&
-          profileA.totalAppearances >= MIN_OCCURRENCES &&
-          profileB.totalAppearances >= MIN_OCCURRENCES) {
-        const coCount = profileA.coOccurrences.get(cityB) || 0;
-        if (coCount === 0) {
-          return {
-            valid: false,
-            reason: `"${cityA}" e "${cityB}" nunca foram combinadas em ${Math.min(profileA.totalAppearances, profileB.totalAppearances)} rotas históricas`,
-          };
-        }
       }
     }
   }
 
   return { valid: true, reason: '' };
+}
+
+/**
+ * Find the corridor name for a given set of cities
+ */
+export function findCorridorName(
+  cities: string[],
+  patterns: ExtractedPatterns
+): string | null {
+  const normalized = new Set(cities.map(c => normalizeCity(c)).filter(c => c !== HUB_CITY && c !== 'desconhecida'));
+  if (normalized.size === 0) return null;
+
+  const matches = matchOrdersToCorridor(normalized, patterns.corridors);
+  if (matches.length > 0 && matches[0].score >= 0.3) {
+    const corridor = matches[0].corridor;
+    const coreCap = corridor.coreCity.charAt(0).toUpperCase() + corridor.coreCity.slice(1);
+    return `Corredor ${coreCap}`;
+  }
+
+  return null;
 }
 
 /**
@@ -301,40 +559,24 @@ export function generateRoutingHints(
     if (city !== 'desconhecida') currentCities.add(city);
   }
 
-  // 1. Dedicated truck hints
-  for (const city of currentCities) {
-    const profile = cityProfiles.get(city);
-    if (!profile || profile.totalAppearances < MIN_OCCURRENCES) continue;
-
-    if (profile.dedicatedTruckRate >= 0.7) {
-      const confidence = Math.round(profile.dedicatedTruckRate * 100);
-      if (confidence >= MIN_CONFIDENCE) {
-        hints.push({
-          type: 'dedicate_truck', cities: [city], confidence,
-          reasoning: `Em ${confidence}% das ${profile.totalAppearances} rotas anteriores, ${city} teve caminhão dedicado`,
-        });
-      }
-    }
-  }
-
-  // 2. Combine cities hints
+  // 1. Combine cities hints (from corridors)
   for (const co of coOccurrences) {
     if (!currentCities.has(co.cityA) || !currentCities.has(co.cityB)) continue;
-    if (co.togetherCount < MIN_OCCURRENCES) continue;
+    if (co.togetherCount < 1) continue;
 
     const confidence = Math.round(co.coOccurrenceRate * 100);
     if (confidence >= MIN_CONFIDENCE) {
       hints.push({
         type: 'combine_cities', cities: [co.cityA, co.cityB], confidence,
-        reasoning: `Em ${confidence}% das rotas anteriores, ${co.cityA} e ${co.cityB} ficaram no mesmo caminhão`,
+        reasoning: `Em ${confidence}% das rotas, ${co.cityA} e ${co.cityB} ficaram no mesmo caminhão`,
       });
     }
   }
 
-  // 3. Split city hints
+  // 2. Split city hints
   for (const city of currentCities) {
     const profile = cityProfiles.get(city);
-    if (!profile || profile.totalAppearances < MIN_OCCURRENCES) continue;
+    if (!profile || profile.totalAppearances < 2) continue;
 
     if (profile.avgTrucksUsed >= 1.5) {
       const confidence = Math.min(90, Math.round((profile.avgTrucksUsed / 3) * 100));
@@ -347,10 +589,10 @@ export function generateRoutingHints(
     }
   }
 
-  // 4. Priority order hint
+  // 3. Priority order hint
   const citiesWithPriority = Array.from(currentCities)
     .map(city => ({ city, score: cityProfiles.get(city)?.priorityScore || 0 }))
-    .filter(c => c.score >= MIN_OCCURRENCES)
+    .filter(c => c.score >= 1)
     .sort((a, b) => b.score - a.score);
 
   if (citiesWithPriority.length >= 2) {
