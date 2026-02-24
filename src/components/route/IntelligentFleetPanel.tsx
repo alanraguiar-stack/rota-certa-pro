@@ -28,6 +28,7 @@ import {
   isFleetSelectionValid,
   FleetAnalysis
 } from '@/lib/routeIntelligence';
+import { ANCHOR_RULES } from '@/lib/anchorRules';
 
 interface IntelligentFleetPanelProps {
   trucks: Truck[];
@@ -67,16 +68,46 @@ export function IntelligentFleetPanel({
     [totalWeight, trucks, orders]
   );
 
-  // Auto-aplicar recomendação quando disponível e nenhum caminhão selecionado
+  // Auto-aplicar recomendação e forçar inclusão de caminhões âncora
   useEffect(() => {
+    if (disabled) return;
+
     if (
       fleetAnalysis.recommendedTrucks.length > 0 && 
-      selectedTruckIds.length === 0 &&
-      !disabled
+      selectedTruckIds.length === 0
     ) {
+      // Caso 1: nenhum selecionado — aplicar toda a recomendação
       onSelectionChange(fleetAnalysis.recommendedTrucks.map(t => t.id));
+      return;
     }
-  }, [fleetAnalysis.recommendedTrucks, selectedTruckIds.length, disabled, onSelectionChange]);
+
+    // Caso 2: já há selecionados — garantir que âncoras obrigatórios estejam incluídos
+    if (selectedTruckIds.length > 0 && orders.length > 0) {
+      const orderCities = new Set(
+        orders
+          .map(o => o.city?.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
+          .filter(Boolean)
+      );
+
+      const missingAnchorIds: string[] = [];
+      for (const rule of ANCHOR_RULES) {
+        if (rule.isSupport || !rule.anchorCity) continue;
+        if (!orderCities.has(rule.anchorCity)) continue;
+        // Encontrar o caminhão correspondente pela placa
+        const anchorTruck = trucks.find(t => {
+          const prefix = t.plate.replace(/[\s-]/g, '').toUpperCase().substring(0, 3);
+          return prefix === rule.platePrefix;
+        });
+        if (anchorTruck && !selectedTruckIds.includes(anchorTruck.id)) {
+          missingAnchorIds.push(anchorTruck.id);
+        }
+      }
+
+      if (missingAnchorIds.length > 0) {
+        onSelectionChange([...selectedTruckIds, ...missingAnchorIds]);
+      }
+    }
+  }, [fleetAnalysis.recommendedTrucks, selectedTruckIds.length, disabled, onSelectionChange, orders, trucks]);
 
   // Cálculos da seleção atual
   const selectedTrucks = trucks.filter(t => selectedTruckIds.includes(t.id));
