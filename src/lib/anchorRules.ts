@@ -41,7 +41,7 @@ export const ANCHOR_RULES: AnchorRule[] = [
   {
     platePrefix: 'EUR',
     anchorCity: 'barueri',
-    maxDeliveries: 22,
+    maxDeliveries: 25,
     allowedFillCities: ['jandira', 'itapevi', 'cotia', 'vargem grande paulista'],
     neighborhoodExceptions: [],
     label: 'Caminhão A — Barueri',
