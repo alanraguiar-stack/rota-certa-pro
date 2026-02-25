@@ -220,6 +220,8 @@ function parseItinerarioData(text: string): { records: any[]; vendaIds: Set<stri
         client_name: cliente,
         address: address || 'Endereço não informado',
         weight_kg: peso,
+        city: cidade,
+        neighborhood: bairro,
       });
     }
   }
@@ -388,6 +390,7 @@ function mergeItinerarioWithADV(
       pedido_id: record.pedido_id,
       client_name: record.client_name || advOrder?.client_name || 'Cliente',
       address: record.address,
+      city: (record as any).city || undefined,
       weight_kg: advOrder?.weight_kg || record.weight_kg || 0,
       items: advOrder?.items || [],
       isValid: Boolean(record.address && record.address !== 'Endereço não informado'),
