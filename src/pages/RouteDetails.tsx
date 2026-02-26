@@ -126,6 +126,7 @@ export default function RouteDetails() {
           weight_kg: o.weight_kg,
           product_description: o.product_description,
           items: o.items,
+          city: o.city,
         })),
         {
           onSuccess: () => {
