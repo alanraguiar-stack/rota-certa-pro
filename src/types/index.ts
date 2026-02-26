@@ -119,6 +119,7 @@ export interface Order {
   latitude?: number | null;
   longitude?: number | null;
   geocoding_status?: string | null;
+  city?: string | null;
   items?: OrderItem[]; // Multiple items per order
 }
 

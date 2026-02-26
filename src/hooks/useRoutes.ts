@@ -1,9 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy, OrderItem, ParsedOrderItem } from '@/types';
+import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy, OrderItem, ParsedOrderItem, ParsedOrder } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distribution';
+import { autoComposeRoute } from '@/lib/autoRouterEngine';
 import { optimizeDeliveryOrder } from '@/lib/routing';
 
 // Helper to convert Supabase order to local Order type
@@ -22,6 +23,7 @@ function toOrder(o: unknown): Order | undefined {
     latitude: obj.latitude != null ? Number(obj.latitude) : null,
     longitude: obj.longitude != null ? Number(obj.longitude) : null,
     geocoding_status: obj.geocoding_status != null ? String(obj.geocoding_status) : null,
+    city: obj.city != null ? String(obj.city) : null,
   };
 }
 export function useRoutes() {
@@ -237,6 +239,7 @@ export function useRouteDetails(routeId: string | undefined) {
       weight_kg: number; 
       product_description?: string;
       items?: ParsedOrderItem[];
+      city?: string;
     }>) => {
       const ordersToInsert = orders.map((o, index) => ({
         route_id: routeId!,
@@ -245,6 +248,7 @@ export function useRouteDetails(routeId: string | undefined) {
         weight_kg: o.weight_kg,
         product_description: o.product_description || null,
         sequence_order: index + 1,
+        city: o.city || null,
       }));
 
       const { data: insertedOrders, error } = await supabase
@@ -392,43 +396,68 @@ export function useRouteDetails(routeId: string | undefined) {
         throw new Error('É necessário ter pedidos e caminhões atribuídos');
       }
 
-      // Use the distribution algorithm to assign orders to trucks
-      const routeTrucks = route.route_trucks.map(rt => ({
-        id: rt.id,
-        truck: rt.truck!,
+      // Convert DB orders to ParsedOrder format for the anchor engine
+      const parsedOrders: ParsedOrder[] = route.orders.map(o => ({
+        pedido_id: o.id,
+        client_name: o.client_name,
+        address: o.address,
+        weight_kg: Number(o.weight_kg),
+        product_description: o.product_description,
+        city: (o as any).city || undefined,
+        items: (o.items || []).map(item => ({
+          product_name: item.product_name,
+          weight_kg: Number(item.weight_kg),
+          quantity: item.quantity,
+        })),
+        isValid: true,
       }));
 
-      const distributionResult = distributeOrders(
-        route.orders,
-        routeTrucks,
-        'padrao' // Strategy for load distribution
-      );
+      // Get truck objects from route_trucks
+      const trucks = route.route_trucks
+        .map(rt => rt.truck!)
+        .filter(Boolean);
+
+      // Use anchor-based engine instead of generic distribution
+      const result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' });
+
+      console.log('[distributeLoad] autoComposeRoute result:', {
+        compositions: result.compositions.map(c => ({
+          plate: c.truck.plate,
+          orders: c.orders.length,
+          cities: c.cities,
+        })),
+        warnings: result.warnings,
+        reasoning: result.reasoning,
+      });
 
       // Clear existing assignments
       for (const rt of route.route_trucks) {
         await supabase.from('order_assignments').delete().eq('route_truck_id', rt.id);
       }
 
-      // Create new assignments (without route optimization - just distribute by weight/capacity)
-      for (const dist of distributionResult.distributions) {
-        if (dist.orders.length > 0) {
-          const assignmentsToInsert = dist.orders.map((o, idx) => ({
-            order_id: o.orderId,
-            route_truck_id: dist.routeTruckId,
-            delivery_sequence: idx + 1, // Temporary sequence, will be optimized later
+      // Map compositions back to route_trucks by truck ID
+      for (const comp of result.compositions) {
+        const rt = route.route_trucks.find(r => r.truck?.id === comp.truck.id);
+        if (!rt) continue;
+
+        if (comp.orders.length > 0) {
+          const assignmentsToInsert = comp.orders.map((o, idx) => ({
+            order_id: o.pedido_id!, // pedido_id is the order.id from DB
+            route_truck_id: rt.id,
+            delivery_sequence: idx + 1,
           }));
 
           await supabase.from('order_assignments').insert(assignmentsToInsert);
         }
 
-        // Update route_truck totals (without route metrics yet)
+        // Update route_truck totals
         await supabase
           .from('route_trucks')
           .update({
-            total_weight_kg: dist.currentWeight,
-            total_orders: dist.orders.length,
+            total_weight_kg: comp.totalWeight,
+            total_orders: comp.orders.length,
           })
-          .eq('id', dist.routeTruckId);
+          .eq('id', rt.id);
       }
 
       // Update route status to 'loading' (ready for loading manifest)

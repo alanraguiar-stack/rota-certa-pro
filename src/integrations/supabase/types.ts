@@ -240,6 +240,7 @@ export type Database = {
       orders: {
         Row: {
           address: string
+          city: string | null
           client_name: string
           created_at: string
           geocoding_status: string | null
@@ -253,6 +254,7 @@ export type Database = {
         }
         Insert: {
           address: string
+          city?: string | null
           client_name: string
           created_at?: string
           geocoding_status?: string | null
@@ -266,6 +268,7 @@ export type Database = {
         }
         Update: {
           address?: string
+          city?: string | null
           client_name?: string
           created_at?: string
           geocoding_status?: string | null
