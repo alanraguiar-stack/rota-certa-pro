@@ -86,6 +86,13 @@ export function useDriverRoutes() {
 
   const fetchDeliveries = useCallback(async (assignmentId: string) => {
     try {
+      // First get the route_truck_id for this assignment to join order_assignments
+      const { data: assignmentData } = await (supabase as any)
+        .from('driver_assignments')
+        .select('route_truck_id')
+        .eq('id', assignmentId)
+        .single();
+
       const { data, error } = await (supabase as any)
         .from('delivery_executions')
         .select(`
@@ -94,6 +101,25 @@ export function useDriverRoutes() {
         `)
         .eq('driver_assignment_id', assignmentId)
         .order('created_at', { ascending: true });
+
+      // Sort by delivery_sequence from order_assignments
+      if (data && assignmentData?.route_truck_id) {
+        const orderIds = data.map((d: any) => d.order_id);
+        const { data: seqData } = await (supabase as any)
+          .from('order_assignments')
+          .select('order_id, delivery_sequence')
+          .eq('route_truck_id', assignmentData.route_truck_id)
+          .in('order_id', orderIds);
+
+        if (seqData) {
+          const seqMap = new Map(seqData.map((s: any) => [s.order_id, Number(s.delivery_sequence)]));
+          data.sort((a: any, b: any) => {
+            const seqA = seqMap.get(a.order_id) ?? 999;
+            const seqB = seqMap.get(b.order_id) ?? 999;
+            return (seqA as number) - (seqB as number);
+          });
+        }
+      }
 
       if (error) throw error;
       setDeliveries(data || []);

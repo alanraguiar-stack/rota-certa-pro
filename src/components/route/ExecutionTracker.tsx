@@ -86,6 +86,24 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
 
   useEffect(() => { fetchData(); }, [routeTrucks]);
 
+  // Realtime subscription for delivery_executions updates
+  useEffect(() => {
+    const channel = supabase
+      .channel('execution-tracker')
+      .on(
+        'postgres_changes' as any,
+        { event: '*', schema: 'public', table: 'delivery_executions' },
+        () => {
+          fetchData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [routeTrucks]);
+
   const generatePDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(16);

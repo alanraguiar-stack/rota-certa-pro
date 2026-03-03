@@ -14,7 +14,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { useUserRole, useUserManagement, AppRole } from '@/hooks/useUserRole';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy } from 'lucide-react';
 import { ProductUnitsImporter } from '@/components/route/ProductUnitsImporter';
 import { RouteHistoryImporter } from '@/components/route/RouteHistoryImporter';
 
@@ -41,6 +41,8 @@ export default function Settings() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [creatingDriver, setCreatingDriver] = useState(false);
+  const [testDriverInfo, setTestDriverInfo] = useState<{ email: string; password: string; fullName: string } | null>(null);
 
   // Load user profile
   useEffect(() => {
@@ -150,6 +152,28 @@ export default function Settings() {
       setUsers(users.map(u => 
         u.user_id === userId ? { ...u, is_active: !currentlyActive } : u
       ));
+    }
+  };
+
+  const handleCreateTestDriver = async () => {
+    setCreatingDriver(true);
+    setTestDriverInfo(null);
+    try {
+      const driverNumber = Date.now() % 10000;
+      const { data, error } = await supabase.functions.invoke('create-test-driver', {
+        body: { driverNumber },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      setTestDriverInfo({ email: data.email, password: data.password, fullName: data.fullName });
+      toast({ title: 'Motorista de teste criado!' });
+      // Reload users list
+      const allUsers = await getAllUsers();
+      setUsers(allUsers);
+    } catch (err: any) {
+      toast({ title: 'Erro ao criar motorista', description: err.message, variant: 'destructive' });
+    } finally {
+      setCreatingDriver(false);
     }
   };
 
@@ -320,7 +344,33 @@ export default function Settings() {
                     Gerencie permissões e status dos usuários
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  {/* Create Test Driver */}
+                  <div className="flex items-center gap-3 p-4 rounded-lg border border-dashed border-border">
+                    <Button onClick={handleCreateTestDriver} disabled={creatingDriver} variant="outline" className="gap-2">
+                      <UserPlus className="h-4 w-4" />
+                      {creatingDriver ? 'Criando...' : 'Criar Motorista de Teste'}
+                    </Button>
+                    {testDriverInfo && (
+                      <div className="flex-1 text-sm space-y-1 bg-muted p-3 rounded-md">
+                        <p className="font-medium">{testDriverInfo.fullName}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">Email:</span>
+                          <code className="text-xs bg-background px-1 rounded">{testDriverInfo.email}</code>
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { navigator.clipboard.writeText(testDriverInfo.email); toast({ title: 'Email copiado!' }); }}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground">Senha:</span>
+                          <code className="text-xs bg-background px-1 rounded">{testDriverInfo.password}</code>
+                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { navigator.clipboard.writeText(testDriverInfo.password); toast({ title: 'Senha copiada!' }); }}>
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   {loadingUsers ? (
                     <p className="text-center text-muted-foreground py-8">
                       Carregando usuários...
@@ -359,6 +409,7 @@ export default function Settings() {
                                 <SelectContent>
                                   <SelectItem value="admin">Administrador</SelectItem>
                                   <SelectItem value="operacional">Operacional</SelectItem>
+                                  <SelectItem value="motorista">Motorista</SelectItem>
                                 </SelectContent>
                               </Select>
                             </TableCell>

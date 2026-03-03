@@ -380,6 +380,7 @@ export function autoComposeRoute(
     }
 
     const capacity = Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+    const maxDel = truck.max_deliveries ? Number(truck.max_deliveries) : 25;
     const assignedOrders: GeocodedOrder[] = [];
     let currentWeight = 0;
 
@@ -396,11 +397,13 @@ export function autoComposeRoute(
       for (const order of cityOrders) {
         if (assignedOrderKeys.has(orderKey(order))) continue;
         if (currentWeight + order.weight_kg > capacity) continue;
+        if (assignedOrders.length >= maxDel) break;
 
         assignedOrders.push(order);
         assignedOrderKeys.add(orderKey(order));
         currentWeight += order.weight_kg;
       }
+      if (assignedOrders.length >= maxDel) break;
     }
 
     const citiesInTruck = new Set<string>();
