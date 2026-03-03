@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
+import { useProductUnits } from '@/hooks/useProductUnits';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -92,17 +93,20 @@ function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
       totalWeight: data.weight,
       orderCount: data.count,
     }))
-    .sort((a, b) => b.totalWeight - a.totalWeight);
+    .sort((a, b) => a.product.localeCompare(b.product));
 }
 
 // PDF Generator for Loading Manifest (simplified - only products)
+const WEIGHT_UNITS = ['kg', 'g'];
+
 function generateLoadingPDF(
   routeName: string,
   date: string,
   truck: TruckType,
   products: ConsolidatedProduct[],
   totalWeight: number,
-  occupancyPercent: number
+  occupancyPercent: number,
+  getUnitForProduct?: (name: string) => string
 ): jsPDF {
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -145,11 +149,20 @@ function generateLoadingPDF(
   autoTable(doc, {
     startY: 73,
     head: [['#', 'Produto', 'Peso Total']],
-    body: products.map((p, idx) => [
-      String(idx + 1),
-      toASCII(p.product),
-      formatWeight(p.totalWeight),
-    ]),
+    body: products.map((p, idx) => {
+      let display = formatWeight(p.totalWeight);
+      if (getUnitForProduct) {
+        const unit = getUnitForProduct(p.product);
+        if (!WEIGHT_UNITS.includes(unit)) {
+          display = `${p.orderCount} ${unit}${p.orderCount > 1 ? 's' : ''}`;
+        }
+      }
+      return [
+        String(idx + 1),
+        toASCII(p.product),
+        display,
+      ];
+    }),
     foot: [['', 'TOTAL', formatWeight(totalWeight)]],
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 10 },
@@ -313,6 +326,7 @@ function generateDeliveryPDF(
 
 export function SideBySideManifests({ routeName, date, trucks }: SideBySideManifestsProps) {
   const [selectedTruckIndex, setSelectedTruckIndex] = useState(0);
+  const { getUnitForProduct } = useProductUnits();
   const selectedTruck = trucks[selectedTruckIndex];
   
   if (trucks.length === 0 || !selectedTruck) {
@@ -335,7 +349,8 @@ export function SideBySideManifests({ routeName, date, trucks }: SideBySideManif
       selectedTruck.truck,
       consolidatedProducts,
       selectedTruck.totalWeight,
-      selectedTruck.occupancyPercent
+      selectedTruck.occupancyPercent,
+      getUnitForProduct
     );
     doc.save(`romaneio-carga-${selectedTruck.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
   };
@@ -359,7 +374,8 @@ export function SideBySideManifests({ routeName, date, trucks }: SideBySideManif
       selectedTruck.truck,
       consolidatedProducts,
       selectedTruck.totalWeight,
-      selectedTruck.occupancyPercent
+      selectedTruck.occupancyPercent,
+      getUnitForProduct
     );
     doc.autoPrint();
     window.open(doc.output('bloburl'), '_blank');
@@ -384,7 +400,7 @@ export function SideBySideManifests({ routeName, date, trucks }: SideBySideManif
       setTimeout(() => {
         // Loading manifest
         const loadingDoc = generateLoadingPDF(
-          routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent
+          routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
         );
         loadingDoc.save(`romaneio-carga-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
         
@@ -489,7 +505,11 @@ export function SideBySideManifests({ routeName, date, trucks }: SideBySideManif
                       <span className="font-medium">{product.product}</span>
                     </div>
                     <Badge variant="secondary" className="font-bold">
-                      {formatWeight(product.totalWeight)}
+                      {(() => {
+                        const unit = getUnitForProduct(product.product);
+                        if (WEIGHT_UNITS.includes(unit)) return formatWeight(product.totalWeight);
+                        return `${product.orderCount} ${unit}${product.orderCount > 1 ? 's' : ''}`;
+                      })()}
                     </Badge>
                   </div>
                 ))}

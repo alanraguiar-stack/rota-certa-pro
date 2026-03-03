@@ -98,7 +98,7 @@ function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
       totalWeight: data.weight,
       orderCount: data.count,
     }))
-    .sort((a, b) => b.totalWeight - a.totalWeight);
+    .sort((a, b) => a.product.localeCompare(b.product));
 }
 
 // PDF Generator for Loading Manifest (products only - for CD team)
@@ -351,22 +351,26 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
     );
   }
   
-  const handleDownloadAll = () => {
+  const handleDownloadAllLoading = () => {
     trucks.forEach((truckData, index) => {
       const products = consolidateProducts(truckData.orders);
       setTimeout(() => {
-        // Loading manifest
-        const loadingDoc = generateLoadingPDF(
+        const doc = generateLoadingPDF(
           routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
         );
-        loadingDoc.save(`romaneio-carga-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
-        
-        // Delivery manifest
-        const deliveryDoc = generateDeliveryPDF(
+        doc.save(`romaneio-carga-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
+      }, index * 500);
+    });
+  };
+
+  const handleDownloadAllDelivery = () => {
+    trucks.forEach((truckData, index) => {
+      setTimeout(() => {
+        const doc = generateDeliveryPDF(
           routeName, date, truckData.truck, truckData.orders, truckData.totalWeight, truckData.departureTime
         );
-        deliveryDoc.save(`romaneio-entrega-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
-      }, index * 600);
+        doc.save(`romaneio-entrega-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
+      }, index * 500);
     });
   };
   
@@ -409,10 +413,16 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
             Clique para baixar ou imprimir os romaneios
           </p>
         </div>
-        <Button onClick={handleDownloadAll} className="gap-2" size="lg">
-          <FileDown className="h-4 w-4" />
-          Baixar Todos ({trucks.length * 2} PDFs)
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleDownloadAllLoading} className="gap-2" variant="outline">
+            <ClipboardCheck className="h-4 w-4" />
+            Baixar Romaneios de Carga ({trucks.length})
+          </Button>
+          <Button onClick={handleDownloadAllDelivery} className="gap-2" variant="outline">
+            <MapPin className="h-4 w-4" />
+            Baixar Romaneios de Entrega ({trucks.length})
+          </Button>
+        </div>
       </div>
       
       {/* Truck Cards Grid */}

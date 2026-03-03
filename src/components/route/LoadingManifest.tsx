@@ -69,7 +69,7 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
       unitType: data.unitType,
       orderCount: data.count,
     }))
-    .sort((a, b) => b.totalWeight - a.totalWeight);
+    .sort((a, b) => a.product.localeCompare(b.product));
 }
 
 function formatWeight(weight: number): string {
