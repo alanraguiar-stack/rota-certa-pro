@@ -273,10 +273,11 @@ function addOrdersToTruck(
 ) {
   const truck = routeTrucks.find(rt => rt.id === dist.routeTruckId)?.truck;
   
+  const maxDel = truck?.max_deliveries ? Number(truck.max_deliveries) : 25;
   for (const go of orders) {
     const weight = Number(go.order.weight_kg);
     const canFitWeight = dist.currentWeight + weight <= dist.capacity;
-    const canFitOrders = !truck?.max_deliveries || dist.orderCount < truck.max_deliveries;
+    const canFitOrders = dist.orderCount < maxDel;
 
     if (canFitWeight && canFitOrders) {
       dist.orders.push({

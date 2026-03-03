@@ -77,14 +77,25 @@ export default function DeliveryConfirmation() {
 
       // Check if there are more pending deliveries
       const remaining = await fetchDeliveries(execution!.driver_assignment_id);
-      const nextPending = remaining.find((d: DeliveryExecution) => d.status === 'pendente');
+      const pendingDeliveries = remaining.filter((d: DeliveryExecution) => d.status === 'pendente');
 
-      if (nextPending) {
-        // Navigate to next delivery via Google Maps
-        const nextAddress = nextPending.order?.address;
-        if (nextAddress) {
-          const url = `https://www.google.com/maps/dir/?api=1&origin=current+location&destination=${encodeURIComponent(nextAddress)}&travelmode=driving`;
-          window.open(url, '_blank');
+      if (pendingDeliveries.length > 0) {
+        // Reopen Google Maps with ALL remaining pending stops
+        const pendingStops = pendingDeliveries
+          .map((d: DeliveryExecution) => d.order?.address)
+          .filter(Boolean) as string[];
+        
+        if (pendingStops.length > 0) {
+          const destination = pendingStops[pendingStops.length - 1];
+          const waypoints = pendingStops.slice(0, -1).join('|');
+          const params = new URLSearchParams({
+            api: '1',
+            origin: 'current+location',
+            destination,
+            travelmode: 'driving',
+          });
+          if (waypoints) params.set('waypoints', waypoints);
+          window.open(`https://www.google.com/maps/dir/?${params.toString()}`, '_blank');
         }
         navigate('/motorista');
       } else {
