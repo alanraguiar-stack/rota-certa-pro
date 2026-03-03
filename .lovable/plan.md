@@ -1,62 +1,69 @@
 
 
-# Correcoes de Distribuicao, Romaneio e Downloads
+# Plano: Limite Global de 25, Usuarios Fake, Revisao do Fluxo Motorista e Realtime
 
-## 1. Padronizar limite de entregas em 25
+## 1. Limite de 25 entregas para TODOS os caminhoes (incluindo nao-ancora)
 
-**Arquivo:** `src/lib/anchorRules.ts`
-- CYR: 24 → 25
-- FKD: 24 → 25
-- EEF: 99 → 25 (padronizar)
+**Problema:** O `autoRouterEngine.ts` aplica `maxDeliveries` apenas para caminhoes ancora (via `anchorRules`). Caminhoes nao-ancora (Step 5c, linhas 372-403) nao tem nenhum limite de entregas — aceitam tudo que couber no peso.
 
-## 2. Unidades de medida no romaneio de carga
+**Correcao:** `src/lib/autoRouterEngine.ts` — No loop de caminhoes nao-ancora (Step 5c), adicionar verificacao `assignedOrders.length >= 25` como condicao de parada. Tambem aplicar o `max_deliveries` do banco se estiver preenchido no truck.
 
-O problema e que `TruckManifestCards.tsx` e `SideBySideManifests.tsx` usam `consolidateProducts` que NAO consulta `getUnitForProduct`. O `TruckManifestCards` ja usa `getUnitForProduct` na exibicao e no PDF, mas o `SideBySideManifests` nao usa.
+Tambem garantir que `src/lib/distribution.ts` (funcao legada) respeite o limite.
 
-Porem o problema real e que produtos como "Tubaina" estao com unit_type = 'kg' na tabela `product_units`. Isso depende dos dados importados pelo usuario. O sistema ja consulta a tabela corretamente — se Tubaina aparece como 'kg', e porque esta cadastrada assim.
+## 2. Criar usuarios fake para teste de atribuicao de motorista
 
-**Acao:** Garantir que `SideBySideManifests` tambem use `useProductUnits` e passe `getUnitForProduct` para o PDF de carga (atualmente nao passa). E no `LoadingManifest.tsx` (que ja usa), garantir consistencia.
+**Arquivo:** `src/pages/Settings.tsx`
 
-**Arquivos:**
-- `src/components/route/SideBySideManifests.tsx`: Importar `useProductUnits`, passar `getUnitForProduct` para `generateLoadingPDF` e exibicao.
+Adicionar um botao na aba de Gestao de Usuarios (admin) para "Criar Motorista de Teste". Ao clicar:
+- Chama `supabase.auth.signUp` com email fake (ex: `motorista_teste_1@rotacerta.test`) e senha padrao
+- Cria profile com nome "Motorista Teste 1"
+- Atribui role `motorista` na tabela `user_roles`
+- Isso permite testar a atribuicao de rota e visualizar pela otica do motorista fazendo login com esse usuario
 
-## 3. Limite minimo de 15 entregas — evitar caminhoes com poucas entregas
+O admin precisara saber o email/senha para logar como motorista em outra aba. Exibiremos essa informacao na tela.
 
-**Arquivo:** `src/lib/autoRouterEngine.ts`
+**Nota:** Sera necessario habilitar auto-confirm apenas para esses usuarios de teste, OU usar a service role key via edge function para criar o usuario ja confirmado.
 
-Apos a alocacao dos caminhoes ancora (Step 5), adicionar um passo de **consolidacao**: se um caminhao ancora (nao-apoio) tiver menos de 15 entregas, transferir seus pedidos para o caminhao de apoio (EEF) e remover o caminhao da composicao. Isso evita enviar um caminhao com poucas entregas.
+**Abordagem:** Criar uma edge function `create-test-driver` que usa a service role key para criar o usuario via `supabase.auth.admin.createUser({ email, password, email_confirm: true })`, insere o profile e o role. O frontend chama essa edge function.
 
-Logica:
-```text
-const MIN_DELIVERIES = 15;
-for each non-support composition:
-  if orders.length < MIN_DELIVERIES:
-    move all orders to support truck
-    clear this composition
-    add warning
+## 3. Revisar fluxo completo do motorista
+
+O fluxo atual:
+1. **Receber rota:** `DriverDashboard` busca `driver_assignments` com join em `route_trucks/trucks/routes` — OK
+2. **Iniciar roteiro:** Marca status `em_andamento` e abre Google Maps com todas as paradas pendentes — OK
+3. **Ticar entrega:** Clica na entrega pendente → `DeliveryConfirmation` com assinatura + foto + observacoes — OK
+4. **Google Maps paradas:** Usa `buildGoogleMapsUrl` com enderecos das entregas pendentes — OK, mas preciso verificar se a ordem respeita `delivery_sequence`
+
+**Problemas identificados:**
+- As entregas no `fetchDeliveries` sao ordenadas por `created_at` e nao por `delivery_sequence` da `order_assignments`. Isso pode colocar as paradas fora da ordem planejada no Google Maps.
+- Apos confirmar entrega, o sistema navega para a proxima parada individual mas deveria reabrir o Maps com TODAS as paradas restantes (nao apenas a proxima).
+
+**Correcoes:**
+- `src/hooks/useDriverRoutes.ts`: Alterar `fetchDeliveries` para fazer join com `order_assignments` e ordenar por `delivery_sequence`
+- `src/pages/DeliveryConfirmation.tsx`: Apos confirmar, reabrir Google Maps com todas as paradas pendentes restantes (nao apenas a proxima)
+
+## 4. Realtime — Admin ve entregas sendo ticadas em tempo real
+
+**Abordagem:**
+- Habilitar realtime na tabela `delivery_executions` via migracao SQL
+- No `ExecutionTracker.tsx`, adicionar um canal realtime que escuta `postgres_changes` na tabela `delivery_executions`. Quando um motorista tica uma entrega (UPDATE de status), o admin ve a atualizacao automaticamente sem precisar clicar "Atualizar"
+
+**Migracao SQL:**
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE public.delivery_executions;
 ```
 
-## 4. Romaneio de carga em ordem alfabetica
-
-**Arquivos:** `TruckManifestCards.tsx`, `SideBySideManifests.tsx`, `LoadingManifest.tsx`
-
-Alterar o `.sort()` de `consolidateProducts` de ordenar por peso (`b.totalWeight - a.totalWeight`) para ordem alfabetica (`a.product.localeCompare(b.product)`).
-
-## 5. Separar botao "Baixar Todos" em dois: Carga e Entrega
-
-**Arquivo:** `src/components/route/TruckManifestCards.tsx`
-
-Substituir o botao unico `Baixar Todos (N PDFs)` por dois botoes:
-- "Baixar Romaneios de Carga" — baixa somente os PDFs de carga
-- "Baixar Romaneios de Entrega" — baixa somente os PDFs de entrega
+**Arquivo:** `src/components/route/ExecutionTracker.tsx` — Adicionar `useEffect` com `supabase.channel('executions').on('postgres_changes', ...)` que chama `fetchData()` quando detecta mudanca.
 
 ## Resumo de Arquivos
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/lib/anchorRules.ts` | maxDeliveries → 25 para todos |
-| `src/lib/autoRouterEngine.ts` | Consolidacao de caminhoes com < 15 entregas |
-| `src/components/route/TruckManifestCards.tsx` | Sort alfabetico, separar botoes download |
-| `src/components/route/SideBySideManifests.tsx` | Sort alfabetico, integrar useProductUnits |
-| `src/components/route/LoadingManifest.tsx` | Sort alfabetico |
+| `src/lib/autoRouterEngine.ts` | Limite de 25 entregas para caminhoes nao-ancora |
+| `src/pages/Settings.tsx` | Botao "Criar Motorista de Teste" (chama edge function) |
+| `supabase/functions/create-test-driver/index.ts` | Edge function para criar usuario fake confirmado |
+| `src/hooks/useDriverRoutes.ts` | Ordenar deliveries por `delivery_sequence` |
+| `src/pages/DeliveryConfirmation.tsx` | Reabrir Maps com todas paradas restantes |
+| `src/components/route/ExecutionTracker.tsx` | Subscription realtime para atualizacao automatica |
+| Migracao SQL | Habilitar realtime na tabela `delivery_executions` |
 
