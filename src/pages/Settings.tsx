@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -29,7 +30,7 @@ interface UserProfile {
 export default function Settings() {
   const { user } = useAuth();
   const { theme, toggleTheme, isDark } = useTheme();
-  const { isAdmin, loading: roleLoading } = useUserRole();
+  const { isAdmin, isMotorista, loading: roleLoading } = useUserRole();
   const { getAllUsers, updateUserRole, toggleUserActive } = useUserManagement();
   const { toast } = useToast();
 
@@ -176,6 +177,11 @@ export default function Settings() {
       setCreatingDriver(false);
     }
   };
+
+  // Redirect drivers away from settings
+  if (!roleLoading && isMotorista) {
+    return <Navigate to="/motorista" replace />;
+  }
 
   return (
     <AppLayout>
