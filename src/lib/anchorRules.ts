@@ -50,7 +50,7 @@ export const ANCHOR_RULES: AnchorRule[] = [
   {
     platePrefix: 'CYR',
     anchorCity: 'osasco',
-    maxDeliveries: 24,
+    maxDeliveries: 25,
     allowedFillCities: [],
     neighborhoodExceptions: [
       { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2 },
@@ -62,7 +62,7 @@ export const ANCHOR_RULES: AnchorRule[] = [
   {
     platePrefix: 'FKD',
     anchorCity: 'carapicuiba',
-    maxDeliveries: 24,
+    maxDeliveries: 25,
     allowedFillCities: [],
     neighborhoodExceptions: [
       { neighborhood: 'metalurgicos', city: 'osasco', maxDeliveries: 2, insertAfterNeighborhood: 'jardim novo horizonte' },
@@ -74,7 +74,7 @@ export const ANCHOR_RULES: AnchorRule[] = [
   {
     platePrefix: 'EEF',
     anchorCity: '',  // Sem cidade âncora — recebe demais + excedentes
-    maxDeliveries: 99,
+    maxDeliveries: 25,
     allowedFillCities: [
       'pirapora do bom jesus', 'santana de parnaiba',
       'taboao da serra', 'embu', 'embu das artes', 'sao paulo',

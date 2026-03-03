@@ -423,6 +423,45 @@ export function autoComposeRoute(
     }
   }
 
+  // Step 5d: Consolidation — move trucks with < 15 deliveries to support
+  const MIN_DELIVERIES = 15;
+  const supportComp = compositions.find(c => c.anchorRule?.isSupport);
+  if (supportComp) {
+    for (const comp of compositions) {
+      if (comp === supportComp) continue;
+      if (comp.orders.length === 0) continue;
+      if (comp.anchorRule?.isSupport) continue;
+      if (comp.orders.length < MIN_DELIVERIES) {
+        warnings.push(
+          `${comp.truck.plate}: apenas ${comp.orders.length} entregas (mín. ${MIN_DELIVERIES}). Pedidos transferidos para caminhão de apoio.`
+        );
+        reasoning.push(
+          `Consolidação: ${comp.truck.plate} (${comp.orders.length} entregas) → apoio ${supportComp.truck.plate}`
+        );
+        // Transfer orders to support
+        supportComp.orders.push(...comp.orders);
+        supportComp.totalWeight += comp.totalWeight;
+        supportComp.occupancyPercent = Math.round(
+          (supportComp.totalWeight / Number(supportComp.truck.capacity_kg)) * 100
+        );
+        supportComp.estimatedDeliveries = supportComp.orders.length;
+        // Update support cities
+        for (const order of comp.orders) {
+          const city = normalizeCityName((order as any).city || (order as any).geocoded?.city || 'desconhecida');
+          if (!supportComp.cities.includes(city)) {
+            supportComp.cities.push(city);
+          }
+        }
+        // Clear this composition
+        comp.orders = [];
+        comp.totalWeight = 0;
+        comp.occupancyPercent = 0;
+        comp.estimatedDeliveries = 0;
+        comp.cities = [];
+      }
+    }
+  }
+
   // Step 6: Sequence optimization (city > CEP > bairro > rua)
   for (const comp of compositions) {
     if (comp.orders.length > 1) {
