@@ -410,6 +410,21 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             description: `${result.advOrders.length} pedidos (${formatWeightIntl(totalWeight)})`,
           });
           
+          // Auto-cadastrar produtos novos do PDF ADV
+          const allProducts = result.advOrders.flatMap(o => 
+            (o.items || []).map(item => ({ product_name: item.product_name }))
+          );
+          if (allProducts.length > 0) {
+            bulkAddNewProducts(allProducts).then(res => {
+              if (res.added > 0) {
+                toast({
+                  title: '🆕 Produtos cadastrados automaticamente',
+                  description: `${res.added} novos produtos detectados e registrados`,
+                });
+              }
+            });
+          }
+          
           return { type: 'adv', data: result.advOrders };
         }
         

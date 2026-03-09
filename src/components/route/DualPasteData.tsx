@@ -566,6 +566,21 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
         description: `${orders.length} pedidos com itens`,
       });
       
+      // Auto-cadastrar produtos novos
+      const allProducts2 = orders.flatMap(o => 
+        (o.items || []).map(item => ({ product_name: item.product_name }))
+      );
+      if (allProducts2.length > 0) {
+        bulkAddNewProducts(allProducts2).then(result => {
+          if (result.added > 0) {
+            toast({
+              title: '🆕 Produtos cadastrados automaticamente',
+              description: `${result.added} novos produtos detectados e registrados`,
+            });
+          }
+        });
+      }
+      
       return { type: 'adv', data: orders };
     }
     
