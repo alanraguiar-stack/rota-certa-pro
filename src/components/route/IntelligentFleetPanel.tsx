@@ -90,14 +90,16 @@ export function IntelligentFleetPanel({
       );
 
       const missingAnchorIds: string[] = [];
-      for (const rule of ANCHOR_RULES) {
-        if (rule.isSupport || !rule.anchorCity) continue;
-        if (!orderCities.has(rule.anchorCity)) continue;
-        // Encontrar o caminhão correspondente pela placa
-        const anchorTruck = trucks.find(t => {
-          const prefix = t.plate.replace(/[\s-]/g, '').toUpperCase().substring(0, 3);
-          return prefix === rule.platePrefix;
-        });
+      const truckData = trucks.map(t => ({
+        plate: t.plate,
+        capacity_kg: Number(t.capacity_kg),
+        max_deliveries: t.max_deliveries,
+        id: t.id,
+      }));
+      const territoryAssignments = assignTrucksToTerritories(truckData, orderCities);
+
+      for (const [, assignedTruck] of territoryAssignments) {
+        const anchorTruck = trucks.find(t => t.plate === (assignedTruck as any).plate);
         if (anchorTruck && !selectedTruckIds.includes(anchorTruck.id)) {
           missingAnchorIds.push(anchorTruck.id);
         }

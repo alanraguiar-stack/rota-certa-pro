@@ -132,23 +132,27 @@ export function analyzeFleetRequirements(
       reasoning.push(`🏙️ Cidades detectadas nos pedidos: ${[...orderCities].join(', ')}`);
     }
 
-    // Para cada regra âncora, verificar se a cidade está nos pedidos
-    for (const rule of ANCHOR_RULES) {
-      if (!rule.anchorCity || rule.isSupport) continue;
-      
-      if (orderCities.has(rule.anchorCity)) {
-        // Encontrar o caminhão correspondente na frota
-        const matchingTruck = availableTrucks.find(t => {
-          const prefix = t.plate.replace(/[\s-]/g, '').toUpperCase().substring(0, 3);
-          return prefix === rule.platePrefix;
-        });
-        
-        if (matchingTruck && !anchorTrucks.some(at => at.id === matchingTruck.id)) {
-          anchorTrucks.push(matchingTruck);
-          reasoning.push(
-            `🔒 ${rule.anchorCity} detectado nos pedidos → ${matchingTruck.plate} (${rule.label}) incluído obrigatoriamente`
-          );
-        }
+    // Para cada regra de território, verificar se a cidade está nos pedidos
+    // O sistema seleciona automaticamente os melhores caminhões disponíveis
+    const { assignTrucksToTerritories } = await import('@/lib/anchorRules');
+    const truckData = availableTrucks.map(t => ({
+      plate: t.plate,
+      capacity_kg: Number(t.capacity_kg),
+      max_deliveries: t.max_deliveries,
+      id: t.id,
+    }));
+    const territoryAssignments = assignTrucksToTerritories(truckData, orderCities);
+
+    for (const [territoryId, assignedTruck] of territoryAssignments) {
+      const rule = TERRITORY_RULES.find(r => r.id === territoryId);
+      if (!rule || rule.isSupport) continue;
+
+      const matchingTruck = availableTrucks.find(t => t.plate === assignedTruck.plate);
+      if (matchingTruck && !anchorTrucks.some(at => at.id === matchingTruck.id)) {
+        anchorTrucks.push(matchingTruck);
+        reasoning.push(
+          `🔒 ${rule.anchorCity} detectado → ${matchingTruck.plate} atribuído como ${rule.label}`
+        );
       }
     }
   }
