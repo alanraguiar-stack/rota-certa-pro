@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react';
-import { Upload, FileSpreadsheet, Trash2, Package, Download, Search } from 'lucide-react';
+import { Upload, FileSpreadsheet, Trash2, Package, Download, Search, Plus } from 'lucide-react';
 import defaultSpreadsheet from '@/assets/unidade_de_medida.xlsx?url';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
