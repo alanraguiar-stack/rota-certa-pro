@@ -52,6 +52,7 @@ import {
   parseADVDetailExcel,
 } from '@/lib/advParser';
 import * as XLSX from 'xlsx';
+import { useProductUnits } from '@/hooks/useProductUnits';
 
 // Motor Inteligente de Leitura
 import { 
