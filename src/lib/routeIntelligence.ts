@@ -144,7 +144,9 @@ export function analyzeFleetRequirements(
 
     for (const [territoryId, assignedTruck] of territoryAssignments) {
       const rule = TERRITORY_RULES.find(r => r.id === territoryId);
-      if (!rule || rule.isSupport) continue;
+      if (!rule) continue;
+      // Skip support trucks in anchor selection — they'll be added only if weight requires
+      if (rule.isSupport) continue;
 
       const matchingTruck = availableTrucks.find(t => t.plate === assignedTruck.plate);
       if (matchingTruck && !anchorTrucks.some(at => at.id === matchingTruck.id)) {

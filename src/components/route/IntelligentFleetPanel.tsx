@@ -28,7 +28,7 @@ import {
   isFleetSelectionValid,
   FleetAnalysis
 } from '@/lib/routeIntelligence';
-import { TERRITORY_RULES, assignTrucksToTerritories } from '@/lib/anchorRules';
+import { TERRITORY_RULES } from '@/lib/anchorRules';
 
 interface IntelligentFleetPanelProps {
   trucks: Truck[];
@@ -76,40 +76,9 @@ export function IntelligentFleetPanel({
       fleetAnalysis.recommendedTrucks.length > 0 && 
       selectedTruckIds.length === 0
     ) {
-      // Caso 1: nenhum selecionado — aplicar toda a recomendação
       onSelectionChange(fleetAnalysis.recommendedTrucks.map(t => t.id));
-      return;
     }
-
-    // Caso 2: já há selecionados — garantir que âncoras obrigatórios estejam incluídos
-    if (selectedTruckIds.length > 0 && orders.length > 0) {
-      const orderCities = new Set(
-        orders
-          .map(o => o.city?.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, ''))
-          .filter(Boolean)
-      );
-
-      const missingAnchorIds: string[] = [];
-      const truckData = trucks.map(t => ({
-        plate: t.plate,
-        capacity_kg: Number(t.capacity_kg),
-        max_deliveries: t.max_deliveries,
-        id: t.id,
-      }));
-      const territoryAssignments = assignTrucksToTerritories(truckData, orderCities);
-
-      for (const [, assignedTruck] of territoryAssignments) {
-        const anchorTruck = trucks.find(t => t.plate === (assignedTruck as any).plate);
-        if (anchorTruck && !selectedTruckIds.includes(anchorTruck.id)) {
-          missingAnchorIds.push(anchorTruck.id);
-        }
-      }
-
-      if (missingAnchorIds.length > 0) {
-        onSelectionChange([...selectedTruckIds, ...missingAnchorIds]);
-      }
-    }
-  }, [fleetAnalysis.recommendedTrucks, selectedTruckIds.length, disabled, onSelectionChange, orders, trucks]);
+  }, [fleetAnalysis.recommendedTrucks, selectedTruckIds.length, disabled, onSelectionChange]);
 
   // Cálculos da seleção atual
   const selectedTrucks = trucks.filter(t => selectedTruckIds.includes(t.id));
