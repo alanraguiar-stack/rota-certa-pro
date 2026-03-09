@@ -226,6 +226,55 @@ export function ProductUnitsImporter() {
         </Card>
       )}
 
+      {/* Manual Add */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Plus className="h-5 w-5" />
+            Adicionar Produto Manualmente
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form
+            className="flex flex-col sm:flex-row gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newProductName.trim()) return;
+              setIsAdding(true);
+              const ok = await addUnit(newProductName, newProductUnit);
+              setIsAdding(false);
+              if (ok) {
+                toast({ title: `Produto "${newProductName}" adicionado` });
+                setNewProductName('');
+                setNewProductUnit('kg');
+              } else {
+                toast({ title: 'Erro ao adicionar produto', variant: 'destructive' });
+              }
+            }}
+          >
+            <Input
+              placeholder="Nome do produto"
+              value={newProductName}
+              onChange={(e) => setNewProductName(e.target.value)}
+              className="flex-1"
+            />
+            <select
+              value={newProductUnit}
+              onChange={(e) => setNewProductUnit(e.target.value)}
+              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {validUnits.map(u => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </select>
+            <Button type="submit" disabled={isAdding || !newProductName.trim()} className="gap-2">
+              <Plus className="h-4 w-4" />
+              {isAdding ? 'Adicionando...' : 'Adicionar'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
       {/* Current Units */}
       <Card>
         <CardHeader>
