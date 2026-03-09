@@ -776,6 +776,53 @@ function optimizeDeliverySequence(
     result.push(...cityOrders);
   }
 
+  // Step 5: Cross-city insertAfterNeighborhood (e.g. Jaguaré after Rochdale across city groups)
+  const rule = territoryRule || (anchorRule ? TERRITORY_RULES.find(r => r.anchorCity === anchorRule.anchorCity) : null);
+  if (rule) {
+    const crossCityInsertions = rule.neighborhoodExceptions.filter(e => e.insertAfterNeighborhood);
+    for (const insertion of crossCityInsertions) {
+      const targetNh = normalizeNeighborhood(insertion.insertAfterNeighborhood!);
+      const sourceNh = normalizeNeighborhood(insertion.neighborhood);
+
+      // Find source orders in result
+      const sourceIndices: number[] = [];
+      for (let i = 0; i < result.length; i++) {
+        const orderNh = normalizeNeighborhood(result[i].geocoded.neighborhood || '');
+        const orderCity = normalizeCityName(result[i].city || result[i].geocoded.city || '');
+        if (orderNh === sourceNh && orderCity === normalizeCityName(insertion.city)) {
+          sourceIndices.push(i);
+        }
+      }
+      if (sourceIndices.length === 0) continue;
+
+      // Find last occurrence of target neighborhood
+      let lastTargetIdx = -1;
+      for (let i = 0; i < result.length; i++) {
+        const orderNh = normalizeNeighborhood(result[i].geocoded.neighborhood || '');
+        if (orderNh === targetNh) {
+          lastTargetIdx = i;
+        }
+      }
+      if (lastTargetIdx === -1) continue;
+
+      // Extract source orders (back to front)
+      const sourceOrders = sourceIndices.map(idx => result[idx]);
+      for (let i = sourceIndices.length - 1; i >= 0; i--) {
+        result.splice(sourceIndices[i], 1);
+      }
+
+      // Recalculate insertion point (may have shifted)
+      let insertAfter = -1;
+      for (let i = 0; i < result.length; i++) {
+        const orderNh = normalizeNeighborhood(result[i].geocoded.neighborhood || '');
+        if (orderNh === targetNh) {
+          insertAfter = i;
+        }
+      }
+      result.splice(insertAfter + 1, 0, ...sourceOrders);
+    }
+  }
+
   orders.length = 0;
   orders.push(...result);
 }

@@ -46,6 +46,8 @@ export interface TerritoryRule {
   isSupport: boolean;
   /** Prioridade para atribuição (menor = atribuído primeiro) */
   priority: number;
+  /** Placa fixa — quando definida, este caminhão é reservado para o território */
+  fixedPlate?: string;
 }
 
 /**
@@ -62,6 +64,7 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     neighborhoodExceptions: [],
     excludedNeighborhoods: [
       { neighborhood: 'jardim mutinga', city: 'barueri' },
+      { neighborhood: 'imperial', city: 'barueri' },
     ],
     priorityNeighborhoods: [],
     isSupport: false,
@@ -75,16 +78,18 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     allowedFillCities: [],
     neighborhoodFills: [],
     neighborhoodExceptions: [
-      { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2 },
+      { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2, insertAfterNeighborhood: 'rochdale' },
       { neighborhood: 'parque imperial', city: 'sao paulo', maxDeliveries: 2 },
     ],
     excludedNeighborhoods: [],
-    // Jardim Mutinga (Barueri) entra PRIMEIRO, antes das entregas de Osasco
+    // Jardim Mutinga e Imperial (Barueri) entram PRIMEIRO, antes das entregas de Osasco
     priorityNeighborhoods: [
       { neighborhood: 'jardim mutinga', city: 'barueri' },
+      { neighborhood: 'imperial', city: 'barueri' },
     ],
     isSupport: false,
     priority: 2,
+    fixedPlate: 'TRC1Z00',
   },
   {
     id: 'carapicuiba',
@@ -235,13 +240,27 @@ export function assignTrucksToTerritories(
   const usedTrucks = new Set<string>();
   const assignments = new Map<string, typeof trucks[number]>();
 
+  // Phase 1: assign territories with fixedPlate first
   for (const rule of sortedRules) {
-    // Skip non-support territories if their anchor city has no orders
-    if (!rule.isSupport && rule.anchorCity && !citiesInOrders.has(rule.anchorCity)) {
-      continue;
-    }
+    if (!rule.fixedPlate) continue;
+    if (!rule.isSupport && rule.anchorCity && !citiesInOrders.has(rule.anchorCity)) continue;
 
-    // Find best available truck
+    const normalizedFixed = rule.fixedPlate.replace(/[\s-]/g, '').toUpperCase();
+    const truck = availableTrucks.find(
+      t => t.plate.replace(/[\s-]/g, '').toUpperCase() === normalizedFixed && !usedTrucks.has(t.plate)
+    );
+    if (!truck) continue;
+
+    usedTrucks.add(truck.plate);
+    assignments.set(rule.id, truck);
+    setTruckTerritory(truck.plate, rule);
+  }
+
+  // Phase 2: assign remaining territories automatically
+  for (const rule of sortedRules) {
+    if (rule.fixedPlate) continue; // already handled
+    if (!rule.isSupport && rule.anchorCity && !citiesInOrders.has(rule.anchorCity)) continue;
+
     const truck = availableTrucks.find(t => !usedTrucks.has(t.plate));
     if (!truck) continue;
 
