@@ -28,7 +28,7 @@ import {
   isFleetSelectionValid,
   FleetAnalysis
 } from '@/lib/routeIntelligence';
-import { ANCHOR_RULES } from '@/lib/anchorRules';
+import { TERRITORY_RULES, assignTrucksToTerritories } from '@/lib/anchorRules';
 
 interface IntelligentFleetPanelProps {
   trucks: Truck[];
