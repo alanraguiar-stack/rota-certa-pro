@@ -78,16 +78,18 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     allowedFillCities: [],
     neighborhoodFills: [],
     neighborhoodExceptions: [
-      { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2 },
+      { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2, insertAfterNeighborhood: 'rochdale' },
       { neighborhood: 'parque imperial', city: 'sao paulo', maxDeliveries: 2 },
     ],
     excludedNeighborhoods: [],
-    // Jardim Mutinga (Barueri) entra PRIMEIRO, antes das entregas de Osasco
+    // Jardim Mutinga e Imperial (Barueri) entram PRIMEIRO, antes das entregas de Osasco
     priorityNeighborhoods: [
       { neighborhood: 'jardim mutinga', city: 'barueri' },
+      { neighborhood: 'imperial', city: 'barueri' },
     ],
     isSupport: false,
     priority: 2,
+    fixedPlate: 'TRC1Z00',
   },
   {
     id: 'carapicuiba',
