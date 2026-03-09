@@ -64,6 +64,7 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     neighborhoodExceptions: [],
     excludedNeighborhoods: [
       { neighborhood: 'jardim mutinga', city: 'barueri' },
+      { neighborhood: 'imperial', city: 'barueri' },
     ],
     priorityNeighborhoods: [],
     isSupport: false,
