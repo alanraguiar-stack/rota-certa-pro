@@ -94,6 +94,7 @@ function formatWeightDisplay(weight: number): string {
 
 export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   const { toast } = useToast();
+  const { bulkAddNewProducts } = useProductUnits();
   
   // Estado para arquivo 1 (Itinerário/Vendas)
   const [file1Upload, setFile1Upload] = useState<UploadState>({
