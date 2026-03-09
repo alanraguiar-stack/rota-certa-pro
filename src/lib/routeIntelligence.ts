@@ -13,7 +13,7 @@
  */
 
 import { Truck, ParsedOrder } from '@/types';
-import { ANCHOR_RULES, findAnchorRule } from '@/lib/anchorRules';
+import { TERRITORY_RULES, findAnchorRule } from '@/lib/anchorRules';
 
 // ============================================
 // TIPOS E INTERFACES
