@@ -417,6 +417,7 @@ function mergeItinerarioWithADV(
 
 export function DualPasteData({ onParsed }: DualPasteDataProps) {
   const { toast } = useToast();
+  const { bulkAddNewProducts } = useProductUnits();
   
   // Estado para área 1 (Itinerário)
   const [area1, setArea1] = useState<PasteAreaState>({
