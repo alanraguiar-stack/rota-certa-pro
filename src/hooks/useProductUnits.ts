@@ -105,12 +105,29 @@ export function useProductUnits() {
     return !error;
   }, []);
 
+  const addUnit = useCallback(async (product_name: string, unit_type: string) => {
+    if (!user) return false;
+    const normalizedUnit = VALID_UNITS.includes(unit_type.toLowerCase().trim())
+      ? unit_type.toLowerCase().trim()
+      : 'kg';
+    const { data, error } = await supabase
+      .from('product_units')
+      .insert({ user_id: user.id, product_name: product_name.trim(), unit_type: normalizedUnit })
+      .select()
+      .single();
+    if (!error && data) {
+      setUnits(prev => [...prev, data].sort((a, b) => a.product_name.localeCompare(b.product_name)));
+    }
+    return !error;
+  }, [user]);
+
   return {
     units,
     loading,
     getUnitForProduct,
     importProductUnits,
     deleteUnit,
+    addUnit,
     fetchUnits,
     validUnits: VALID_UNITS,
   };

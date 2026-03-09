@@ -35,11 +35,14 @@ interface ParsedRow {
 }
 
 export function ProductUnitsImporter() {
-  const { units, loading, importProductUnits, deleteUnit, validUnits } = useProductUnits();
+  const { units, loading, importProductUnits, deleteUnit, addUnit, validUnits } = useProductUnits();
   const { toast } = useToast();
   const [preview, setPreview] = useState<ParsedRow[]>([]);
   const [isImporting, setIsImporting] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [newProductName, setNewProductName] = useState('');
+  const [newProductUnit, setNewProductUnit] = useState('kg');
+  const [isAdding, setIsAdding] = useState(false);
 
   const filteredUnits = useMemo(() => {
     if (!searchTerm.trim()) return units;
