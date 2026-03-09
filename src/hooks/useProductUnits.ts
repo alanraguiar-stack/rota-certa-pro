@@ -19,6 +19,37 @@ function normalize(str: string): string {
     .trim();
 }
 
+/**
+ * Infere a unidade de medida a partir do nome do produto.
+ * Prioridade: refrigerante > abreviações explícitas > kg (padrão).
+ */
+export function inferUnitFromName(productName: string): string {
+  const upper = productName.toUpperCase();
+
+  // Refrigerante é SEMPRE fardo
+  if (upper.includes('REFRIGERANTE')) return 'fardo';
+
+  // Abreviações explícitas (com separadores - ou espaço)
+  const abbrevMap: Array<[RegExp, string]> = [
+    [/\bCX\b/, 'caixa'],
+    [/\bUN\b/, 'unidade'],
+    [/\bFD\b/, 'fardo'],
+    [/\bPCT\b/, 'pacote'],
+    [/\bLT\b/, 'litro'],
+    [/\bLITRO\b/, 'litro'],
+    [/\bSC\b/, 'saco'],
+    [/\bDP\b/, 'display'],
+    [/\bGF\b/, 'garrafa'],
+    [/\bPC\b/, 'peca'],
+  ];
+
+  for (const [pattern, unit] of abbrevMap) {
+    if (pattern.test(upper)) return unit;
+  }
+
+  return 'kg';
+}
+
 export function useProductUnits() {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -121,6 +152,45 @@ export function useProductUnits() {
     return !error;
   }, [user]);
 
+  const bulkAddNewProducts = useCallback(async (products: Array<{ product_name: string }>) => {
+    if (!user) return { added: 0, skipped: 0 };
+
+    // Refresh units to have latest data
+    await fetchUnits();
+
+    const currentMap = new Map<string, string>();
+    units.forEach(u => currentMap.set(normalize(u.product_name), u.unit_type));
+
+    const newProducts: Array<{ user_id: string; product_name: string; unit_type: string }> = [];
+    const seen = new Set<string>();
+
+    for (const p of products) {
+      if (!p.product_name) continue;
+      const norm = normalize(p.product_name);
+      if (norm.length < 2) continue;
+      if (currentMap.has(norm) || seen.has(norm)) continue;
+
+      seen.add(norm);
+      newProducts.push({
+        user_id: user.id,
+        product_name: p.product_name.trim(),
+        unit_type: inferUnitFromName(p.product_name),
+      });
+    }
+
+    if (newProducts.length === 0) return { added: 0, skipped: products.length };
+
+    const { error } = await supabase.from('product_units').insert(newProducts);
+
+    if (error) {
+      console.error('Erro ao cadastrar produtos em lote:', error);
+      return { added: 0, skipped: products.length };
+    }
+
+    await fetchUnits();
+    return { added: newProducts.length, skipped: products.length - newProducts.length };
+  }, [user, units, fetchUnits]);
+
   return {
     units,
     loading,
@@ -128,6 +198,7 @@ export function useProductUnits() {
     importProductUnits,
     deleteUnit,
     addUnit,
+    bulkAddNewProducts,
     fetchUnits,
     validUnits: VALID_UNITS,
   };

@@ -52,6 +52,7 @@ import {
   parseADVDetailExcel,
 } from '@/lib/advParser';
 import * as XLSX from 'xlsx';
+import { useProductUnits } from '@/hooks/useProductUnits';
 
 // Motor Inteligente de Leitura
 import { 
@@ -93,6 +94,7 @@ function formatWeightDisplay(weight: number): string {
 
 export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   const { toast } = useToast();
+  const { bulkAddNewProducts } = useProductUnits();
   
   // Estado para arquivo 1 (Itinerário/Vendas)
   const [file1Upload, setFile1Upload] = useState<UploadState>({
@@ -196,6 +198,21 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
               title: '📦 Detalhe das Vendas detectado!',
               description: `${advOrders.length} pedidos com ${totalItems} itens`,
             });
+            
+            // Auto-cadastrar produtos novos
+            const allProducts = advOrders.flatMap(o => 
+              (o.items || []).map(item => ({ product_name: item.product_name }))
+            );
+            if (allProducts.length > 0) {
+              bulkAddNewProducts(allProducts).then(result => {
+                if (result.added > 0) {
+                  toast({
+                    title: '🆕 Produtos cadastrados automaticamente',
+                    description: `${result.added} novos produtos detectados e registrados`,
+                  });
+                }
+              });
+            }
             
             return { type: 'adv', data: advOrders };
           }
@@ -392,6 +409,21 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             title: 'Detalhe das Vendas detectado!',
             description: `${result.advOrders.length} pedidos (${formatWeightIntl(totalWeight)})`,
           });
+          
+          // Auto-cadastrar produtos novos do PDF ADV
+          const allProducts = result.advOrders.flatMap(o => 
+            (o.items || []).map(item => ({ product_name: item.product_name }))
+          );
+          if (allProducts.length > 0) {
+            bulkAddNewProducts(allProducts).then(res => {
+              if (res.added > 0) {
+                toast({
+                  title: '🆕 Produtos cadastrados automaticamente',
+                  description: `${res.added} novos produtos detectados e registrados`,
+                });
+              }
+            });
+          }
           
           return { type: 'adv', data: result.advOrders };
         }
