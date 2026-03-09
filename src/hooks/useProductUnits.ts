@@ -19,6 +19,37 @@ function normalize(str: string): string {
     .trim();
 }
 
+/**
+ * Infere a unidade de medida a partir do nome do produto.
+ * Prioridade: refrigerante > abreviações explícitas > kg (padrão).
+ */
+export function inferUnitFromName(productName: string): string {
+  const upper = productName.toUpperCase();
+
+  // Refrigerante é SEMPRE fardo
+  if (upper.includes('REFRIGERANTE')) return 'fardo';
+
+  // Abreviações explícitas (com separadores - ou espaço)
+  const abbrevMap: Array<[RegExp, string]> = [
+    [/\bCX\b/, 'caixa'],
+    [/\bUN\b/, 'unidade'],
+    [/\bFD\b/, 'fardo'],
+    [/\bPCT\b/, 'pacote'],
+    [/\bLT\b/, 'litro'],
+    [/\bLITRO\b/, 'litro'],
+    [/\bSC\b/, 'saco'],
+    [/\bDP\b/, 'display'],
+    [/\bGF\b/, 'garrafa'],
+    [/\bPC\b/, 'peca'],
+  ];
+
+  for (const [pattern, unit] of abbrevMap) {
+    if (pattern.test(upper)) return unit;
+  }
+
+  return 'kg';
+}
+
 export function useProductUnits() {
   const { user } = useAuth();
   const { toast } = useToast();
