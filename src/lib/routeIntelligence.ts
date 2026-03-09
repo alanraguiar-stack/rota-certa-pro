@@ -134,7 +134,7 @@ export function analyzeFleetRequirements(
 
     // Para cada regra de território, verificar se a cidade está nos pedidos
     // O sistema seleciona automaticamente os melhores caminhões disponíveis
-    const { assignTrucksToTerritories } = await import('@/lib/anchorRules');
+    const { assignTrucksToTerritories: assignFn } = { assignTrucksToTerritories };
     const truckData = availableTrucks.map(t => ({
       plate: t.plate,
       capacity_kg: Number(t.capacity_kg),
