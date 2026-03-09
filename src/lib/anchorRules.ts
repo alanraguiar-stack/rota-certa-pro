@@ -1,26 +1,9 @@
 /**
- * Regras Operacionais Fixas — Caminhões Âncora por Território
+ * Regras Operacionais por TERRITÓRIO (Cidade Âncora)
  * 
- * Estas regras NÃO são inferidas pelo sistema.
- * São regras de negócio explícitas da operação.
+ * O sistema atribui automaticamente caminhões disponíveis a cada território.
+ * Não há mais vínculo fixo placa→cidade.
  */
-
-export interface AnchorRule {
-  /** Prefixo da placa (3 primeiras letras) para match */
-  platePrefix: string;
-  /** Cidade âncora obrigatória */
-  anchorCity: string;
-  /** Limite máximo de entregas */
-  maxDeliveries: number;
-  /** Cidades permitidas para encaixe (além da âncora) */
-  allowedFillCities: string[];
-  /** Exceções de bairro: bairros de OUTRAS cidades que podem ser encaixados */
-  neighborhoodExceptions: NeighborhoodException[];
-  /** Rótulo amigável */
-  label: string;
-  /** É caminhão de apoio? */
-  isSupport: boolean;
-}
 
 export interface NeighborhoodException {
   /** Bairro permitido */
@@ -33,64 +16,188 @@ export interface NeighborhoodException {
   insertAfterNeighborhood?: string;
 }
 
+export interface NeighborhoodFill {
+  /** Bairro permitido para fill */
+  neighborhood: string;
+  /** Cidade do bairro */
+  city: string;
+}
+
+export interface TerritoryRule {
+  /** Identificador do território */
+  id: string;
+  /** Rótulo amigável */
+  label: string;
+  /** Cidade âncora obrigatória (vazia para apoio) */
+  anchorCity: string;
+  /** Limite máximo de entregas */
+  maxDeliveries: number;
+  /** Cidades permitidas para encaixe (além da âncora) */
+  allowedFillCities: string[];
+  /** Bairros específicos de OUTRAS cidades para fill (nível bairro, não cidade inteira) */
+  neighborhoodFills: NeighborhoodFill[];
+  /** Exceções de bairro: bairros de OUTRAS cidades que podem ser encaixados com limite */
+  neighborhoodExceptions: NeighborhoodException[];
+  /** Bairros a EXCLUIR da cidade âncora (reservados para outro território) */
+  excludedNeighborhoods: { neighborhood: string; city: string }[];
+  /** Bairros de OUTRA cidade que entram PRIMEIRO na sequência (antes da cidade âncora) */
+  priorityNeighborhoods: { neighborhood: string; city: string }[];
+  /** É caminhão de apoio? */
+  isSupport: boolean;
+  /** Prioridade para atribuição (menor = atribuído primeiro) */
+  priority: number;
+}
+
 /**
- * Regras fixas dos caminhões âncora.
- * Match por prefixo de placa (3 primeiras letras, case-insensitive).
+ * Regras de território — o motor seleciona automaticamente o caminhão.
  */
-export const ANCHOR_RULES: AnchorRule[] = [
+export const TERRITORY_RULES: TerritoryRule[] = [
   {
-    platePrefix: 'EUR',
+    id: 'barueri',
+    label: 'Âncora Barueri',
     anchorCity: 'barueri',
     maxDeliveries: 25,
-    allowedFillCities: ['jandira', 'itapevi', 'cotia', 'vargem grande paulista'],
+    allowedFillCities: ['cotia', 'vargem grande paulista'],
+    neighborhoodFills: [],
     neighborhoodExceptions: [],
-    label: 'Caminhão A — Barueri',
+    excludedNeighborhoods: [
+      { neighborhood: 'jardim mutinga', city: 'barueri' },
+    ],
+    priorityNeighborhoods: [],
     isSupport: false,
+    priority: 1,
   },
   {
-    platePrefix: 'CYR',
+    id: 'osasco',
+    label: 'Âncora Osasco',
     anchorCity: 'osasco',
     maxDeliveries: 25,
     allowedFillCities: [],
+    neighborhoodFills: [],
     neighborhoodExceptions: [
       { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2 },
       { neighborhood: 'parque imperial', city: 'sao paulo', maxDeliveries: 2 },
     ],
-    label: 'Caminhão B — Osasco',
+    excludedNeighborhoods: [],
+    // Jardim Mutinga (Barueri) entra PRIMEIRO, antes das entregas de Osasco
+    priorityNeighborhoods: [
+      { neighborhood: 'jardim mutinga', city: 'barueri' },
+    ],
     isSupport: false,
+    priority: 2,
   },
   {
-    platePrefix: 'FKD',
+    id: 'carapicuiba',
+    label: 'Âncora Carapicuíba',
     anchorCity: 'carapicuiba',
     maxDeliveries: 25,
     allowedFillCities: [],
+    neighborhoodFills: [],
     neighborhoodExceptions: [
       { neighborhood: 'metalurgicos', city: 'osasco', maxDeliveries: 2, insertAfterNeighborhood: 'jardim novo horizonte' },
       { neighborhood: 'vila do conde', city: 'barueri', maxDeliveries: 2 },
     ],
-    label: 'Caminhão C — Carapicuíba',
+    excludedNeighborhoods: [],
+    priorityNeighborhoods: [],
     isSupport: false,
+    priority: 3,
   },
   {
-    platePrefix: 'EEF',
-    anchorCity: '',  // Sem cidade âncora — recebe demais + excedentes
+    id: 'jandira',
+    label: 'Âncora Jandira',
+    anchorCity: 'jandira',
+    maxDeliveries: 25,
+    allowedFillCities: ['itapevi'],
+    neighborhoodFills: [],
+    neighborhoodExceptions: [],
+    excludedNeighborhoods: [],
+    priorityNeighborhoods: [],
+    isSupport: false,
+    priority: 4,
+  },
+  {
+    id: 'embu',
+    label: 'Âncora Embu',
+    anchorCity: 'embu',
+    maxDeliveries: 25,
+    allowedFillCities: ['embu das artes'],
+    neighborhoodFills: [
+      // Bairros específicos de Osasco
+      { neighborhood: 'conceicao', city: 'osasco' },
+      { neighborhood: 'metalurgico', city: 'osasco' },
+      { neighborhood: 'santa maria', city: 'osasco' },
+      // Bairros específicos de Carapicuíba
+      { neighborhood: 'vila da oportunidade', city: 'carapicuiba' },
+      { neighborhood: 'jardim yaya', city: 'carapicuiba' },
+      { neighborhood: 'pousada dos bandeirantes', city: 'carapicuiba' },
+    ],
+    neighborhoodExceptions: [],
+    excludedNeighborhoods: [],
+    priorityNeighborhoods: [],
+    isSupport: false,
+    priority: 5,
+  },
+  {
+    id: 'apoio',
+    label: 'Apoio / Excedentes',
+    anchorCity: '',
     maxDeliveries: 25,
     allowedFillCities: [
       'pirapora do bom jesus', 'santana de parnaiba',
-      'taboao da serra', 'embu', 'embu das artes', 'sao paulo',
+      'taboao da serra', 'sao paulo',
     ],
+    neighborhoodFills: [],
     neighborhoodExceptions: [],
-    label: 'Caminhão D — Apoio / Excedentes',
+    excludedNeighborhoods: [],
+    priorityNeighborhoods: [],
     isSupport: true,
+    priority: 99,
   },
 ];
 
+// ================================================================
+// Legacy interface kept for backward compatibility
+// ================================================================
+
+export interface AnchorRule {
+  platePrefix: string;
+  anchorCity: string;
+  maxDeliveries: number;
+  allowedFillCities: string[];
+  neighborhoodExceptions: NeighborhoodException[];
+  label: string;
+  isSupport: boolean;
+}
+
+/** Runtime map: truck plate → territory rule (set during autoCompose) */
+const truckTerritoryMap = new Map<string, TerritoryRule>();
+
+export function setTruckTerritory(plate: string, rule: TerritoryRule): void {
+  truckTerritoryMap.set(plate.replace(/[\s-]/g, '').toUpperCase(), rule);
+}
+
+export function clearTruckTerritories(): void {
+  truckTerritoryMap.clear();
+}
+
 /**
- * Encontra a regra âncora para um caminhão pela placa.
+ * Legacy: find anchor rule for a truck by plate.
+ * Now returns the territory assigned during composition.
  */
 export function findAnchorRule(plate: string): AnchorRule | null {
-  const prefix = plate.replace(/[\s-]/g, '').toUpperCase().substring(0, 3);
-  return ANCHOR_RULES.find(r => r.platePrefix === prefix) || null;
+  const normalized = plate.replace(/[\s-]/g, '').toUpperCase();
+  const territory = truckTerritoryMap.get(normalized);
+  if (!territory) return null;
+
+  return {
+    platePrefix: normalized.substring(0, 3),
+    anchorCity: territory.anchorCity,
+    maxDeliveries: territory.maxDeliveries,
+    allowedFillCities: territory.allowedFillCities,
+    neighborhoodExceptions: territory.neighborhoodExceptions,
+    label: territory.label,
+    isSupport: territory.isSupport,
+  };
 }
 
 /**
@@ -102,4 +209,46 @@ export function normalizeNeighborhood(neighborhood: string): string {
     .trim()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
+}
+
+/**
+ * Assign trucks to territories automatically.
+ * Returns a map: territory id → truck
+ */
+export function assignTrucksToTerritories(
+  trucks: { plate: string; capacity_kg: number; max_deliveries: number | null }[],
+  citiesInOrders: Set<string>
+): Map<string, typeof trucks[number]> {
+  clearTruckTerritories();
+
+  // Sort territories by priority
+  const sortedRules = [...TERRITORY_RULES].sort((a, b) => a.priority - b.priority);
+
+  // Sort trucks by capacity (best first)
+  const availableTrucks = [...trucks].sort((a, b) => {
+    const aMax = a.max_deliveries ?? 25;
+    const bMax = b.max_deliveries ?? 25;
+    if (bMax !== aMax) return bMax - aMax;
+    return Number(b.capacity_kg) - Number(a.capacity_kg);
+  });
+
+  const usedTrucks = new Set<string>();
+  const assignments = new Map<string, typeof trucks[number]>();
+
+  for (const rule of sortedRules) {
+    // Skip non-support territories if their anchor city has no orders
+    if (!rule.isSupport && rule.anchorCity && !citiesInOrders.has(rule.anchorCity)) {
+      continue;
+    }
+
+    // Find best available truck
+    const truck = availableTrucks.find(t => !usedTrucks.has(t.plate));
+    if (!truck) continue;
+
+    usedTrucks.add(truck.plate);
+    assignments.set(rule.id, truck);
+    setTruckTerritory(truck.plate, rule);
+  }
+
+  return assignments;
 }
