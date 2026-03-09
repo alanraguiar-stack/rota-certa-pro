@@ -256,10 +256,27 @@ export function assignTrucksToTerritories(
     setTruckTerritory(truck.plate, rule);
   }
 
+  // Collect all cities covered by non-support territories
+  const coveredCities = new Set<string>();
+  for (const rule of sortedRules) {
+    if (rule.isSupport) continue;
+    if (rule.anchorCity) coveredCities.add(rule.anchorCity);
+    for (const fc of rule.allowedFillCities) coveredCities.add(fc);
+    for (const nf of rule.neighborhoodFills) coveredCities.add(nf.city);
+    for (const ne of rule.neighborhoodExceptions) coveredCities.add(ne.city);
+  }
+
   // Phase 2: assign remaining territories automatically
   for (const rule of sortedRules) {
     if (rule.fixedPlate) continue; // already handled
-    if (!rule.isSupport && rule.anchorCity && !citiesInOrders.has(rule.anchorCity)) continue;
+
+    if (rule.isSupport) {
+      // Only assign support truck if there are orphan cities not covered by any territory
+      const hasOrphanCities = [...citiesInOrders].some(c => !coveredCities.has(c));
+      if (!hasOrphanCities) continue;
+    } else {
+      if (rule.anchorCity && !citiesInOrders.has(rule.anchorCity)) continue;
+    }
 
     const truck = availableTrucks.find(t => !usedTrucks.has(t.plate));
     if (!truck) continue;

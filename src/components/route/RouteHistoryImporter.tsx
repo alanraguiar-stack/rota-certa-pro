@@ -467,7 +467,7 @@ export function RouteHistoryImporter() {
             </div>
             <div className="flex gap-2">
               <Input
-                placeholder="Rótulo do caminhão (ex: CYR)"
+                placeholder="Rótulo do caminhão (ex: TRC)"
                 value={pasteTruck}
                 onChange={e => setPasteTruck(e.target.value.toUpperCase())}
                 className="w-48"
