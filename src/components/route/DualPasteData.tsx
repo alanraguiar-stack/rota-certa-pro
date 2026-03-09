@@ -22,6 +22,7 @@ import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { parsePastedData } from '@/lib/orderParser';
+import { useProductUnits } from '@/hooks/useProductUnits';
 
 interface DualPasteDataProps {
   onParsed: (orders: ParsedOrder[]) => void;
