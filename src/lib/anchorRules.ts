@@ -46,6 +46,8 @@ export interface TerritoryRule {
   isSupport: boolean;
   /** Prioridade para atribuição (menor = atribuído primeiro) */
   priority: number;
+  /** Placa fixa — quando definida, este caminhão é reservado para o território */
+  fixedPlate?: string;
 }
 
 /**
