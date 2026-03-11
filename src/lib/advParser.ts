@@ -1226,14 +1226,17 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     const clientMatch = rowText.match(/cliente\s*:\s*([A-ZÁÉÍÓÚÀÃÕÇÂÊÎÔÛÄËÏÖÜ\s\-\.]+?)(?:\s+\d{11,14})?$/i);
     if (clientMatch) {
       // Salvar pedido anterior se existir
-      if (currentVendaId && currentItems.length > 0) {
+      if (currentVendaId) {
         const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+        if (currentItems.length === 0) {
+          console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
+        }
         orders.push({
           pedido_id: currentVendaId,
           client_name: currentClient,
           address: '', // Será preenchido pelo cruzamento
           weight_kg: totalWeight,
-          product_description: currentItems.map(i => i.product_name).join(', '),
+          product_description: currentItems.length > 0 ? currentItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
           items: [...currentItems],
           isValid: false, // Sem endereço até cruzar
           error: 'Aguardando cruzamento com Relatório de Vendas',
