@@ -629,16 +629,49 @@ export function mergeItinerarioWithADV(
     };
   });
   
+  // FALLBACK: Adicionar vendas do itinerário que não foram cruzadas com nenhum ADV
+  const orphanOrders: ParsedOrder[] = [];
+  for (const record of itinerario) {
+    if (!usedItinerarioIds.has(record.venda_id)) {
+      const addressParts = [
+        record.address,
+        record.neighborhood,
+        record.city,
+      ].filter(Boolean);
+      if (record.cep) {
+        addressParts.push(formatCEP(record.cep));
+      }
+      const fullAddress = addressParts.join(', ');
+      
+      orphanOrders.push({
+        pedido_id: record.venda_id,
+        client_name: record.client_name,
+        address: fullAddress,
+        city: record.city || undefined,
+        weight_kg: record.weight_kg,
+        product_description: 'Sem itens detalhados',
+        items: [],
+        isValid: fullAddress.length > 0,
+        error: fullAddress.length > 0 ? undefined : 'Endereço não encontrado',
+      });
+      console.log('[Merge] 🔄 Venda órfã do itinerário adicionada:', record.venda_id, '|', record.client_name?.substring(0, 25));
+    }
+  }
+
+  const allOrders = [...mergedOrders, ...orphanOrders];
+
   console.log('[Merge] ═══════════════════════════════════════════════');
   console.log('[Merge] RESULTADO:');
   console.log('[Merge]   Cruzados por ID:', matchedById);
   console.log('[Merge]   Cruzados por Cliente:', matchedByClient);
   console.log('[Merge]   Cruzados por Nome Parcial:', matchedByPartialClient);
   console.log('[Merge]   Total cruzados:', matchedById + matchedByClient + matchedByPartialClient);
-  console.log('[Merge]   Sem match:', unmatchedCount);
+  console.log('[Merge]   Sem match (ADV):', unmatchedCount);
+  console.log('[Merge]   Vendas órfãs (itinerário):', orphanOrders.length);
+  console.log('[Merge]   Total final:', allOrders.length);
   console.log('[Merge] ═══════════════════════════════════════════════');
   
-  return mergedOrders;
+  return allOrders;
 }
 
 /**
@@ -1226,14 +1259,17 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     const clientMatch = rowText.match(/cliente\s*:\s*([A-ZÁÉÍÓÚÀÃÕÇÂÊÎÔÛÄËÏÖÜ\s\-\.]+?)(?:\s+\d{11,14})?$/i);
     if (clientMatch) {
       // Salvar pedido anterior se existir
-      if (currentVendaId && currentItems.length > 0) {
+      if (currentVendaId) {
         const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+        if (currentItems.length === 0) {
+          console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
+        }
         orders.push({
           pedido_id: currentVendaId,
           client_name: currentClient,
           address: '', // Será preenchido pelo cruzamento
           weight_kg: totalWeight,
-          product_description: currentItems.map(i => i.product_name).join(', '),
+          product_description: currentItems.length > 0 ? currentItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
           items: [...currentItems],
           isValid: false, // Sem endereço até cruzar
           error: 'Aguardando cruzamento com Relatório de Vendas',
@@ -1253,14 +1289,17 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     const vendaMatch = rowText.match(/venda\s*n[º°]?\s*:\s*(\d+)/i);
     if (vendaMatch) {
       // Salvar venda anterior do mesmo cliente
-      if (currentVendaId && currentItems.length > 0) {
+      if (currentVendaId) {
         const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+        if (currentItems.length === 0) {
+          console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
+        }
         orders.push({
           pedido_id: currentVendaId,
           client_name: currentClient,
           address: '',
           weight_kg: totalWeight,
-          product_description: currentItems.map(i => i.product_name).join(', '),
+          product_description: currentItems.length > 0 ? currentItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
           items: [...currentItems],
           isValid: false,
           error: 'Aguardando cruzamento com Relatório de Vendas',
@@ -1324,14 +1363,17 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   }
   
   // Processar último pedido
-  if (currentVendaId && currentItems.length > 0) {
+  if (currentVendaId) {
     const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+    if (currentItems.length === 0) {
+      console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
+    }
     orders.push({
       pedido_id: currentVendaId,
       client_name: currentClient,
       address: '',
       weight_kg: totalWeight,
-      product_description: currentItems.map(i => i.product_name).join(', '),
+      product_description: currentItems.length > 0 ? currentItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
       items: [...currentItems],
       isValid: false,
       error: 'Aguardando cruzamento com Relatório de Vendas',
