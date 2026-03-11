@@ -1330,14 +1330,17 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   }
   
   // Processar último pedido
-  if (currentVendaId && currentItems.length > 0) {
+  if (currentVendaId) {
     const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+    if (currentItems.length === 0) {
+      console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
+    }
     orders.push({
       pedido_id: currentVendaId,
       client_name: currentClient,
       address: '',
       weight_kg: totalWeight,
-      product_description: currentItems.map(i => i.product_name).join(', '),
+      product_description: currentItems.length > 0 ? currentItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
       items: [...currentItems],
       isValid: false,
       error: 'Aguardando cruzamento com Relatório de Vendas',
