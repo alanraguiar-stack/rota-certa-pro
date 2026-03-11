@@ -505,173 +505,149 @@ function normalizeVendaId(id: string): string {
 /**
  * Cruza dados do Itinerário (endereços) com o Relatório ADV (itens detalhados)
  * 
- * ESTRATÉGIA DE CRUZAMENTO (3 níveis):
- * 1. Primeiro tenta por venda_id normalizado (sem zeros à esquerda)
- * 2. Fallback por nome do cliente normalizado (correspondência exata)
- * 3. Fallback por nome parcial do cliente (contém/está contido)
+ * O ITINERÁRIO É A LISTA MESTRE — o resultado final terá exatamente o mesmo
+ * número de registros do itinerário. O ADV enriquece com itens/produtos.
+ * 
+ * ESTRATÉGIA DE CRUZAMENTO:
+ * 1. Match por venda_id normalizado (sem zeros à esquerda)
+ * 2. Fallback por nome do cliente normalizado (exato)
+ * Se não encontrar match, o registro do itinerário é preservado sem itens.
  */
 export function mergeItinerarioWithADV(
   itinerario: ItinerarioRecord[],
   advOrders: ParsedOrder[]
 ): ParsedOrder[] {
   console.log('[Merge] ═══════════════════════════════════════════════');
-  console.log('[Merge] Iniciando cruzamento de dados');
+  console.log('[Merge] Iniciando cruzamento (Itinerário = lista mestre)');
   console.log('[Merge] Itinerário:', itinerario.length, 'registros');
   console.log('[Merge] ADV:', advOrders.length, 'pedidos');
   
-  // MAPA 1: Por venda_id NORMALIZADO (sem zeros à esquerda, só dígitos)
-  const itinerarioByIdMap = new Map<string, ItinerarioRecord>();
-  for (const record of itinerario) {
-    const normalizedId = normalizeVendaId(record.venda_id);
-    itinerarioByIdMap.set(normalizedId, record);
-  }
-  
-  // MAPA 2: Por nome do cliente normalizado (fallback)
-  const itinerarioByClientMap = new Map<string, ItinerarioRecord>();
-  for (const record of itinerario) {
-    const normalizedName = normalizeClientNameForMatch(record.client_name);
-    // Só adiciona se não houver duplicatas (primeiro ganha)
-    if (!itinerarioByClientMap.has(normalizedName)) {
-      itinerarioByClientMap.set(normalizedName, record);
+  // MAPA do ADV por venda_id normalizado
+  const advByIdMap = new Map<string, ParsedOrder>();
+  for (const order of advOrders) {
+    const normalizedId = normalizeVendaId(order.pedido_id || '');
+    if (normalizedId) {
+      advByIdMap.set(normalizedId, order);
     }
   }
   
-  console.log('[Merge] Mapa por ID normalizado:', itinerarioByIdMap.size, 'entradas');
-  console.log('[Merge] Mapa por Cliente:', itinerarioByClientMap.size, 'entradas');
+  // MAPA do ADV por nome do cliente normalizado (fallback)
+  const advByClientMap = new Map<string, ParsedOrder>();
+  for (const order of advOrders) {
+    if (order.client_name) {
+      const normalizedName = normalizeClientNameForMatch(order.client_name);
+      if (!advByClientMap.has(normalizedName)) {
+        advByClientMap.set(normalizedName, order);
+      }
+    }
+  }
+  
+  console.log('[Merge] Mapa ADV por ID:', advByIdMap.size, 'entradas');
+  console.log('[Merge] Mapa ADV por Cliente:', advByClientMap.size, 'entradas');
   
   let matchedById = 0;
   let matchedByClient = 0;
-  let matchedByPartialClient = 0;
   let unmatchedCount = 0;
+  const usedAdvIds = new Set<string>();
   
-  // Track used itinerario records for partial matching (avoid double-match)
-  const usedItinerarioIds = new Set<string>();
-  
-  const mergedOrders = advOrders.map(order => {
-    // NÍVEL 1: Buscar por venda_id NORMALIZADO
-    const normalizedOrderId = normalizeVendaId(order.pedido_id || '');
-    let enderecoData = itinerarioByIdMap.get(normalizedOrderId);
+  // Iterar sobre o ITINERÁRIO (lista mestre)
+  const mergedOrders: ParsedOrder[] = itinerario.map(record => {
+    // Construir endereço completo a partir do itinerário
+    const addressParts = [
+      record.address,
+      record.neighborhood,
+      record.city,
+    ].filter(Boolean);
+    if (record.cep) {
+      addressParts.push(formatCEP(record.cep));
+    }
+    const fullAddress = addressParts.join(', ');
+    
+    // NÍVEL 1: Match por venda_id normalizado
+    const normalizedId = normalizeVendaId(record.venda_id);
+    let advOrder = advByIdMap.get(normalizedId);
     let matchType = 'id';
     
-    // NÍVEL 2: Fallback por nome do cliente normalizado (exato)
-    if (!enderecoData && order.client_name) {
-      const normalizedClientName = normalizeClientNameForMatch(order.client_name);
-      enderecoData = itinerarioByClientMap.get(normalizedClientName);
-      matchType = 'client';
-      
-      if (enderecoData) {
-        console.log('[Merge] Fallback por cliente:', order.client_name, '->', enderecoData.venda_id);
+    if (advOrder) {
+      const advKey = normalizeVendaId(advOrder.pedido_id || '');
+      if (usedAdvIds.has(advKey)) {
+        advOrder = undefined; // Já foi usado
+      } else {
+        usedAdvIds.add(advKey);
       }
     }
     
-    // NÍVEL 3: Busca parcial por nome do cliente (contém/está contido)
-    if (!enderecoData && order.client_name) {
-      const normName = normalizeClientNameForMatch(order.client_name);
-      if (normName.length >= 5) { // Só busca parcial se nome tem tamanho razoável
-        for (const [key, record] of itinerarioByClientMap) {
-          if (usedItinerarioIds.has(record.venda_id)) continue;
-          if (key.includes(normName) || normName.includes(key)) {
-            enderecoData = record;
-            matchType = 'partial_client';
-            console.log('[Merge] Fallback parcial:', order.client_name, '->', record.client_name);
-            break;
-          }
+    // NÍVEL 2: Fallback por nome do cliente normalizado
+    if (!advOrder && record.client_name) {
+      const normalizedName = normalizeClientNameForMatch(record.client_name);
+      const candidate = advByClientMap.get(normalizedName);
+      if (candidate) {
+        const candidateKey = normalizeVendaId(candidate.pedido_id || '') || normalizeClientNameForMatch(candidate.client_name || '');
+        if (!usedAdvIds.has(candidateKey)) {
+          advOrder = candidate;
+          usedAdvIds.add(candidateKey);
+          matchType = 'client';
+          console.log('[Merge] Fallback por cliente:', record.client_name, '->', candidate.pedido_id);
         }
       }
     }
     
-    if (enderecoData) {
-      if (matchType === 'id') {
-        matchedById++;
-      } else if (matchType === 'partial_client') {
-        matchedByPartialClient++;
-      } else {
-        matchedByClient++;
-      }
+    if (advOrder) {
+      if (matchType === 'id') matchedById++;
+      else matchedByClient++;
       
-      usedItinerarioIds.add(enderecoData.venda_id);
-      
-      // Construir endereço completo
-      const addressParts = [
-        enderecoData.address,
-        enderecoData.neighborhood,
-        enderecoData.city,
-      ].filter(Boolean);
-      
-      // Adicionar CEP formatado se disponível
-      if (enderecoData.cep) {
-        addressParts.push(formatCEP(enderecoData.cep));
-      }
-      
-      const fullAddress = addressParts.join(', ');
-      
-      console.log('[Merge] ✅ Match (' + matchType + '):', order.pedido_id || order.client_name?.substring(0, 20), '->', fullAddress.substring(0, 40));
+      console.log('[Merge] ✅ Match (' + matchType + '):', record.venda_id, '|', record.client_name?.substring(0, 20), '->', fullAddress.substring(0, 40));
       
       return {
-        ...order,
+        ...advOrder,
+        pedido_id: record.venda_id || advOrder.pedido_id,
         address: fullAddress,
-        city: enderecoData.city || undefined,
-        // Atualizar peso do itinerário (fonte oficial)
-        weight_kg: enderecoData.weight_kg > 0 ? enderecoData.weight_kg : order.weight_kg,
-        isValid: true,
-        error: undefined,
+        city: record.city || undefined,
+        // Peso do itinerário é a fonte oficial
+        weight_kg: record.weight_kg > 0 ? record.weight_kg : advOrder.weight_kg,
+        isValid: fullAddress.length > 0,
+        error: fullAddress.length > 0 ? undefined : 'Endereço não encontrado',
       };
     }
     
+    // Sem match no ADV — criar pedido só com dados do itinerário
     unmatchedCount++;
-    console.log('[Merge] ❌ Sem match:', order.pedido_id, '|', order.client_name?.substring(0, 25));
+    console.log('[Merge] ⚠️ Sem match ADV:', record.venda_id, '|', record.client_name?.substring(0, 25), '- usando só itinerário');
     
-    // Mantém o pedido sem endereço
     return {
-      ...order,
-      isValid: false,
-      error: 'Endereço não encontrado no itinerário',
+      pedido_id: record.venda_id,
+      client_name: record.client_name,
+      address: fullAddress,
+      city: record.city || undefined,
+      weight_kg: record.weight_kg,
+      product_description: 'Sem itens detalhados',
+      items: [],
+      isValid: fullAddress.length > 0,
+      error: fullAddress.length > 0 ? undefined : 'Endereço não encontrado',
     };
   });
   
-  // FALLBACK: Adicionar vendas do itinerário que não foram cruzadas com nenhum ADV
-  const orphanOrders: ParsedOrder[] = [];
-  for (const record of itinerario) {
-    if (!usedItinerarioIds.has(record.venda_id)) {
-      const addressParts = [
-        record.address,
-        record.neighborhood,
-        record.city,
-      ].filter(Boolean);
-      if (record.cep) {
-        addressParts.push(formatCEP(record.cep));
-      }
-      const fullAddress = addressParts.join(', ');
-      
-      orphanOrders.push({
-        pedido_id: record.venda_id,
-        client_name: record.client_name,
-        address: fullAddress,
-        city: record.city || undefined,
-        weight_kg: record.weight_kg,
-        product_description: 'Sem itens detalhados',
-        items: [],
-        isValid: fullAddress.length > 0,
-        error: fullAddress.length > 0 ? undefined : 'Endereço não encontrado',
-      });
-      console.log('[Merge] 🔄 Venda órfã do itinerário adicionada:', record.venda_id, '|', record.client_name?.substring(0, 25));
-    }
+  // Log de pedidos ADV que não encontraram correspondência no itinerário (informativo)
+  const unmatchedAdv = advOrders.filter(o => {
+    const key = normalizeVendaId(o.pedido_id || '');
+    return key && !usedAdvIds.has(key);
+  });
+  if (unmatchedAdv.length > 0) {
+    console.log('[Merge] ℹ️ Pedidos ADV sem correspondência no itinerário:', unmatchedAdv.length);
+    unmatchedAdv.forEach(o => {
+      console.log('[Merge]   -', o.pedido_id, '|', o.client_name?.substring(0, 25));
+    });
   }
-
-  const allOrders = [...mergedOrders, ...orphanOrders];
 
   console.log('[Merge] ═══════════════════════════════════════════════');
   console.log('[Merge] RESULTADO:');
   console.log('[Merge]   Cruzados por ID:', matchedById);
   console.log('[Merge]   Cruzados por Cliente:', matchedByClient);
-  console.log('[Merge]   Cruzados por Nome Parcial:', matchedByPartialClient);
-  console.log('[Merge]   Total cruzados:', matchedById + matchedByClient + matchedByPartialClient);
-  console.log('[Merge]   Sem match (ADV):', unmatchedCount);
-  console.log('[Merge]   Vendas órfãs (itinerário):', orphanOrders.length);
-  console.log('[Merge]   Total final:', allOrders.length);
+  console.log('[Merge]   Sem match ADV (só itinerário):', unmatchedCount);
+  console.log('[Merge]   Total final:', mergedOrders.length, '(= itinerário:', itinerario.length, ')');
   console.log('[Merge] ═══════════════════════════════════════════════');
   
-  return allOrders;
+  return mergedOrders;
 }
 
 /**
