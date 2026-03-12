@@ -7,15 +7,15 @@ import { Progress } from '@/components/ui/progress';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDriverRoutes, DeliveryExecution } from '@/hooks/useDriverRoutes';
 import { DeliveryCard } from '@/components/driver/DeliveryCard';
-import { DISTRIBUTION_CENTER } from '@/types';
+import { useToast } from '@/hooks/use-toast';
 
-function buildGoogleMapsUrl(origin: string, stops: { address: string }[]) {
+function buildGoogleMapsUrl(stops: { address: string }[]) {
   if (stops.length === 0) return '';
   const lastStop = stops[stops.length - 1].address;
   const waypoints = stops.slice(0, -1).map(s => s.address).join('|');
   const params = new URLSearchParams({
     api: '1',
-    origin,
+    origin: 'current+location',
     destination: lastStop,
     travelmode: 'driving',
   });
@@ -26,7 +26,8 @@ function buildGoogleMapsUrl(origin: string, stops: { address: string }[]) {
 export default function DriverDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { assignments, deliveries, loading, fetchAssignments, fetchDeliveries, startRoute } = useDriverRoutes();
+  const { toast } = useToast();
+  const { assignments, deliveries, loading, fetchAssignments, fetchDeliveries, startRoute, confirmDelivery, markNotDelivered } = useDriverRoutes();
   const [activeAssignment, setActiveAssignment] = useState<string | null>(null);
 
   useEffect(() => {
@@ -55,13 +56,12 @@ export default function DriverDashboard() {
       await startRoute(currentAssignment.id);
       await fetchAssignments();
     }
-    // Build Google Maps URL with pending deliveries
     const pendingStops = deliveries
       .filter(d => d.status === 'pendente')
       .map(d => ({ address: d.order?.address || '' }))
       .filter(s => s.address);
     if (pendingStops.length > 0) {
-      const url = buildGoogleMapsUrl(DISTRIBUTION_CENTER.address, pendingStops);
+      const url = buildGoogleMapsUrl(pendingStops);
       window.open(url, '_blank');
     }
   };
@@ -69,6 +69,38 @@ export default function DriverDashboard() {
   const handleDeliveryClick = (delivery: DeliveryExecution) => {
     if (delivery.status === 'pendente') {
       navigate(`/motorista/entrega/${delivery.id}`);
+    }
+  };
+
+  const handleQuickConfirm = async (executionId: string) => {
+    try {
+      await confirmDelivery(executionId, '', '', '');
+      toast({ title: 'Entrega confirmada!' });
+      if (activeAssignment) {
+        const remaining = await fetchDeliveries(activeAssignment);
+        const pending = remaining.filter((d: DeliveryExecution) => d.status === 'pendente');
+        if (pending.length === 0) {
+          const { supabase } = await import('@/integrations/supabase/client');
+          await (supabase as any)
+            .from('driver_assignments')
+            .update({ status: 'finalizada', finished_at: new Date().toISOString() })
+            .eq('id', activeAssignment);
+          toast({ title: 'Rota finalizada!', description: 'Todas as entregas concluídas.' });
+          await fetchAssignments();
+        }
+      }
+    } catch (err: any) {
+      toast({ title: 'Erro', description: err.message, variant: 'destructive' });
+    }
+  };
+
+  const handleQuickReject = async (executionId: string) => {
+    try {
+      await markNotDelivered(executionId, 'Não entregue (ação rápida)');
+      toast({ title: 'Marcada como não entregue' });
+      if (activeAssignment) await fetchDeliveries(activeAssignment);
+    } catch (err: any) {
+      toast({ title: 'Erro', description: err.message, variant: 'destructive' });
     }
   };
 
@@ -167,6 +199,8 @@ export default function DriverDashboard() {
                   delivery={delivery}
                   index={index}
                   onClick={() => handleDeliveryClick(delivery)}
+                  onQuickConfirm={handleQuickConfirm}
+                  onQuickReject={handleQuickReject}
                 />
               ))}
             </div>

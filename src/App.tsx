@@ -36,6 +36,7 @@ const App = () => (
             <Route path="/historico" element={<History />} />
             <Route path="/configuracoes" element={<Settings />} />
             <Route path="/motorista" element={<DriverDashboard />} />
+            <Route path="/motorista/acesso/:code" element={<DriverAccess />} />
             <Route path="/motorista/entrega/:id" element={<DeliveryConfirmation />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

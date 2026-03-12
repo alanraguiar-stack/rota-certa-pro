@@ -356,29 +356,38 @@ export default function Settings() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Create Test Driver */}
-                  <div className="flex items-center gap-3 p-4 rounded-lg border border-dashed border-border">
-                    <Button onClick={handleCreateTestDriver} disabled={creatingDriver} variant="outline" className="gap-2">
-                      <UserPlus className="h-4 w-4" />
-                      {creatingDriver ? 'Criando...' : 'Criar Motorista de Teste'}
-                    </Button>
-                    {testDriverInfo && (
-                      <div className="flex-1 text-sm space-y-1 bg-muted p-3 rounded-md">
-                        <p className="font-medium">{testDriverInfo.fullName}</p>
+                  {/* Create Driver */}
+                  <div className="space-y-3 p-4 rounded-lg border border-dashed border-border">
+                    <div className="flex items-center gap-3">
+                      <Input
+                        placeholder="Nome do motorista"
+                        value={newDriverName}
+                        onChange={(e) => setNewDriverName(e.target.value)}
+                        className="max-w-xs"
+                      />
+                      <Button onClick={handleCreateDriver} disabled={creatingDriver} variant="outline" className="gap-2 shrink-0">
+                        <UserPlus className="h-4 w-4" />
+                        {creatingDriver ? 'Criando...' : 'Criar Motorista'}
+                      </Button>
+                    </div>
+                    {driverInfo && (
+                      <div className="text-sm space-y-2 bg-muted p-3 rounded-md">
+                        <p className="font-medium">{driverInfo.fullName}</p>
                         <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">Email:</span>
-                          <code className="text-xs bg-background px-1 rounded">{testDriverInfo.email}</code>
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { navigator.clipboard.writeText(testDriverInfo.email); toast({ title: 'Email copiado!' }); }}>
+                          <span className="text-muted-foreground">Link de acesso:</span>
+                          <code className="text-xs bg-background px-2 py-1 rounded break-all">{driverInfo.accessLink}</code>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.accessLink); toast({ title: 'Link copiado!' }); }}>
                             <Copy className="h-3 w-3" />
                           </Button>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground">Senha:</span>
-                          <code className="text-xs bg-background px-1 rounded">{testDriverInfo.password}</code>
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { navigator.clipboard.writeText(testDriverInfo.password); toast({ title: 'Senha copiada!' }); }}>
+                          <code className="text-xs bg-background px-2 py-1 rounded">{driverInfo.password}</code>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.password); toast({ title: 'Senha copiada!' }); }}>
                             <Copy className="h-3 w-3" />
                           </Button>
                         </div>
+                        <p className="text-xs text-muted-foreground">Envie o link e a senha para o motorista.</p>
                       </div>
                     )}
                   </div>
