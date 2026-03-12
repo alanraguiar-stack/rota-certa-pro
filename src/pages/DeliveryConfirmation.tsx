@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, MapPin, Check, Navigation, Package } from 'lucide-react';
+import { ArrowLeft, Camera, MapPin, Check, X, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -8,13 +8,12 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useDriverRoutes, DeliveryExecution } from '@/hooks/useDriverRoutes';
 import { SignatureCanvas } from '@/components/driver/SignatureCanvas';
-import { DISTRIBUTION_CENTER } from '@/types';
 
 export default function DeliveryConfirmation() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { confirmDelivery, uploadProof, fetchDeliveries } = useDriverRoutes();
+  const { confirmDelivery, markNotDelivered, uploadProof, fetchDeliveries } = useDriverRoutes();
 
   const [execution, setExecution] = useState<DeliveryExecution | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,6 +22,7 @@ export default function DeliveryConfirmation() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [observations, setObservations] = useState('');
+  const [showProofs, setShowProofs] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -50,68 +50,56 @@ export default function DeliveryConfirmation() {
     }
   }, []);
 
-  const handleSubmit = async () => {
-    if (!signatureDataUrl) {
-      toast({ title: 'Assinatura obrigatória', description: 'Capture a assinatura do cliente.', variant: 'destructive' });
-      return;
-    }
-    if (!photoFile) {
-      toast({ title: 'Foto obrigatória', description: 'Tire uma foto da entrega.', variant: 'destructive' });
-      return;
-    }
+  const handleAfterAction = async () => {
+    // Check remaining pending deliveries
+    const remaining = await fetchDeliveries(execution!.driver_assignment_id);
+    const pendingDeliveries = remaining.filter((d: DeliveryExecution) => d.status === 'pendente');
 
+    if (pendingDeliveries.length === 0) {
+      await (supabase as any)
+        .from('driver_assignments')
+        .update({ status: 'finalizada', finished_at: new Date().toISOString() })
+        .eq('id', execution!.driver_assignment_id);
+      toast({ title: 'Rota finalizada!', description: 'Todas as entregas foram concluídas.' });
+    }
+    navigate('/motorista');
+  };
+
+  const handleConfirm = async () => {
     setSubmitting(true);
     try {
-      // Convert signature data URL to blob
-      const sigResp = await fetch(signatureDataUrl);
-      const sigBlob = await sigResp.blob();
+      let sigUrl = '';
+      let photoUrl = '';
 
-      // Upload both
-      const [sigUrl, photoUrl] = await Promise.all([
-        uploadProof(sigBlob, 'signature.png'),
-        uploadProof(photoFile, `photo.${photoFile.name.split('.').pop() || 'jpg'}`),
-      ]);
+      if (signatureDataUrl) {
+        const sigResp = await fetch(signatureDataUrl);
+        const sigBlob = await sigResp.blob();
+        sigUrl = await uploadProof(sigBlob, 'signature.png');
+      }
+
+      if (photoFile) {
+        photoUrl = await uploadProof(photoFile, `photo.${photoFile.name.split('.').pop() || 'jpg'}`);
+      }
 
       await confirmDelivery(execution!.id, sigUrl, photoUrl, observations);
       toast({ title: 'Entrega confirmada!', description: execution!.order?.client_name });
-
-      // Check if there are more pending deliveries
-      const remaining = await fetchDeliveries(execution!.driver_assignment_id);
-      const pendingDeliveries = remaining.filter((d: DeliveryExecution) => d.status === 'pendente');
-
-      if (pendingDeliveries.length > 0) {
-        // Reopen Google Maps with ALL remaining pending stops
-        const pendingStops = pendingDeliveries
-          .map((d: DeliveryExecution) => d.order?.address)
-          .filter(Boolean) as string[];
-        
-        if (pendingStops.length > 0) {
-          const destination = pendingStops[pendingStops.length - 1];
-          const waypoints = pendingStops.slice(0, -1).join('|');
-          const params = new URLSearchParams({
-            api: '1',
-            origin: 'current+location',
-            destination,
-            travelmode: 'driving',
-          });
-          if (waypoints) params.set('waypoints', waypoints);
-          window.open(`https://www.google.com/maps/dir/?${params.toString()}`, '_blank');
-        }
-        navigate('/motorista');
-      } else {
-        // All done - finish route
-        const { useDriverRoutes: _hook } = await import('@/hooks/useDriverRoutes');
-        // Mark assignment as finished
-        await (supabase as any)
-          .from('driver_assignments')
-          .update({ status: 'finalizada', finished_at: new Date().toISOString() })
-          .eq('id', execution!.driver_assignment_id);
-        toast({ title: 'Rota finalizada!', description: 'Todas as entregas foram concluídas.' });
-        navigate('/motorista');
-      }
+      await handleAfterAction();
     } catch (err: any) {
       console.error(err);
       toast({ title: 'Erro ao confirmar', description: err.message, variant: 'destructive' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleNotDelivered = async () => {
+    setSubmitting(true);
+    try {
+      await markNotDelivered(execution!.id, observations || 'Não entregue');
+      toast({ title: 'Marcada como não entregue' });
+      await handleAfterAction();
+    } catch (err: any) {
+      toast({ title: 'Erro', description: err.message, variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }
@@ -146,7 +134,7 @@ export default function DeliveryConfirmation() {
         </div>
       </div>
 
-      <div className="p-4 space-y-4 max-w-lg mx-auto pb-32">
+      <div className="p-4 space-y-4 max-w-lg mx-auto pb-48">
         {/* Client Info */}
         <Card>
           <CardContent className="pt-4 space-y-2">
@@ -164,45 +152,6 @@ export default function DeliveryConfirmation() {
           </CardContent>
         </Card>
 
-        {/* Signature */}
-        <Card>
-          <CardContent className="pt-4">
-            <SignatureCanvas onSignatureChange={setSignatureDataUrl} />
-          </CardContent>
-        </Card>
-
-        {/* Photo */}
-        <Card>
-          <CardContent className="pt-4 space-y-3">
-            <p className="text-sm font-medium text-foreground">Foto da Entrega</p>
-            {photoPreview ? (
-              <div className="relative">
-                <img src={photoPreview} alt="Foto da entrega" className="w-full rounded-xl object-cover max-h-60" />
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  className="absolute top-2 right-2"
-                  onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
-                >
-                  Trocar
-                </Button>
-              </div>
-            ) : (
-              <label className="flex flex-col items-center justify-center h-40 rounded-xl border-2 border-dashed border-border bg-muted/30 cursor-pointer hover:border-primary/50 transition-colors">
-                <Camera className="h-8 w-8 text-muted-foreground mb-2" />
-                <span className="text-sm text-muted-foreground">Tirar foto ou selecionar</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={handlePhotoCapture}
-                />
-              </label>
-            )}
-          </CardContent>
-        </Card>
-
         {/* Observations */}
         <Card>
           <CardContent className="pt-4 space-y-2">
@@ -211,23 +160,86 @@ export default function DeliveryConfirmation() {
               placeholder="Alguma observação sobre a entrega..."
               value={observations}
               onChange={(e) => setObservations(e.target.value)}
-              rows={3}
+              rows={2}
             />
           </CardContent>
         </Card>
+
+        {/* Optional proofs toggle */}
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => setShowProofs(!showProofs)}
+        >
+          <Camera className="h-4 w-4 mr-2" />
+          {showProofs ? 'Ocultar' : 'Adicionar'} foto / assinatura (opcional)
+        </Button>
+
+        {showProofs && (
+          <>
+            {/* Signature */}
+            <Card>
+              <CardContent className="pt-4">
+                <SignatureCanvas onSignatureChange={setSignatureDataUrl} />
+              </CardContent>
+            </Card>
+
+            {/* Photo */}
+            <Card>
+              <CardContent className="pt-4 space-y-3">
+                <p className="text-sm font-medium text-foreground">Foto da Entrega</p>
+                {photoPreview ? (
+                  <div className="relative">
+                    <img src={photoPreview} alt="Foto da entrega" className="w-full rounded-xl object-cover max-h-60" />
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="absolute top-2 right-2"
+                      onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+                    >
+                      Trocar
+                    </Button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center h-40 rounded-xl border-2 border-dashed border-border bg-muted/30 cursor-pointer hover:border-primary/50 transition-colors">
+                    <Camera className="h-8 w-8 text-muted-foreground mb-2" />
+                    <span className="text-sm text-muted-foreground">Tirar foto ou selecionar</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      onChange={handlePhotoCapture}
+                    />
+                  </label>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
-      {/* Fixed bottom button */}
+      {/* Fixed bottom buttons */}
       <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border p-4">
-        <div className="max-w-lg mx-auto">
+        <div className="max-w-lg mx-auto space-y-2">
           <Button
-            onClick={handleSubmit}
-            disabled={submitting || !signatureDataUrl || !photoFile}
+            onClick={handleConfirm}
+            disabled={submitting}
             className="w-full h-14 text-lg gap-2 btn-cta"
             size="lg"
           >
             <Check className="h-6 w-6" />
             {submitting ? 'Confirmando...' : 'Confirmar Entrega'}
+          </Button>
+          <Button
+            onClick={handleNotDelivered}
+            disabled={submitting}
+            variant="outline"
+            className="w-full h-12 gap-2 text-destructive border-destructive/30 hover:bg-destructive/10"
+            size="lg"
+          >
+            <X className="h-5 w-5" />
+            Não Entregue
           </Button>
         </div>
       </div>

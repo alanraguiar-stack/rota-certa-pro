@@ -12,6 +12,7 @@ import RouteDetails from "./pages/RouteDetails";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import DriverDashboard from "./pages/DriverDashboard";
+import DriverAccess from "./pages/DriverAccess";
 import DeliveryConfirmation from "./pages/DeliveryConfirmation";
 import NotFound from "./pages/NotFound";
 import LandingPage from "./pages/LandingPage";
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/historico" element={<History />} />
             <Route path="/configuracoes" element={<Settings />} />
             <Route path="/motorista" element={<DriverDashboard />} />
+            <Route path="/motorista/acesso/:code" element={<DriverAccess />} />
             <Route path="/motorista/entrega/:id" element={<DeliveryConfirmation />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

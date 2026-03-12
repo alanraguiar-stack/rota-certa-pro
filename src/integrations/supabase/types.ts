@@ -92,6 +92,30 @@ export type Database = {
           },
         ]
       }
+      driver_access_codes: {
+        Row: {
+          access_code: string
+          created_at: string
+          driver_password: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          access_code: string
+          created_at?: string
+          driver_password: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          access_code?: string
+          created_at?: string
+          driver_password?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       driver_assignments: {
         Row: {
           created_at: string

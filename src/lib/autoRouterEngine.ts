@@ -546,6 +546,9 @@ export function autoComposeRoute(
     }
   }
 
+  // Step 5e: Rebalance between internal (non-support, non-third-party) trucks
+  rebalanceInternalTrucks(compositions, reasoning, warnings);
+
   // Step 6: Sequence optimization with street grouping
   for (const comp of compositions) {
     if (comp.orders.length > 1) {
@@ -583,6 +586,88 @@ export function autoComposeRoute(
     averageOccupancy: Math.round(averageOccupancy),
     warnings, reasoning, validation,
   };
+}
+
+// ================================================================
+// REBALANCING: Equalize orders between internal trucks
+// ================================================================
+
+function rebalanceInternalTrucks(
+  compositions: TruckComposition[],
+  reasoning: string[],
+  warnings: string[]
+): void {
+  // Internal trucks = have territory, not support, have orders
+  const internal = compositions.filter(c =>
+    c.orders.length > 0 &&
+    c.territoryRule &&
+    !c.territoryRule.isSupport
+  );
+
+  if (internal.length < 2) return;
+
+  const MAX_DIFF = 3;
+
+  // Sort by order count descending
+  internal.sort((a, b) => b.orders.length - a.orders.length);
+  const most = internal[0];
+  const least = internal[internal.length - 1];
+  const diff = most.orders.length - least.orders.length;
+
+  if (diff <= MAX_DIFF + 1) return; // already balanced enough
+
+  // Calculate how many to move
+  const target = Math.floor((most.orders.length + least.orders.length) / 2);
+  const toMove = most.orders.length - target;
+  if (toMove <= 0) return;
+
+  // Find movable orders: NOT from anchor city, prefer fill cities and neighborhood exceptions
+  const anchorCity = most.territoryRule?.anchorCity || '';
+  const movable = most.orders.filter(o => {
+    const city = normalizeCityName(o.city || (o as any).geocoded?.city || '');
+    return city !== anchorCity;
+  });
+
+  if (movable.length === 0) return;
+
+  const leastCapacity = Number(least.truck.capacity_kg) * 0.95;
+  const leastMaxDel = least.territoryRule?.maxDeliveries || 25;
+  let moved = 0;
+
+  for (const order of movable) {
+    if (moved >= toMove) break;
+    if (least.orders.length >= leastMaxDel) break;
+    if (least.totalWeight + order.weight_kg > leastCapacity) continue;
+
+    // Remove from most
+    const idx = most.orders.indexOf(order);
+    if (idx >= 0) {
+      most.orders.splice(idx, 1);
+      most.totalWeight -= order.weight_kg;
+
+      // Add to least
+      least.orders.push(order);
+      least.totalWeight += order.weight_kg;
+      moved++;
+    }
+  }
+
+  if (moved > 0) {
+    // Update stats
+    for (const comp of [most, least]) {
+      comp.estimatedDeliveries = comp.orders.length;
+      comp.occupancyPercent = Math.round((comp.totalWeight / Number(comp.truck.capacity_kg)) * 100);
+      const cities = new Set<string>();
+      for (const o of comp.orders) {
+        cities.add(normalizeCityName(o.city || (o as any).geocoded?.city || 'desconhecida'));
+      }
+      comp.cities = Array.from(cities);
+    }
+
+    reasoning.push(
+      `Rebalanceamento: ${moved} entregas de ${most.truck.plate} (${most.orders.length + moved}→${most.orders.length}) → ${least.truck.plate} (${least.orders.length - moved}→${least.orders.length})`
+    );
+  }
 }
 
 // ================================================================

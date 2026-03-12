@@ -43,7 +43,8 @@ export default function Settings() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [creatingDriver, setCreatingDriver] = useState(false);
-  const [testDriverInfo, setTestDriverInfo] = useState<{ email: string; password: string; fullName: string } | null>(null);
+  const [newDriverName, setNewDriverName] = useState('');
+  const [driverInfo, setDriverInfo] = useState<{ accessCode: string; password: string; fullName: string; accessLink: string } | null>(null);
 
   // Load user profile
   useEffect(() => {
@@ -156,19 +157,23 @@ export default function Settings() {
     }
   };
 
-  const handleCreateTestDriver = async () => {
+  const handleCreateDriver = async () => {
+    if (!newDriverName.trim()) {
+      toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
+      return;
+    }
     setCreatingDriver(true);
-    setTestDriverInfo(null);
+    setDriverInfo(null);
     try {
-      const driverNumber = Date.now() % 10000;
       const { data, error } = await supabase.functions.invoke('create-test-driver', {
-        body: { driverNumber },
+        body: { driverName: newDriverName.trim() },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setTestDriverInfo({ email: data.email, password: data.password, fullName: data.fullName });
-      toast({ title: 'Motorista de teste criado!' });
-      // Reload users list
+      const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
+      setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
+      setNewDriverName('');
+      toast({ title: 'Motorista criado com sucesso!' });
       const allUsers = await getAllUsers();
       setUsers(allUsers);
     } catch (err: any) {
@@ -351,29 +356,38 @@ export default function Settings() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Create Test Driver */}
-                  <div className="flex items-center gap-3 p-4 rounded-lg border border-dashed border-border">
-                    <Button onClick={handleCreateTestDriver} disabled={creatingDriver} variant="outline" className="gap-2">
-                      <UserPlus className="h-4 w-4" />
-                      {creatingDriver ? 'Criando...' : 'Criar Motorista de Teste'}
-                    </Button>
-                    {testDriverInfo && (
-                      <div className="flex-1 text-sm space-y-1 bg-muted p-3 rounded-md">
-                        <p className="font-medium">{testDriverInfo.fullName}</p>
+                  {/* Create Driver */}
+                  <div className="space-y-3 p-4 rounded-lg border border-dashed border-border">
+                    <div className="flex items-center gap-3">
+                      <Input
+                        placeholder="Nome do motorista"
+                        value={newDriverName}
+                        onChange={(e) => setNewDriverName(e.target.value)}
+                        className="max-w-xs"
+                      />
+                      <Button onClick={handleCreateDriver} disabled={creatingDriver} variant="outline" className="gap-2 shrink-0">
+                        <UserPlus className="h-4 w-4" />
+                        {creatingDriver ? 'Criando...' : 'Criar Motorista'}
+                      </Button>
+                    </div>
+                    {driverInfo && (
+                      <div className="text-sm space-y-2 bg-muted p-3 rounded-md">
+                        <p className="font-medium">{driverInfo.fullName}</p>
                         <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">Email:</span>
-                          <code className="text-xs bg-background px-1 rounded">{testDriverInfo.email}</code>
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { navigator.clipboard.writeText(testDriverInfo.email); toast({ title: 'Email copiado!' }); }}>
+                          <span className="text-muted-foreground">Link de acesso:</span>
+                          <code className="text-xs bg-background px-2 py-1 rounded break-all">{driverInfo.accessLink}</code>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.accessLink); toast({ title: 'Link copiado!' }); }}>
                             <Copy className="h-3 w-3" />
                           </Button>
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground">Senha:</span>
-                          <code className="text-xs bg-background px-1 rounded">{testDriverInfo.password}</code>
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => { navigator.clipboard.writeText(testDriverInfo.password); toast({ title: 'Senha copiada!' }); }}>
+                          <code className="text-xs bg-background px-2 py-1 rounded">{driverInfo.password}</code>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.password); toast({ title: 'Senha copiada!' }); }}>
                             <Copy className="h-3 w-3" />
                           </Button>
                         </div>
+                        <p className="text-xs text-muted-foreground">Envie o link e a senha para o motorista.</p>
                       </div>
                     )}
                   </div>

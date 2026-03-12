@@ -1,1 +1,4 @@
 project_id = "dioiraprytqpqhipombm"
+
+[functions.driver-login]
+verify_jwt = false

@@ -5,6 +5,11 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+function generateAccessCode(): string {
+  const num = Math.floor(1000 + Math.random() * 9000);
+  return `RC-${num}`;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -41,10 +46,12 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Admin only' }), { status: 403, headers: corsHeaders })
     }
 
-    const { driverNumber } = await req.json()
-    const email = `motorista_teste_${driverNumber}@rotacerta.test`
-    const password = `teste${driverNumber}2025`
-    const fullName = `Motorista Teste ${driverNumber}`
+    const { driverName } = await req.json()
+    const accessCode = generateAccessCode()
+    const driverNumber = Date.now() % 100000
+    const email = `motorista_${driverNumber}@rotacerta.internal`
+    const password = `rc${driverNumber}${Math.random().toString(36).substring(2, 6)}`
+    const fullName = driverName || `Motorista ${driverNumber}`
 
     // Create user with email confirmed
     const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
@@ -73,8 +80,15 @@ Deno.serve(async (req) => {
       role: 'motorista',
     })
 
+    // Store access code
+    await supabase.from('driver_access_codes').insert({
+      user_id: userId,
+      access_code: accessCode,
+      driver_password: password,
+    })
+
     return new Response(
-      JSON.stringify({ email, password, fullName, userId }),
+      JSON.stringify({ accessCode, password, fullName, userId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
