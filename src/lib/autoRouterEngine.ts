@@ -546,6 +546,9 @@ export function autoComposeRoute(
     }
   }
 
+  // Step 5e: Rebalance between internal (non-support, non-third-party) trucks
+  rebalanceInternalTrucks(compositions, reasoning, warnings);
+
   // Step 6: Sequence optimization with street grouping
   for (const comp of compositions) {
     if (comp.orders.length > 1) {
