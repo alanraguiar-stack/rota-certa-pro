@@ -140,19 +140,21 @@ export function useDriverRoutes() {
 
   const confirmDelivery = useCallback(async (
     executionId: string,
-    signatureUrl: string,
-    photoUrl: string,
+    signatureUrl?: string,
+    photoUrl?: string,
     observations?: string
   ) => {
+    const updateData: any = {
+      status: 'concluida',
+      delivered_at: new Date().toISOString(),
+      observations: observations || null,
+    };
+    if (signatureUrl) updateData.signature_url = signatureUrl;
+    if (photoUrl) updateData.photo_url = photoUrl;
+
     const { error } = await (supabase as any)
       .from('delivery_executions')
-      .update({
-        status: 'concluida',
-        delivered_at: new Date().toISOString(),
-        signature_url: signatureUrl,
-        photo_url: photoUrl,
-        observations: observations || null,
-      })
+      .update(updateData)
       .eq('id', executionId);
     if (error) throw error;
   }, []);
