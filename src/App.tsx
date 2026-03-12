@@ -12,6 +12,7 @@ import RouteDetails from "./pages/RouteDetails";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import DriverDashboard from "./pages/DriverDashboard";
+import DriverAccess from "./pages/DriverAccess";
 import DeliveryConfirmation from "./pages/DeliveryConfirmation";
 import NotFound from "./pages/NotFound";
 import LandingPage from "./pages/LandingPage";
