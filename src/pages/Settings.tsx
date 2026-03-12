@@ -157,19 +157,23 @@ export default function Settings() {
     }
   };
 
-  const handleCreateTestDriver = async () => {
+  const handleCreateDriver = async () => {
+    if (!newDriverName.trim()) {
+      toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
+      return;
+    }
     setCreatingDriver(true);
-    setTestDriverInfo(null);
+    setDriverInfo(null);
     try {
-      const driverNumber = Date.now() % 10000;
       const { data, error } = await supabase.functions.invoke('create-test-driver', {
-        body: { driverNumber },
+        body: { driverName: newDriverName.trim() },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      setTestDriverInfo({ email: data.email, password: data.password, fullName: data.fullName });
-      toast({ title: 'Motorista de teste criado!' });
-      // Reload users list
+      const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
+      setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
+      setNewDriverName('');
+      toast({ title: 'Motorista criado com sucesso!' });
       const allUsers = await getAllUsers();
       setUsers(allUsers);
     } catch (err: any) {
