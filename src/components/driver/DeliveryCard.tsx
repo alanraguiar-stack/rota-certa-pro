@@ -24,62 +24,64 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
   return (
     <div
       className={cn(
-        'w-full rounded-xl border-2 p-4 transition-all',
+        'w-full rounded-xl border-2 p-3 transition-all',
         config.className,
       )}
     >
-      <div className="flex items-start gap-3">
-        <button onClick={onClick} className="flex items-start gap-3 flex-1 text-left active:scale-[0.98]">
+      <div className="flex items-start gap-2">
+        <button onClick={onClick} className="flex items-start gap-2 flex-1 min-w-0 text-left active:scale-[0.98]">
           <div className={cn(
-            'flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold',
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold mt-0.5',
             delivery.status === 'concluida' ? 'bg-success text-success-foreground' :
             delivery.status === 'nao_entregue' ? 'bg-destructive text-destructive-foreground' :
             'bg-muted text-muted-foreground'
           )}>
-            {delivery.status === 'pendente' ? index + 1 : <StatusIcon className="h-4 w-4" />}
+            {delivery.status === 'pendente' ? index + 1 : <StatusIcon className="h-3.5 w-3.5" />}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-medium text-foreground truncate">{delivery.order?.client_name}</p>
-            <div className="flex items-start gap-1 mt-1">
-              <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground line-clamp-2">{delivery.order?.address}</p>
+            <p className="text-sm font-medium text-foreground truncate">{delivery.order?.client_name}</p>
+            <div className="flex items-start gap-1 mt-0.5">
+              <MapPin className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
+              <p className="text-xs text-muted-foreground line-clamp-2">{delivery.order?.address}</p>
             </div>
-            {(delivery.order?.weight_kg || delivery.order?.product_description) && (
-              <p className="text-xs text-muted-foreground mt-1 truncate">
-                {delivery.order?.weight_kg ? `${delivery.order.weight_kg} kg` : ''}
-                {delivery.order?.weight_kg && delivery.order?.product_description ? ' · ' : ''}
-                {delivery.order?.product_description || ''}
+            {delivery.order?.weight_kg && (
+              <p className="text-xs font-semibold text-foreground mt-1">
+                {delivery.order.weight_kg} kg
+              </p>
+            )}
+            {delivery.order?.product_description && (
+              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1 break-all">
+                {delivery.order.product_description}
               </p>
             )}
             {delivery.delivered_at && (
-              <p className="text-xs text-muted-foreground mt-1">
+              <p className="text-xs text-muted-foreground mt-0.5">
                 {new Date(delivery.delivered_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
               </p>
             )}
           </div>
         </button>
 
-        {/* Quick action buttons for pending deliveries */}
         {delivery.status === 'pendente' && (onQuickConfirm || onQuickReject) && (
-          <div className="flex flex-col gap-1.5 shrink-0">
+          <div className="flex flex-col gap-1 shrink-0">
             {onQuickConfirm && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 text-success hover:bg-success/10 hover:text-success"
+                className="h-8 w-8 text-success hover:bg-success/10 hover:text-success"
                 onClick={(e) => { e.stopPropagation(); onQuickConfirm(delivery.id); }}
               >
-                <CheckCircle2 className="h-5 w-5" />
+                <CheckCircle2 className="h-4 w-4" />
               </Button>
             )}
             {onQuickReject && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={(e) => { e.stopPropagation(); onQuickReject(delivery.id); }}
               >
-                <XCircle className="h-5 w-5" />
+                <XCircle className="h-4 w-4" />
               </Button>
             )}
           </div>

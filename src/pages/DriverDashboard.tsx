@@ -191,7 +191,7 @@ export default function DriverDashboard() {
             )}
 
             {/* Deliveries List */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <h2 className="font-semibold text-foreground">Entregas</h2>
               {deliveries.map((delivery, index) => (
                 <DeliveryCard
