@@ -178,20 +178,32 @@ export default function Settings() {
       toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
       return;
     }
+    if (newDriverPassword && newDriverPassword.length < 6) {
+      toast({ title: 'A senha deve ter pelo menos 6 caracteres', variant: 'destructive' });
+      return;
+    }
     setCreatingDriver(true);
     setDriverInfo(null);
     try {
       const { data, error } = await supabase.functions.invoke('create-test-driver', {
-        body: { driverName: newDriverName.trim() },
+        body: { driverName: newDriverName.trim(), driverPassword: newDriverPassword || undefined },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
       setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
       setNewDriverName('');
+      setNewDriverPassword('');
       toast({ title: 'Motorista criado com sucesso!' });
       const allUsers = await getAllUsers();
       setUsers(allUsers);
+      // Refresh access codes
+      const { data: codes } = await supabase.from('driver_access_codes').select('user_id, access_code, driver_password');
+      if (codes) {
+        const codesMap: Record<string, { accessCode: string; password: string }> = {};
+        for (const c of codes) codesMap[c.user_id] = { accessCode: c.access_code, password: c.driver_password };
+        setAccessCodes(codesMap);
+      }
     } catch (err: any) {
       toast({ title: 'Erro ao criar motorista', description: err.message, variant: 'destructive' });
     } finally {
