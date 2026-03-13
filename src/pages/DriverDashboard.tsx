@@ -1,27 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Truck, Navigation, Package, RefreshCw } from 'lucide-react';
+import { Truck, Package, RefreshCw, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDriverRoutes, DeliveryExecution } from '@/hooks/useDriverRoutes';
 import { DeliveryCard } from '@/components/driver/DeliveryCard';
 import { useToast } from '@/hooks/use-toast';
 
-function buildGoogleMapsUrl(stops: { address: string }[]) {
-  if (stops.length === 0) return '';
-  const lastStop = stops[stops.length - 1].address;
-  const waypoints = stops.slice(0, -1).map(s => s.address).join('|');
-  const params = new URLSearchParams({
-    api: '1',
-    origin: 'current+location',
-    destination: lastStop,
-    travelmode: 'driving',
-  });
-  if (waypoints) params.set('waypoints', waypoints);
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
-}
+type ConfirmMode = 'entregue' | 'nao_entregue';
 
 export default function DriverDashboard() {
   const { user } = useAuth();
@@ -30,11 +20,15 @@ export default function DriverDashboard() {
   const { assignments, deliveries, loading, fetchAssignments, fetchDeliveries, startRoute, confirmDelivery, markNotDelivered } = useDriverRoutes();
   const [activeAssignment, setActiveAssignment] = useState<string | null>(null);
 
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; mode: ConfirmMode; executionId: string }>({ open: false, mode: 'entregue', executionId: '' });
+  const [observations, setObservations] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
   useEffect(() => {
     if (user) fetchAssignments();
   }, [user, fetchAssignments]);
 
-  // Auto-select active or first pending assignment
   useEffect(() => {
     if (assignments.length > 0 && !activeAssignment) {
       const active = assignments.find(a => a.status === 'em_andamento') || assignments.find(a => a.status === 'pendente');
@@ -51,19 +45,10 @@ export default function DriverDashboard() {
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
 
   const handleStartRoute = async () => {
-    if (!currentAssignment) return;
-    if (currentAssignment.status === 'pendente') {
-      await startRoute(currentAssignment.id);
-      await fetchAssignments();
-    }
-    const pendingStops = deliveries
-      .filter(d => d.status === 'pendente')
-      .map(d => ({ address: d.order?.address || '' }))
-      .filter(s => s.address);
-    if (pendingStops.length > 0) {
-      const url = buildGoogleMapsUrl(pendingStops);
-      window.open(url, '_blank');
-    }
+    if (!currentAssignment || currentAssignment.status !== 'pendente') return;
+    await startRoute(currentAssignment.id);
+    await fetchAssignments();
+    toast({ title: 'Rota iniciada!' });
   };
 
   const handleDeliveryClick = (delivery: DeliveryExecution) => {
@@ -72,10 +57,26 @@ export default function DriverDashboard() {
     }
   };
 
-  const handleQuickConfirm = async (executionId: string) => {
+  const openConfirmDialog = (executionId: string, mode: ConfirmMode) => {
+    setObservations('');
+    setConfirmDialog({ open: true, mode, executionId });
+  };
+
+  const handleConfirmSubmit = async () => {
+    if (confirmDialog.mode === 'nao_entregue' && !observations.trim()) {
+      toast({ title: 'Motivo obrigatório', description: 'Informe o motivo da não entrega.', variant: 'destructive' });
+      return;
+    }
+    setSubmitting(true);
     try {
-      await confirmDelivery(executionId, '', '', '');
-      toast({ title: 'Entrega confirmada!' });
+      if (confirmDialog.mode === 'entregue') {
+        await confirmDelivery(confirmDialog.executionId, '', '', observations.trim());
+        toast({ title: 'Entrega confirmada!' });
+      } else {
+        await markNotDelivered(confirmDialog.executionId, observations.trim());
+        toast({ title: 'Marcada como não entregue' });
+      }
+      setConfirmDialog({ open: false, mode: 'entregue', executionId: '' });
       if (activeAssignment) {
         const remaining = await fetchDeliveries(activeAssignment);
         const pending = remaining.filter((d: DeliveryExecution) => d.status === 'pendente');
@@ -91,16 +92,8 @@ export default function DriverDashboard() {
       }
     } catch (err: any) {
       toast({ title: 'Erro', description: err.message, variant: 'destructive' });
-    }
-  };
-
-  const handleQuickReject = async (executionId: string) => {
-    try {
-      await markNotDelivered(executionId, 'Não entregue (ação rápida)');
-      toast({ title: 'Marcada como não entregue' });
-      if (activeAssignment) await fetchDeliveries(activeAssignment);
-    } catch (err: any) {
-      toast({ title: 'Erro', description: err.message, variant: 'destructive' });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -178,15 +171,15 @@ export default function DriverDashboard() {
               </CardContent>
             </Card>
 
-            {/* Start Route Button */}
-            {currentAssignment.status !== 'finalizada' && deliveries.some(d => d.status === 'pendente') && (
+            {/* Start Route Button — only changes status */}
+            {currentAssignment.status === 'pendente' && (
               <Button
                 onClick={handleStartRoute}
                 className="w-full h-14 text-lg gap-3 btn-cta"
                 size="lg"
               >
-                <Navigation className="h-6 w-6" />
-                {currentAssignment.status === 'pendente' ? 'Iniciar Roteiro' : 'Continuar no Maps'}
+                <Play className="h-6 w-6" />
+                Iniciar Rota
               </Button>
             )}
 
@@ -199,14 +192,49 @@ export default function DriverDashboard() {
                   delivery={delivery}
                   index={index}
                   onClick={() => handleDeliveryClick(delivery)}
-                  onQuickConfirm={handleQuickConfirm}
-                  onQuickReject={handleQuickReject}
+                  onQuickConfirm={(id) => openConfirmDialog(id, 'entregue')}
+                  onQuickReject={(id) => openConfirmDialog(id, 'nao_entregue')}
                 />
               ))}
             </div>
           </>
         )}
       </div>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmDialog.open} onOpenChange={(open) => { if (!open) setConfirmDialog(prev => ({ ...prev, open: false })); }}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {confirmDialog.mode === 'entregue' ? 'Confirmar Entrega' : 'Não Entregue'}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmDialog.mode === 'entregue'
+                ? 'Deseja confirmar esta entrega? Você pode adicionar uma observação opcional.'
+                : 'Informe o motivo da não entrega. Este campo é obrigatório.'}
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            placeholder={confirmDialog.mode === 'entregue' ? 'Observação (opcional)' : 'Motivo da não entrega (obrigatório)'}
+            value={observations}
+            onChange={(e) => setObservations(e.target.value)}
+            className="min-h-[100px]"
+          />
+          <DialogFooter className="flex-row gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setConfirmDialog(prev => ({ ...prev, open: false }))}>
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1"
+              variant={confirmDialog.mode === 'entregue' ? 'default' : 'destructive'}
+              onClick={handleConfirmSubmit}
+              disabled={submitting || (confirmDialog.mode === 'nao_entregue' && !observations.trim())}
+            >
+              {submitting ? 'Salvando...' : 'Confirmar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

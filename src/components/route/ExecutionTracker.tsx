@@ -205,6 +205,11 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
                           </span>
                         )}
                         {statusBadge(d.status)}
+                        {d.observations && (
+                          <Button variant="ghost" size="sm" className="text-warning" onClick={() => setEvidenceModal(d)} title={d.observations}>
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
+                        )}
                         {(d.signature_url || d.photo_url) && (
                           <Button variant="ghost" size="sm" onClick={() => setEvidenceModal(d)}>
                             <Eye className="h-4 w-4" />
