@@ -126,7 +126,7 @@ export default function DriverDashboard() {
         </div>
       </div>
 
-      <div className="p-4 space-y-4 max-w-lg mx-auto">
+      <div className="px-3 py-3 space-y-3 max-w-lg mx-auto">
         {loading && <p className="text-center text-muted-foreground py-8">Carregando...</p>}
 
         {!loading && assignments.length === 0 && (
