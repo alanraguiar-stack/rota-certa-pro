@@ -83,21 +83,21 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-9 w-9 p-1.5 hover:border-[#4285F4] hover:bg-[#4285F4]/10"
                 asChild
               >
                 <a href={buildGoogleMapsUrl(address)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
-                  <Map className="h-4 w-4 text-primary" />
+                  <img src="/icons/google-maps.png" alt="Google Maps" className="h-full w-full object-contain" />
                 </a>
               </Button>
               <Button
                 variant="outline"
                 size="icon"
-                className="h-8 w-8"
+                className="h-9 w-9 p-1.5 hover:border-[#33ccff] hover:bg-[#33ccff]/10"
                 asChild
               >
                 <a href={buildWazeUrl(address)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
-                  <Navigation className="h-4 w-4 text-primary" />
+                  <img src="/icons/waze.png" alt="Waze" className="h-full w-full object-contain" />
                 </a>
               </Button>
             </>
