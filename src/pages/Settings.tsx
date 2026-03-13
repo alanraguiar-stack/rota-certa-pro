@@ -67,7 +67,7 @@ export default function Settings() {
     loadProfile();
   }, [user]);
 
-  // Load all users (admin only)
+  // Load all users and access codes (admin only)
   useEffect(() => {
     const loadUsers = async () => {
       if (!isAdmin) return;
@@ -75,6 +75,20 @@ export default function Settings() {
       setLoadingUsers(true);
       const allUsers = await getAllUsers();
       setUsers(allUsers);
+
+      // Fetch access codes for all drivers
+      const { data: codes } = await supabase
+        .from('driver_access_codes')
+        .select('user_id, access_code, driver_password');
+      
+      if (codes) {
+        const codesMap: Record<string, { accessCode: string; password: string }> = {};
+        for (const c of codes) {
+          codesMap[c.user_id] = { accessCode: c.access_code, password: c.driver_password };
+        }
+        setAccessCodes(codesMap);
+      }
+
       setLoadingUsers(false);
     };
 
