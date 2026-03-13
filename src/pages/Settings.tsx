@@ -178,7 +178,7 @@ export default function Settings() {
       toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
       return;
     }
-    if (newDriverPassword && newDriverPassword.length < 6) {
+    if (!newDriverPassword || newDriverPassword.length < 6) {
       toast({ title: 'A senha deve ter pelo menos 6 caracteres', variant: 'destructive' });
       return;
     }
