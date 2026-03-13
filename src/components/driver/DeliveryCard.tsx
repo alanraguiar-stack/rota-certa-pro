@@ -97,7 +97,7 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
                 asChild
               >
                 <a href={buildWazeUrl(address)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
-                  <img src="/icons/waze.svg" alt="Waze" className="h-full w-full object-contain" />
+                  <img src="/icons/waze.png" alt="Waze" className="h-full w-full object-contain" />
                 </a>
               </Button>
             </>
