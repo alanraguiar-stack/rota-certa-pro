@@ -1,12 +1,12 @@
 
-# Bloquear acesso do motorista à página de Configurações
 
-O motorista consegue acessar `/configuracoes` diretamente (mesmo sem o link no menu). A página Settings precisa verificar o role e redirecionar motoristas.
+# Reverter ícone do Waze para o PNG original
 
-## Correção
+Trocar a referência no `DeliveryCard.tsx` de `/icons/waze.svg` de volta para `/icons/waze.png` (o ícone original que o usuário enviou, com fundo azul).
 
-**Arquivo:** `src/pages/Settings.tsx`
+## Arquivo afetado
 
-No componente `Settings`, usar `useUserRole()` para verificar se o usuário é motorista. Se `isMotorista === true`, renderizar `<Navigate to="/motorista" replace />` em vez do conteúdo da página.
+| Arquivo | Mudança |
+|---|---|
+| `src/components/driver/DeliveryCard.tsx` | Trocar `/icons/waze.svg` por `/icons/waze.png` |
 
-Isso garante que mesmo acessando a URL diretamente, o motorista será redirecionado para seu dashboard.
