@@ -178,7 +178,7 @@ export default function Settings() {
       toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
       return;
     }
-    if (newDriverPassword && newDriverPassword.length < 6) {
+    if (!newDriverPassword || newDriverPassword.length < 6) {
       toast({ title: 'A senha deve ter pelo menos 6 caracteres', variant: 'destructive' });
       return;
     }
@@ -439,6 +439,8 @@ export default function Settings() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Nome</TableHead>
+                          <TableHead>Senha</TableHead>
+                          <TableHead>Link Rápido</TableHead>
                           <TableHead>Permissão</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Ações</TableHead>
@@ -448,21 +450,31 @@ export default function Settings() {
                         {users.map((u) => (
                           <TableRow key={u.id}>
                             <TableCell>
-                              <div>
-                                <p className="font-medium">{u.full_name || 'Sem nome'}</p>
-                                {u.role === 'motorista' && accessCodes[u.user_id] && (
-                                  <div className="flex items-center gap-1 mt-1">
-                                    <code className="text-xs text-muted-foreground">{accessCodes[u.user_id].accessCode}</code>
-                                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { 
-                                      const link = `${window.location.origin}/motorista/acesso/${accessCodes[u.user_id].accessCode}`;
-                                      navigator.clipboard.writeText(link); 
-                                      toast({ title: 'Link copiado!' }); 
-                                    }}>
-                                      <Copy className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
+                              <p className="font-medium">{u.full_name || 'Sem nome'}</p>
+                            </TableCell>
+                            <TableCell>
+                              {accessCodes[u.user_id] ? (
+                                <div className="flex items-center gap-1">
+                                  <code className="text-xs">{accessCodes[u.user_id].password}</code>
+                                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { navigator.clipboard.writeText(accessCodes[u.user_id].password); toast({ title: 'Senha copiada!' }); }}>
+                                    <Copy className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell>
+                              {accessCodes[u.user_id] ? (
+                                <div className="flex items-center gap-1">
+                                  <code className="text-xs truncate max-w-[120px]">{accessCodes[u.user_id].accessCode}</code>
+                                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { 
+                                    const link = `${window.location.origin}/motorista/acesso/${accessCodes[u.user_id].accessCode}`;
+                                    navigator.clipboard.writeText(link); 
+                                    toast({ title: 'Link copiado!' }); 
+                                  }}>
+                                    <Copy className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              ) : <span className="text-muted-foreground">—</span>}
                             </TableCell>
                             <TableCell>
                               <Select
