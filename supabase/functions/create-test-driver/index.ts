@@ -46,11 +46,11 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Admin only' }), { status: 403, headers: corsHeaders })
     }
 
-    const { driverName } = await req.json()
+    const { driverName, driverPassword } = await req.json()
     const accessCode = generateAccessCode()
     const driverNumber = Date.now() % 100000
     const email = `motorista_${driverNumber}@rotacerta.internal`
-    const password = `rc${driverNumber}${Math.random().toString(36).substring(2, 6)}`
+    const password = driverPassword && driverPassword.length >= 6 ? driverPassword : `rc${driverNumber}${Math.random().toString(36).substring(2, 6)}`
     const fullName = driverName || `Motorista ${driverNumber}`
 
     // Create user with email confirmed

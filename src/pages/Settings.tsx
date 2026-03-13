@@ -44,7 +44,9 @@ export default function Settings() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPassword, setNewDriverPassword] = useState('');
   const [driverInfo, setDriverInfo] = useState<{ accessCode: string; password: string; fullName: string; accessLink: string } | null>(null);
+  const [accessCodes, setAccessCodes] = useState<Record<string, { accessCode: string; password: string }>>({});
 
   // Load user profile
   useEffect(() => {
