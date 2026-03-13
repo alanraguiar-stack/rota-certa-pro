@@ -44,7 +44,9 @@ export default function Settings() {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [newDriverName, setNewDriverName] = useState('');
+  const [newDriverPassword, setNewDriverPassword] = useState('');
   const [driverInfo, setDriverInfo] = useState<{ accessCode: string; password: string; fullName: string; accessLink: string } | null>(null);
+  const [accessCodes, setAccessCodes] = useState<Record<string, { accessCode: string; password: string }>>({});
 
   // Load user profile
   useEffect(() => {
@@ -65,7 +67,7 @@ export default function Settings() {
     loadProfile();
   }, [user]);
 
-  // Load all users (admin only)
+  // Load all users and access codes (admin only)
   useEffect(() => {
     const loadUsers = async () => {
       if (!isAdmin) return;
@@ -73,6 +75,20 @@ export default function Settings() {
       setLoadingUsers(true);
       const allUsers = await getAllUsers();
       setUsers(allUsers);
+
+      // Fetch access codes for all drivers
+      const { data: codes } = await supabase
+        .from('driver_access_codes')
+        .select('user_id, access_code, driver_password');
+      
+      if (codes) {
+        const codesMap: Record<string, { accessCode: string; password: string }> = {};
+        for (const c of codes) {
+          codesMap[c.user_id] = { accessCode: c.access_code, password: c.driver_password };
+        }
+        setAccessCodes(codesMap);
+      }
+
       setLoadingUsers(false);
     };
 
@@ -162,20 +178,32 @@ export default function Settings() {
       toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
       return;
     }
+    if (newDriverPassword && newDriverPassword.length < 6) {
+      toast({ title: 'A senha deve ter pelo menos 6 caracteres', variant: 'destructive' });
+      return;
+    }
     setCreatingDriver(true);
     setDriverInfo(null);
     try {
       const { data, error } = await supabase.functions.invoke('create-test-driver', {
-        body: { driverName: newDriverName.trim() },
+        body: { driverName: newDriverName.trim(), driverPassword: newDriverPassword || undefined },
       });
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
       const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
       setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
       setNewDriverName('');
+      setNewDriverPassword('');
       toast({ title: 'Motorista criado com sucesso!' });
       const allUsers = await getAllUsers();
       setUsers(allUsers);
+      // Refresh access codes
+      const { data: codes } = await supabase.from('driver_access_codes').select('user_id, access_code, driver_password');
+      if (codes) {
+        const codesMap: Record<string, { accessCode: string; password: string }> = {};
+        for (const c of codes) codesMap[c.user_id] = { accessCode: c.access_code, password: c.driver_password };
+        setAccessCodes(codesMap);
+      }
     } catch (err: any) {
       toast({ title: 'Erro ao criar motorista', description: err.message, variant: 'destructive' });
     } finally {
@@ -358,11 +386,18 @@ export default function Settings() {
                 <CardContent className="space-y-4">
                   {/* Create Driver */}
                   <div className="space-y-3 p-4 rounded-lg border border-dashed border-border">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <Input
                         placeholder="Nome do motorista"
                         value={newDriverName}
                         onChange={(e) => setNewDriverName(e.target.value)}
+                        className="max-w-xs"
+                      />
+                      <Input
+                        placeholder="Senha (mín. 6 caracteres)"
+                        type="password"
+                        value={newDriverPassword}
+                        onChange={(e) => setNewDriverPassword(e.target.value)}
                         className="max-w-xs"
                       />
                       <Button onClick={handleCreateDriver} disabled={creatingDriver} variant="outline" className="gap-2 shrink-0">
@@ -415,6 +450,18 @@ export default function Settings() {
                             <TableCell>
                               <div>
                                 <p className="font-medium">{u.full_name || 'Sem nome'}</p>
+                                {u.role === 'motorista' && accessCodes[u.user_id] && (
+                                  <div className="flex items-center gap-1 mt-1">
+                                    <code className="text-xs text-muted-foreground">{accessCodes[u.user_id].accessCode}</code>
+                                    <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { 
+                                      const link = `${window.location.origin}/motorista/acesso/${accessCodes[u.user_id].accessCode}`;
+                                      navigator.clipboard.writeText(link); 
+                                      toast({ title: 'Link copiado!' }); 
+                                    }}>
+                                      <Copy className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                )}
                               </div>
                             </TableCell>
                             <TableCell>

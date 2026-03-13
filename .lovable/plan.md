@@ -1,42 +1,12 @@
 
+# Bloquear acesso do motorista à página de Configurações
 
-# Corrigir persistência de motoristas + senha customizável
+O motorista consegue acessar `/configuracoes` diretamente (mesmo sem o link no menu). A página Settings precisa verificar o role e redirecionar motoristas.
 
-## Problema raiz: RLS bloqueia visibilidade
+## Correção
 
-A tabela `profiles` tem RLS `auth.uid() = user_id` para SELECT. O admin só consegue ver **seu próprio** perfil. Quando `getAllUsers()` consulta profiles, retorna apenas 1 registro. Os motoristas existem no banco mas são invisíveis para o admin.
+**Arquivo:** `src/pages/Settings.tsx`
 
-Mesmo problema na `user_roles`: a policy SELECT é `has_role(auth.uid(), 'admin')` — isso funciona. Mas profiles não tem policy para admin.
+No componente `Settings`, usar `useUserRole()` para verificar se o usuário é motorista. Se `isMotorista === true`, renderizar `<Navigate to="/motorista" replace />` em vez do conteúdo da página.
 
-## Correções
-
-### 1. Migração SQL — Admin pode ver todos os profiles
-Adicionar policy SELECT em `profiles` para admins:
-```sql
-CREATE POLICY "Admins can view all profiles"
-ON public.profiles FOR SELECT
-TO authenticated
-USING (public.has_role(auth.uid(), 'admin'));
-```
-
-### 2. `src/pages/Settings.tsx` — Campo de senha customizável
-- Adicionar estado `newDriverPassword` com input de senha no formulário de criação
-- Enviar `driverPassword` no body da edge function
-- Validação mínima: 6 caracteres
-
-### 3. `supabase/functions/create-test-driver/index.ts` — Aceitar senha customizada
-- Receber `driverPassword` do body (opcional, fallback para senha gerada)
-- Usar essa senha no `createUser` e no `driver_access_codes`
-
-### 4. Lista de motoristas com link de acesso
-- Na tabela de usuários, mostrar o link de acesso ao lado de cada motorista (buscar da tabela `driver_access_codes`)
-- Permitir copiar o link diretamente da lista
-
-## Arquivos
-
-| Arquivo | Mudança |
-|---|---|
-| Nova migração SQL | Policy admin SELECT em profiles |
-| `src/pages/Settings.tsx` | Campo senha, exibir links de acesso na lista |
-| `supabase/functions/create-test-driver/index.ts` | Aceitar senha customizada |
-
+Isso garante que mesmo acessando a URL diretamente, o motorista será redirecionado para seu dashboard.
