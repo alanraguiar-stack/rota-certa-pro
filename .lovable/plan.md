@@ -1,17 +1,12 @@
 
+# Bloquear acesso do motorista à página de Configurações
 
-# Remover fundo azul do ícone do Waze
+O motorista consegue acessar `/configuracoes` diretamente (mesmo sem o link no menu). A página Settings precisa verificar o role e redirecionar motoristas.
 
-## Solução
+## Correção
 
-Criar um SVG do fantasminha do Waze (sem fundo azul) e salvar em `public/icons/waze.svg`. Atualizar o `DeliveryCard.tsx` para referenciar o SVG no lugar do PNG.
+**Arquivo:** `src/pages/Settings.tsx`
 
-O SVG será o fantasminha branco com olhos azuis e boca, contorno cinza, sem fundo colorido — limpo e leve.
+No componente `Settings`, usar `useUserRole()` para verificar se o usuário é motorista. Se `isMotorista === true`, renderizar `<Navigate to="/motorista" replace />` em vez do conteúdo da página.
 
-## Arquivos
-
-| Arquivo | Mudança |
-|---|---|
-| `public/icons/waze.svg` | Novo SVG do fantasminha sem fundo |
-| `src/components/driver/DeliveryCard.tsx` | Trocar `/icons/waze.png` por `/icons/waze.svg` |
-
+Isso garante que mesmo acessando a URL diretamente, o motorista será redirecionado para seu dashboard.
