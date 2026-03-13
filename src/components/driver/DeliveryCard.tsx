@@ -1,4 +1,4 @@
-import { MapPin, Check, Clock, AlertTriangle, CheckCircle2, XCircle, Navigation, Map } from 'lucide-react';
+import { MapPin, Check, Clock, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { DeliveryExecution } from '@/hooks/useDriverRoutes';
