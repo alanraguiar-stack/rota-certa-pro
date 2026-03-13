@@ -1,4 +1,4 @@
-import { MapPin, Check, Clock, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { MapPin, Check, Clock, AlertTriangle, CheckCircle2, XCircle, Navigation, Map } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { DeliveryExecution } from '@/hooks/useDriverRoutes';
@@ -11,6 +11,14 @@ interface DeliveryCardProps {
   onQuickReject?: (id: string) => void;
 }
 
+function buildGoogleMapsUrl(address: string) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=driving`;
+}
+
+function buildWazeUrl(address: string) {
+  return `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`;
+}
+
 export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuickReject }: DeliveryCardProps) {
   const statusConfig = {
     pendente: { icon: Clock, label: 'Pendente', className: 'border-border' },
@@ -20,6 +28,7 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
 
   const config = statusConfig[delivery.status as keyof typeof statusConfig] || statusConfig.pendente;
   const StatusIcon = config.icon;
+  const address = delivery.order?.address || '';
 
   return (
     <div
@@ -42,7 +51,7 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
             <p className="text-sm font-medium text-foreground truncate">{delivery.order?.client_name}</p>
             <div className="flex items-start gap-1 mt-0.5">
               <MapPin className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
-              <p className="text-xs text-muted-foreground line-clamp-2">{delivery.order?.address}</p>
+              <p className="text-xs text-muted-foreground line-clamp-2">{address}</p>
             </div>
             {delivery.order?.weight_kg && (
               <p className="text-xs font-semibold text-foreground mt-1">
@@ -54,6 +63,11 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
                 {delivery.order.product_description}
               </p>
             )}
+            {delivery.observations && (
+              <p className="text-xs text-warning mt-1 italic line-clamp-2">
+                📝 {delivery.observations}
+              </p>
+            )}
             {delivery.delivered_at && (
               <p className="text-xs text-muted-foreground mt-0.5">
                 {new Date(delivery.delivered_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
@@ -62,30 +76,59 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
           </div>
         </button>
 
-        {delivery.status === 'pendente' && (onQuickConfirm || onQuickReject) && (
-          <div className="flex flex-col gap-1 shrink-0">
-            {onQuickConfirm && (
+        <div className="flex flex-col gap-1 shrink-0">
+          {/* Navigation buttons */}
+          {delivery.status === 'pendente' && address && (
+            <>
               <Button
-                variant="ghost"
+                variant="outline"
                 size="icon"
-                className="h-8 w-8 text-success hover:bg-success/10 hover:text-success"
-                onClick={(e) => { e.stopPropagation(); onQuickConfirm(delivery.id); }}
+                className="h-8 w-8"
+                asChild
               >
-                <CheckCircle2 className="h-4 w-4" />
+                <a href={buildGoogleMapsUrl(address)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
+                  <Map className="h-4 w-4 text-primary" />
+                </a>
               </Button>
-            )}
-            {onQuickReject && (
               <Button
-                variant="ghost"
+                variant="outline"
                 size="icon"
-                className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={(e) => { e.stopPropagation(); onQuickReject(delivery.id); }}
+                className="h-8 w-8"
+                asChild
               >
-                <XCircle className="h-4 w-4" />
+                <a href={buildWazeUrl(address)} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>
+                  <Navigation className="h-4 w-4 text-primary" />
+                </a>
               </Button>
-            )}
-          </div>
-        )}
+            </>
+          )}
+
+          {/* Quick action buttons */}
+          {delivery.status === 'pendente' && (onQuickConfirm || onQuickReject) && (
+            <>
+              {onQuickConfirm && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-success hover:bg-success/10 hover:text-success"
+                  onClick={(e) => { e.stopPropagation(); onQuickConfirm(delivery.id); }}
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+                </Button>
+              )}
+              {onQuickReject && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={(e) => { e.stopPropagation(); onQuickReject(delivery.id); }}
+                >
+                  <XCircle className="h-4 w-4" />
+                </Button>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
