@@ -126,7 +126,7 @@ export default function DriverDashboard() {
         </div>
       </div>
 
-      <div className="p-4 space-y-4 max-w-lg mx-auto">
+      <div className="px-3 py-3 space-y-3 max-w-lg mx-auto">
         {loading && <p className="text-center text-muted-foreground py-8">Carregando...</p>}
 
         {!loading && assignments.length === 0 && (
@@ -191,7 +191,7 @@ export default function DriverDashboard() {
             )}
 
             {/* Deliveries List */}
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <h2 className="font-semibold text-foreground">Entregas</h2>
               {deliveries.map((delivery, index) => (
                 <DeliveryCard
