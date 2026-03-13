@@ -44,6 +44,13 @@ export function DeliveryCard({ delivery, index, onClick, onQuickConfirm, onQuick
               <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
               <p className="text-sm text-muted-foreground line-clamp-2">{delivery.order?.address}</p>
             </div>
+            {(delivery.order?.weight_kg || delivery.order?.product_description) && (
+              <p className="text-xs text-muted-foreground mt-1 truncate">
+                {delivery.order?.weight_kg ? `${delivery.order.weight_kg} kg` : ''}
+                {delivery.order?.weight_kg && delivery.order?.product_description ? ' · ' : ''}
+                {delivery.order?.product_description || ''}
+              </p>
+            )}
             {delivery.delivered_at && (
               <p className="text-xs text-muted-foreground mt-1">
                 {new Date(delivery.delivered_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
