@@ -386,11 +386,18 @@ export default function Settings() {
                 <CardContent className="space-y-4">
                   {/* Create Driver */}
                   <div className="space-y-3 p-4 rounded-lg border border-dashed border-border">
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
                       <Input
                         placeholder="Nome do motorista"
                         value={newDriverName}
                         onChange={(e) => setNewDriverName(e.target.value)}
+                        className="max-w-xs"
+                      />
+                      <Input
+                        placeholder="Senha (mín. 6 caracteres)"
+                        type="password"
+                        value={newDriverPassword}
+                        onChange={(e) => setNewDriverPassword(e.target.value)}
                         className="max-w-xs"
                       />
                       <Button onClick={handleCreateDriver} disabled={creatingDriver} variant="outline" className="gap-2 shrink-0">
