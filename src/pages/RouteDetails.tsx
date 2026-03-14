@@ -299,11 +299,49 @@ export default function RouteDetails() {
     // Optimize routes with the selected strategy
     await optimizeRoutes.mutateAsync(routingStrategy);
     await refetch();
+
+    // Save snapshot to route_history_patterns for learning
+    try {
+      const { supabase } = await import('@/integrations/supabase/client');
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && route) {
+        const today = new Date().toISOString().split('T')[0];
+        const patterns: any[] = [];
+
+        for (const rt of route.route_trucks) {
+          const plate = rt.truck?.plate || 'SEM-PLACA';
+          const assignments = rt.assignments || [];
+          for (const a of assignments) {
+            const order = a.order;
+            if (!order) continue;
+            patterns.push({
+              user_id: user.id,
+              truck_label: plate,
+              client_name: order.client_name,
+              address: order.address,
+              city: order.city || null,
+              neighborhood: null,
+              sequence_order: a.delivery_sequence ?? 0,
+              route_date: today,
+              state: null,
+            });
+          }
+        }
+
+        if (patterns.length > 0) {
+          await supabase.from('route_history_patterns').insert(patterns);
+          console.log(`[PatternLearning] Saved ${patterns.length} patterns from confirmed routes`);
+        }
+      }
+    } catch (err) {
+      console.error('[PatternLearning] Error saving patterns:', err);
+    }
+
     toast({
       title: 'Rotas confirmadas e otimizadas!',
       description: 'Os romaneios estão prontos para geração.',
     });
-  }, [optimizeRoutes, routingStrategy, refetch, toast]);
+  }, [optimizeRoutes, routingStrategy, refetch, toast, route]);
 
 
   if (isLoading) {
