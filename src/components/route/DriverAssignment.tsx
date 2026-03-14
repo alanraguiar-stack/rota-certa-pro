@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { UserPlus, Trash2 } from 'lucide-react';
+import { UserPlus, Trash2, Copy, Link, KeyRound } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -10,6 +10,11 @@ import type { TruckWithAssignments } from '@/types';
 interface DriverUser {
   user_id: string;
   full_name: string | null;
+}
+
+interface DriverAccessInfo {
+  access_code: string;
+  driver_password: string;
 }
 
 interface Props {
@@ -24,6 +29,7 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
   const [existingAssignments, setExistingAssignments] = useState<Record<string, { id: string; driver_user_id: string }>>({});
   const [selectedDrivers, setSelectedDrivers] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [driverAccessInfo, setDriverAccessInfo] = useState<Record<string, DriverAccessInfo>>({});
 
   // Fetch drivers (users with motorista role)
   useEffect(() => {
@@ -57,28 +63,51 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
         .in('route_truck_id', rtIds);
 
       const map: Record<string, { id: string; driver_user_id: string }> = {};
+      const driverUserIds: string[] = [];
       for (const a of data || []) {
         map[a.route_truck_id] = { id: a.id, driver_user_id: a.driver_user_id };
+        driverUserIds.push(a.driver_user_id);
       }
       setExistingAssignments(map);
+
+      // Fetch access codes for existing assigned drivers
+      if (driverUserIds.length > 0) {
+        fetchAccessCodes(driverUserIds);
+      }
     })();
   }, [routeTrucks]);
+
+  const fetchAccessCodes = async (userIds: string[]) => {
+    const { data } = await supabase
+      .from('driver_access_codes')
+      .select('user_id, access_code, driver_password')
+      .in('user_id', userIds);
+
+    if (data) {
+      const map: Record<string, DriverAccessInfo> = {};
+      for (const d of data) {
+        map[d.user_id] = { access_code: d.access_code, driver_password: d.driver_password };
+      }
+      setDriverAccessInfo(prev => ({ ...prev, ...map }));
+    }
+  };
 
   const handleAssign = useCallback(async () => {
     setSaving(true);
     try {
+      const assignedDriverIds: string[] = [];
+
       for (const rt of routeTrucks) {
         const driverId = selectedDrivers[rt.id];
         if (!driverId) continue;
         const existing = existingAssignments[rt.id];
         if (existing) {
-          // Update
           await (supabase as any)
             .from('driver_assignments')
             .update({ driver_user_id: driverId })
             .eq('id', existing.id);
+          assignedDriverIds.push(driverId);
         } else {
-          // Insert assignment + create delivery_executions for each order
           const { data: assignment, error } = await (supabase as any)
             .from('driver_assignments')
             .insert({ route_truck_id: rt.id, driver_user_id: driverId })
@@ -86,8 +115,8 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
             .single();
 
           if (error) throw error;
+          assignedDriverIds.push(driverId);
 
-          // Create delivery executions for all orders in this truck
           const orderIds = rt.assignments?.map(a => a.order_id) || [];
           if (orderIds.length > 0) {
             const executions = orderIds.map(orderId => ({
@@ -99,8 +128,13 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
         }
       }
 
-      // Update route status to empenhada
+      // Update route status
       await supabase.from('routes').update({ status: 'empenhada' } as any).eq('id', routeId);
+
+      // Fetch access codes for the newly assigned drivers
+      if (assignedDriverIds.length > 0) {
+        await fetchAccessCodes(assignedDriverIds);
+      }
 
       toast({ title: 'Motoristas atribuídos!', description: 'A rota está empenhada e pronta para execução.' });
       onAssigned();
@@ -128,6 +162,15 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
     onAssigned();
   }, [existingAssignments, toast, onAssigned]);
 
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast({ title: `${label} copiado!` });
+  };
+
+  const getDriverAccessLink = (accessCode: string) => {
+    return `${window.location.origin}/motorista/acesso/${accessCode}`;
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -141,40 +184,77 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
         {routeTrucks.map(rt => {
           const existing = existingAssignments[rt.id];
           const existingDriver = existing ? drivers.find(d => d.user_id === existing.driver_user_id) : null;
+          const accessInfo = existing ? driverAccessInfo[existing.driver_user_id] : null;
 
           return (
-            <div key={rt.id} className="flex items-center gap-3 rounded-lg border p-3">
-              <div className="flex-1">
-                <p className="font-medium text-foreground">{rt.truck?.plate} — {rt.truck?.model}</p>
-                <p className="text-sm text-muted-foreground">
-                  {rt.assignments?.length || 0} entregas • {Number(rt.total_weight_kg).toFixed(0)} kg
-                </p>
-              </div>
-              {existing ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-success">
-                    {existingDriver?.full_name || 'Motorista atribuído'}
-                  </span>
-                  <Button variant="ghost" size="icon" onClick={() => handleRemoveAssignment(rt.id)}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+            <div key={rt.id} className="rounded-lg border p-3 space-y-2">
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <p className="font-medium text-foreground">{rt.truck?.plate} — {rt.truck?.model}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {rt.assignments?.length || 0} entregas • {Number(rt.total_weight_kg).toFixed(0)} kg
+                  </p>
                 </div>
-              ) : (
-                <Select
-                  value={selectedDrivers[rt.id] || ''}
-                  onValueChange={(v) => setSelectedDrivers(prev => ({ ...prev, [rt.id]: v }))}
-                >
-                  <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Selecionar motorista" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {drivers.map(d => (
-                      <SelectItem key={d.user_id} value={d.user_id}>
-                        {d.full_name || d.user_id.slice(0, 8)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {existing ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-success">
+                      {existingDriver?.full_name || 'Motorista atribuído'}
+                    </span>
+                    <Button variant="ghost" size="icon" onClick={() => handleRemoveAssignment(rt.id)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Select
+                    value={selectedDrivers[rt.id] || ''}
+                    onValueChange={(v) => setSelectedDrivers(prev => ({ ...prev, [rt.id]: v }))}
+                  >
+                    <SelectTrigger className="w-48">
+                      <SelectValue placeholder="Selecionar motorista" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {drivers.map(d => (
+                        <SelectItem key={d.user_id} value={d.user_id}>
+                          {d.full_name || d.user_id.slice(0, 8)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+
+              {/* Access info for assigned driver */}
+              {existing && accessInfo && (
+                <div className="ml-0 rounded-md bg-muted/50 p-2 space-y-1">
+                  <div className="flex items-center gap-2 text-xs">
+                    <Link className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground flex-1 truncate font-mono">
+                      {getDriverAccessLink(accessInfo.access_code)}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => copyToClipboard(getDriverAccessLink(accessInfo.access_code), 'Link')}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs">
+                    <KeyRound className="h-3 w-3 text-muted-foreground" />
+                    <span className="text-muted-foreground flex-1 font-mono">
+                      Senha: {accessInfo.driver_password}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => copyToClipboard(accessInfo.driver_password, 'Senha')}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           );
