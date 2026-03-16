@@ -1217,6 +1217,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   console.log('[ADV Excel] Parsing', rows.length, 'rows');
   
   const orders: ParsedOrder[] = [];
+  const seenVendaIds = new Set<string>();
   
   let currentClient = '';
   let currentVendaId = '';
@@ -1224,52 +1225,27 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   let inItemTable = false;
   let itemColumnMap: { descricao: number; qtde: number } | null = null;
   
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row) continue;
-    
-    const rowText = row.map(c => String(c ?? '')).join(' ').trim();
-    if (!rowText) continue;
-    
-    // Detectar linha de Cliente
-    const clientMatch = rowText.match(/cliente\s*:\s*([A-ZÁÉÍÓÚÀÃÕÇÂÊÎÔÛÄËÏÖÜ\s\-\.]+?)(?:\s+\d{11,14})?$/i);
-    if (clientMatch) {
-      // Salvar pedido anterior se existir
-      if (currentVendaId) {
-        const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
-        if (currentItems.length === 0) {
-          console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
-        }
-        orders.push({
-          pedido_id: currentVendaId,
-          client_name: currentClient,
-          address: '', // Será preenchido pelo cruzamento
-          weight_kg: totalWeight,
-          product_description: currentItems.length > 0 ? currentItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
-          items: [...currentItems],
-          isValid: false, // Sem endereço até cruzar
-          error: 'Aguardando cruzamento com Relatório de Vendas',
-        });
+  // Helper: salva o pedido atual se tiver venda válida
+  const flushCurrentOrder = () => {
+    if (currentVendaId) {
+      const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
+      if (currentItems.length === 0) {
+        console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
       }
-      
-      currentClient = normalizeText(clientMatch[1].trim());
-      currentVendaId = '';
-      currentItems = [];
-      inItemTable = false;
-      itemColumnMap = null;
-      console.log('[ADV Excel] Cliente:', currentClient);
-      continue;
-    }
-    
-    // Detectar linha de Venda
-    const vendaMatch = rowText.match(/venda\s*n[º°]?\s*:\s*(\d+)/i);
-    if (vendaMatch) {
-      // Salvar venda anterior do mesmo cliente
-      if (currentVendaId) {
-        const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
-        if (currentItems.length === 0) {
-          console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
-        }
+      // Deduplicar: se a mesma venda já foi registrada, agregar itens
+      const existingIdx = orders.findIndex(o => o.pedido_id === currentVendaId);
+      if (existingIdx !== -1) {
+        console.log('[ADV Excel] ℹ️ Venda duplicada:', currentVendaId, '- agregando itens ao pedido existente');
+        const existing = orders[existingIdx];
+        const mergedItems = [...(existing.items || []), ...currentItems];
+        const mergedWeight = mergedItems.reduce((sum, item) => sum + item.weight_kg, 0);
+        orders[existingIdx] = {
+          ...existing,
+          weight_kg: mergedWeight,
+          product_description: mergedItems.length > 0 ? mergedItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
+          items: mergedItems,
+        };
+      } else {
         orders.push({
           pedido_id: currentVendaId,
           client_name: currentClient,
@@ -1281,14 +1257,65 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
           error: 'Aguardando cruzamento com Relatório de Vendas',
         });
       }
+      seenVendaIds.add(currentVendaId);
+    }
+  };
+  
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row) continue;
+    
+    const rowText = row.map(c => String(c ?? '')).join(' ').trim();
+    if (!rowText) continue;
+    
+    // Detectar linha de Cliente
+    const clientMatch = rowText.match(/cliente\s*:\s*([A-ZÁÉÍÓÚÀÃÕÇÂÊÎÔÛÄËÏÖÜ\s\-\.]+?)(?:\s+\d{11,14})?$/i);
+    if (clientMatch) {
+      flushCurrentOrder();
       
-      currentVendaId = vendaMatch[1];
+      currentClient = normalizeText(clientMatch[1].trim());
+      currentVendaId = '';
       currentItems = [];
       inItemTable = false;
       itemColumnMap = null;
-      console.log('[ADV Excel] Venda:', currentVendaId);
+      console.log('[ADV Excel] Cliente:', currentClient);
       continue;
     }
+    
+    // Detectar linha de Venda — PRIORIZAR coluna F (índice 5)
+    let vendaDetected = false;
+    
+    // MÉTODO 1: Coluna F (índice 5) contém número de venda puro
+    if (row.length > 5) {
+      const colF = String(row[5] ?? '').trim();
+      const col0 = String(row[0] ?? '').toLowerCase();
+      // Coluna F tem número 5+ dígitos E coluna A contém marcador "venda"
+      if (/^\d{5,}$/.test(colF) && /venda/i.test(col0)) {
+        flushCurrentOrder();
+        currentVendaId = colF;
+        currentItems = [];
+        inItemTable = false;
+        itemColumnMap = null;
+        vendaDetected = true;
+        console.log('[ADV Excel] Venda (col F):', currentVendaId);
+      }
+    }
+    
+    // MÉTODO 2: Fallback — regex no texto concatenado
+    if (!vendaDetected) {
+      const vendaMatch = rowText.match(/venda\s*n[º°]?\s*:\s*(\d+)/i);
+      if (vendaMatch) {
+        flushCurrentOrder();
+        currentVendaId = vendaMatch[1];
+        currentItems = [];
+        inItemTable = false;
+        itemColumnMap = null;
+        vendaDetected = true;
+        console.log('[ADV Excel] Venda (regex):', currentVendaId);
+      }
+    }
+    
+    if (vendaDetected) continue;
     
     // Detectar header de tabela de itens
     if (/descri[çc][ãa]o/i.test(rowText) && /qtde\.?|quantidade/i.test(rowText)) {
@@ -1339,24 +1366,9 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   }
   
   // Processar último pedido
-  if (currentVendaId) {
-    const totalWeight = currentItems.reduce((sum, item) => sum + item.weight_kg, 0);
-    if (currentItems.length === 0) {
-      console.log('[ADV Excel] ⚠️ Venda sem itens válidos:', currentVendaId, '- Cliente:', currentClient);
-    }
-    orders.push({
-      pedido_id: currentVendaId,
-      client_name: currentClient,
-      address: '',
-      weight_kg: totalWeight,
-      product_description: currentItems.length > 0 ? currentItems.map(i => i.product_name).join(', ') : 'Sem itens detalhados',
-      items: [...currentItems],
-      isValid: false,
-      error: 'Aguardando cruzamento com Relatório de Vendas',
-    });
-  }
+  flushCurrentOrder();
   
-  console.log('[ADV Excel] Total orders:', orders.length);
+  console.log('[ADV Excel] Total orders:', orders.length, '(vendas únicas:', seenVendaIds.size, ')');
   return orders;
 }
 
