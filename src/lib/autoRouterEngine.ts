@@ -510,8 +510,8 @@ export function autoComposeRoute(
     }
   }
 
-  // Step 5d: Consolidation — move trucks with < 15 deliveries to support
-  const MIN_DELIVERIES = 15;
+  // Step 5d: Consolidation — move trucks with < 8 deliveries to support
+  const MIN_DELIVERIES = 8;
   const supportComp = compositions.find(c => c.territoryRule?.isSupport || c.anchorRule?.isSupport);
   if (supportComp) {
     for (const comp of compositions) {
