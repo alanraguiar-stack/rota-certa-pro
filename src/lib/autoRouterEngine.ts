@@ -597,63 +597,97 @@ function rebalanceInternalTrucks(
   reasoning: string[],
   warnings: string[]
 ): void {
-  // Internal trucks = have territory, not support, have orders
-  const internal = compositions.filter(c =>
-    c.orders.length > 0 &&
-    c.territoryRule &&
-    !c.territoryRule.isSupport
-  );
-
-  if (internal.length < 2) return;
-
   const MAX_DIFF = 3;
+  const MAX_ITERATIONS = 10;
 
-  // Sort by order count descending
-  internal.sort((a, b) => b.orders.length - a.orders.length);
-  const most = internal[0];
-  const least = internal[internal.length - 1];
-  const diff = most.orders.length - least.orders.length;
+  // Fixed plates that should NOT participate in rebalancing
+  const FIXED_PLATES = new Set(['TRC1Z00', 'TRC1ZOO']);
 
-  if (diff <= MAX_DIFF + 1) return; // already balanced enough
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+    // Internal trucks = have territory, not support, have orders, not fixed
+    const internal = compositions.filter(c =>
+      c.orders.length > 0 &&
+      c.territoryRule &&
+      !c.territoryRule.isSupport &&
+      !FIXED_PLATES.has(c.truck.plate.replace(/[\s-]/g, '').toUpperCase())
+    );
 
-  // Calculate how many to move
-  const target = Math.floor((most.orders.length + least.orders.length) / 2);
-  const toMove = most.orders.length - target;
-  if (toMove <= 0) return;
+    if (internal.length < 2) return;
 
-  // Find movable orders: NOT from anchor city, prefer fill cities and neighborhood exceptions
-  const anchorCity = most.territoryRule?.anchorCity || '';
-  const movable = most.orders.filter(o => {
-    const city = normalizeCityName(o.city || (o as any).geocoded?.city || '');
-    return city !== anchorCity;
-  });
+    // Find most and least loaded
+    internal.sort((a, b) => b.orders.length - a.orders.length);
+    const most = internal[0];
+    const least = internal[internal.length - 1];
+    const diff = most.orders.length - least.orders.length;
 
-  if (movable.length === 0) return;
+    if (diff <= MAX_DIFF) return; // balanced enough
 
-  const leastCapacity = Number(least.truck.capacity_kg) * 0.95;
-  const leastMaxDel = least.territoryRule?.maxDeliveries || 25;
-  let moved = 0;
+    // Calculate how many to move
+    const target = Math.floor((most.orders.length + least.orders.length) / 2);
+    const toMove = Math.min(most.orders.length - target, diff - MAX_DIFF);
+    if (toMove <= 0) return;
 
-  for (const order of movable) {
-    if (moved >= toMove) break;
-    if (least.orders.length >= leastMaxDel) break;
-    if (least.totalWeight + order.weight_kg > leastCapacity) continue;
+    // Find movable orders: NOT from anchor city of source truck
+    const anchorCity = most.territoryRule?.anchorCity || '';
+    const movable = most.orders.filter(o => {
+      const city = normalizeCityName(o.city || (o as any).geocoded?.city || '');
+      return city !== anchorCity;
+    });
 
-    // Remove from most
-    const idx = most.orders.indexOf(order);
-    if (idx >= 0) {
-      most.orders.splice(idx, 1);
-      most.totalWeight -= order.weight_kg;
+    if (movable.length === 0) return;
 
-      // Add to least
-      least.orders.push(order);
-      least.totalWeight += order.weight_kg;
-      moved++;
+    // Score each movable order by geographic affinity with destination truck
+    const leastCities = new Set(least.orders.map(o =>
+      normalizeCityName(o.city || (o as any).geocoded?.city || '')
+    ));
+    const leastNeighborhoods = new Set(least.orders.map(o =>
+      normalizeNeighborhood((o as any).geocoded?.neighborhood || '')
+    ).filter(n => n));
+    const leastStreets = new Set(least.orders.map(o =>
+      ((o as any).geocoded?.street || '').toLowerCase()
+    ).filter(s => s));
+
+    const scored = movable.map(order => {
+      const city = normalizeCityName(order.city || (order as any).geocoded?.city || '');
+      const neighborhood = normalizeNeighborhood((order as any).geocoded?.neighborhood || '');
+      const street = ((order as any).geocoded?.street || '').toLowerCase();
+
+      let score = 0;
+      if (street && leastStreets.has(street)) score += 100;
+      if (neighborhood && leastNeighborhoods.has(neighborhood)) score += 50;
+      if (leastCities.has(city)) score += 20;
+      // Check if city is neighbor of any city in destination truck
+      const leastAnchor = least.territoryRule?.anchorCity || '';
+      if (leastAnchor && city === leastAnchor) score += 30;
+
+      return { order, score };
+    });
+
+    // Sort by affinity score descending (best matches first)
+    scored.sort((a, b) => b.score - a.score);
+
+    const leastCapacity = Number(least.truck.capacity_kg) * 0.95;
+    const leastMaxDel = least.territoryRule?.maxDeliveries || 25;
+    let moved = 0;
+
+    for (const { order } of scored) {
+      if (moved >= toMove) break;
+      if (least.orders.length >= leastMaxDel) break;
+      if (least.totalWeight + order.weight_kg > leastCapacity) continue;
+
+      const idx = most.orders.indexOf(order);
+      if (idx >= 0) {
+        most.orders.splice(idx, 1);
+        most.totalWeight -= order.weight_kg;
+        least.orders.push(order);
+        least.totalWeight += order.weight_kg;
+        moved++;
+      }
     }
-  }
 
-  if (moved > 0) {
-    // Update stats
+    if (moved === 0) return; // no progress, stop
+
+    // Update stats for affected trucks
     for (const comp of [most, least]) {
       comp.estimatedDeliveries = comp.orders.length;
       comp.occupancyPercent = Math.round((comp.totalWeight / Number(comp.truck.capacity_kg)) * 100);
@@ -665,7 +699,7 @@ function rebalanceInternalTrucks(
     }
 
     reasoning.push(
-      `Rebalanceamento: ${moved} entregas de ${most.truck.plate} (${most.orders.length + moved}→${most.orders.length}) → ${least.truck.plate} (${least.orders.length - moved}→${least.orders.length})`
+      `Rebalanceamento #${iteration + 1}: ${moved} entregas de ${most.truck.plate} → ${least.truck.plate} (${most.orders.length}/${least.orders.length})`
     );
   }
 }
