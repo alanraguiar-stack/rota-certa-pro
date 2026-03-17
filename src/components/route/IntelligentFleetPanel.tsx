@@ -5,7 +5,7 @@
  * mostrando ao usuário o "pensamento" por trás da decisão.
  */
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Truck as TruckIcon, 
   Sparkles, 
@@ -69,13 +69,16 @@ export function IntelligentFleetPanel({
   );
 
   // Auto-aplicar recomendação e forçar inclusão de caminhões âncora
+  const hasAutoApplied = useRef(false);
+
   useEffect(() => {
-    if (disabled) return;
+    if (disabled || hasAutoApplied.current) return;
 
     if (
       fleetAnalysis.recommendedTrucks.length > 0 && 
       selectedTruckIds.length === 0
     ) {
+      hasAutoApplied.current = true;
       onSelectionChange(fleetAnalysis.recommendedTrucks.map(t => t.id));
     }
   }, [fleetAnalysis.recommendedTrucks, selectedTruckIds.length, disabled, onSelectionChange]);

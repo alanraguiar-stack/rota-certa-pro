@@ -21,9 +21,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Set up auth state listener BEFORE checking session
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+      (event, session) => {
+        // Only clear user on explicit sign out — never on token refresh
+        if (event === 'SIGNED_OUT') {
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        // For all other events, only update if session exists
+        if (session) {
+          setSession(session);
+          setUser(session.user);
+        }
         setLoading(false);
       }
     );
