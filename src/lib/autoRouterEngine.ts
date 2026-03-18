@@ -889,7 +889,12 @@ function optimizeDeliverySequence(
       }
     }
 
-    cityOrders.sort((a, b) => sortWithinCity(a, b));
+    // Anchor city: sort by distance from CD (ascending) for progressive outward route
+    if (anchorCity && cityGroup.city === anchorCity) {
+      cityOrders.sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+    } else {
+      cityOrders.sort((a, b) => sortWithinCity(a, b));
+    }
     // Apply street grouping sweep
     streetGroupSweep(cityOrders);
     result.push(...cityOrders);
