@@ -541,7 +541,10 @@ export function useRouteDetails(routeId: string | undefined) {
 
       const ordersMap = new Map(route.orders.map(o => [o.id, toOrder(o)]).filter((entry): entry is [string, Order] => entry[1] !== undefined));
 
-      // Optimize each truck's route
+      // Optimize each truck's route and collect all DB updates
+      const allSeqUpdates: Array<{ id: string; delivery_sequence: number }> = [];
+      const allTruckMetricUpdates: Array<{ id: string; estimated_distance_km: number; estimated_time_minutes: number }> = [];
+
       for (const rt of route.route_trucks) {
         const assignments = rt.assignments || [];
         const truckOrders = assignments
@@ -550,30 +553,38 @@ export function useRouteDetails(routeId: string | undefined) {
 
         if (truckOrders.length === 0) continue;
 
-        // Optimize route based on actual addresses
         const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
 
-        // Update assignment sequences based on optimized route
         for (let i = 0; i < optimizedRoute.orderedDeliveries.length; i++) {
           const delivery = optimizedRoute.orderedDeliveries[i];
           const assignment = assignments.find(a => a.order?.id === delivery.order.id);
           if (assignment) {
-            await supabase
-              .from('order_assignments')
-              .update({ delivery_sequence: i + 1 })
-              .eq('id', assignment.id);
+            allSeqUpdates.push({ id: assignment.id, delivery_sequence: i + 1 });
           }
         }
 
-        // Update route_truck with distance and time estimates
-        await supabase
-          .from('route_trucks')
-          .update({
-            estimated_distance_km: optimizedRoute.totalDistance,
-            estimated_time_minutes: optimizedRoute.estimatedMinutes,
-          })
-          .eq('id', rt.id);
+        allTruckMetricUpdates.push({
+          id: rt.id,
+          estimated_distance_km: optimizedRoute.totalDistance,
+          estimated_time_minutes: optimizedRoute.estimatedMinutes,
+        });
       }
+
+      // Batch sequence updates in parallel (chunks of 50)
+      const SEQ_CHUNK = 50;
+      for (let i = 0; i < allSeqUpdates.length; i += SEQ_CHUNK) {
+        const chunk = allSeqUpdates.slice(i, i + SEQ_CHUNK);
+        await Promise.all(
+          chunk.map(u => supabase.from('order_assignments').update({ delivery_sequence: u.delivery_sequence }).eq('id', u.id))
+        );
+      }
+
+      // Batch truck metric updates in parallel
+      await Promise.all(
+        allTruckMetricUpdates.map(u => 
+          supabase.from('route_trucks').update({ estimated_distance_km: u.estimated_distance_km, estimated_time_minutes: u.estimated_time_minutes }).eq('id', u.id)
+        )
+      );
 
       // Update route status to 'distributed'
       await supabase
