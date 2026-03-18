@@ -391,42 +391,34 @@ export function useRouteDetails(routeId: string | undefined) {
 
   // Step 1: Distribute orders to trucks (Romaneio de Carga - without route optimization)
   const distributeLoadMutation = useMutation({
-    mutationFn: async (preComputedResult?: AutoRouterResult | void) => {
+    mutationFn: async () => {
       const route = routeQuery.data;
       if (!route || route.route_trucks.length === 0 || route.orders.length === 0) {
         throw new Error('É necessário ter pedidos e caminhões atribuídos');
       }
 
-      let result: AutoRouterResult;
+      // Always recalculate using real DB orders (with valid UUIDs)
+      const parsedOrders: ParsedOrder[] = route.orders.map(o => ({
+        pedido_id: o.id,
+        client_name: o.client_name,
+        address: o.address,
+        weight_kg: Number(o.weight_kg),
+        product_description: o.product_description,
+        city: (o as any).city || undefined,
+        items: (o.items || []).map(item => ({
+          product_name: item.product_name,
+          weight_kg: Number(item.weight_kg),
+          quantity: item.quantity,
+        })),
+        isValid: true,
+      }));
 
-      if (preComputedResult) {
-        // Use pre-computed result from wizard — skip expensive recalculation
-        result = preComputedResult;
-        console.log('[distributeLoad] Using pre-computed autoResult from wizard');
-      } else {
-        // Convert DB orders to ParsedOrder format for the anchor engine
-        const parsedOrders: ParsedOrder[] = route.orders.map(o => ({
-          pedido_id: o.id,
-          client_name: o.client_name,
-          address: o.address,
-          weight_kg: Number(o.weight_kg),
-          product_description: o.product_description,
-          city: (o as any).city || undefined,
-          items: (o.items || []).map(item => ({
-            product_name: item.product_name,
-            weight_kg: Number(item.weight_kg),
-            quantity: item.quantity,
-          })),
-          isValid: true,
-        }));
+      // Get truck objects from route_trucks
+      const trucks = route.route_trucks
+        .map(rt => rt.truck!)
+        .filter(Boolean);
 
-        // Get truck objects from route_trucks
-        const trucks = route.route_trucks
-          .map(rt => rt.truck!)
-          .filter(Boolean);
-
-        result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' });
-      }
+      const result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' });
 
       console.log('[distributeLoad] autoComposeRoute result:', {
         compositions: result.compositions.map(c => ({

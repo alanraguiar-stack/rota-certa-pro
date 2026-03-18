@@ -164,7 +164,6 @@ export default function NewRoute() {
           selectedTruckIds,
           routingStrategy,
           fleetAlreadyConfigured: true,
-          preComputedAutoResult: autoResult,
         },
       });
     } catch (error) {
