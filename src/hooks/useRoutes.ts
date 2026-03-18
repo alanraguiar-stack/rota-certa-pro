@@ -993,37 +993,36 @@ export function useRouteDetails(routeId: string | undefined) {
       const currentSequence = currentAssignment.delivery_sequence;
       const isMovingUp = newSequence < currentSequence;
       
-      // Update other assignments' sequences
+      // Collect all sequence updates
+      const seqUpdates: Array<{ id: string; seq: number }> = [];
+
       for (const a of assignments) {
         if (a.id === currentAssignment.id) continue;
         
         let newSeq = a.delivery_sequence;
         
         if (isMovingUp) {
-          // Moving up: shift others down
           if (a.delivery_sequence >= newSequence && a.delivery_sequence < currentSequence) {
             newSeq = a.delivery_sequence + 1;
           }
         } else {
-          // Moving down: shift others up
           if (a.delivery_sequence > currentSequence && a.delivery_sequence <= newSequence) {
             newSeq = a.delivery_sequence - 1;
           }
         }
         
         if (newSeq !== a.delivery_sequence) {
-          await supabase
-            .from('order_assignments')
-            .update({ delivery_sequence: newSeq })
-            .eq('id', a.id);
+          seqUpdates.push({ id: a.id, seq: newSeq });
         }
       }
       
-      // Update the moved assignment
-      await supabase
-        .from('order_assignments')
-        .update({ delivery_sequence: newSequence })
-        .eq('id', currentAssignment.id);
+      // Add the moved assignment
+      seqUpdates.push({ id: currentAssignment.id, seq: newSequence });
+
+      // Execute all updates in parallel
+      await Promise.all(
+        seqUpdates.map(u => supabase.from('order_assignments').update({ delivery_sequence: u.seq }).eq('id', u.id))
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
