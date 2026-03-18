@@ -186,42 +186,43 @@ export function useRouteDetails(routeId: string | undefined) {
 
       if (trucksError) throw trucksError;
 
-      // Get assignments for each route_truck
-      const routeTrucksWithAssignments = await Promise.all(
-        (routeTrucks ?? []).map(async (rt) => {
-          const { data: assignments } = await supabase
-            .from('order_assignments')
-            .select(`
-              *,
-              order:orders(*)
-            `)
-            .eq('route_truck_id', rt.id)
-            .order('delivery_sequence', { ascending: true });
+      // Get ALL assignments for this route in a single query (fixes N+1)
+      const routeTruckIds = (routeTrucks ?? []).map(rt => rt.id);
+      let allAssignments: any[] = [];
+      
+      if (routeTruckIds.length > 0) {
+        const { data: assignmentsData } = await supabase
+          .from('order_assignments')
+          .select(`
+            *,
+            order:orders(*)
+          `)
+          .in('route_truck_id', routeTruckIds)
+          .order('delivery_sequence', { ascending: true });
+        
+        allAssignments = assignmentsData ?? [];
+      }
 
-          // Attach items to orders in assignments
-          const assignmentsWithItems = (assignments ?? []).map(assignment => {
-            const order = assignment.order as any;
-            if (order) {
-              return {
-                ...assignment,
-                order: {
-                  ...order,
-                  items: orderItems[order.id] || [],
-                },
-              };
-            }
-            return assignment;
-          });
+      // Group assignments by route_truck_id in memory
+      const assignmentsByTruck = new Map<string, any[]>();
+      for (const a of allAssignments) {
+        const list = assignmentsByTruck.get(a.route_truck_id) ?? [];
+        // Attach items to order
+        const order = a.order as any;
+        if (order) {
+          a.order = { ...order, items: orderItems[order.id] || [] };
+        }
+        list.push(a);
+        assignmentsByTruck.set(a.route_truck_id, list);
+      }
 
-          return {
-            ...rt,
-            assignments: assignmentsWithItems,
-            occupancy_percent: rt.truck
-              ? Math.round((Number(rt.total_weight_kg) / Number(rt.truck.capacity_kg)) * 100)
-              : 0,
-          };
-        })
-      );
+      const routeTrucksWithAssignments = (routeTrucks ?? []).map(rt => ({
+        ...rt,
+        assignments: assignmentsByTruck.get(rt.id) ?? [],
+        occupancy_percent: rt.truck
+          ? Math.round((Number(rt.total_weight_kg) / Number(rt.truck.capacity_kg)) * 100)
+          : 0,
+      }));
 
       return {
         ...route,
