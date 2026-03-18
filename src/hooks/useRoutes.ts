@@ -431,35 +431,45 @@ export function useRouteDetails(routeId: string | undefined) {
         reasoning: result.reasoning,
       });
 
-      // Clear existing assignments
-      for (const rt of route.route_trucks) {
-        await supabase.from('order_assignments').delete().eq('route_truck_id', rt.id);
-      }
+      // Clear existing assignments in parallel
+      await Promise.all(
+        route.route_trucks.map(rt => 
+          supabase.from('order_assignments').delete().eq('route_truck_id', rt.id)
+        )
+      );
 
-      // Map compositions back to route_trucks by truck ID
+      // Collect all inserts and updates
+      const allAssignmentsToInsert: Array<{ order_id: string; route_truck_id: string; delivery_sequence: number }> = [];
+      const truckUpdates: Array<{ id: string; total_weight_kg: number; total_orders: number }> = [];
+
       for (const comp of result.compositions) {
         const rt = route.route_trucks.find(r => r.truck?.id === comp.truck.id);
         if (!rt) continue;
 
         if (comp.orders.length > 0) {
-          const assignmentsToInsert = comp.orders.map((o, idx) => ({
-            order_id: o.pedido_id!, // pedido_id is the order.id from DB
-            route_truck_id: rt.id,
-            delivery_sequence: idx + 1,
-          }));
-
-          await supabase.from('order_assignments').insert(assignmentsToInsert);
+          comp.orders.forEach((o, idx) => {
+            allAssignmentsToInsert.push({
+              order_id: o.pedido_id!,
+              route_truck_id: rt.id,
+              delivery_sequence: idx + 1,
+            });
+          });
         }
 
-        // Update route_truck totals
-        await supabase
-          .from('route_trucks')
-          .update({
-            total_weight_kg: comp.totalWeight,
-            total_orders: comp.orders.length,
-          })
-          .eq('id', rt.id);
+        truckUpdates.push({ id: rt.id, total_weight_kg: comp.totalWeight, total_orders: comp.orders.length });
       }
+
+      // Single batch insert for all assignments
+      if (allAssignmentsToInsert.length > 0) {
+        await supabase.from('order_assignments').insert(allAssignmentsToInsert);
+      }
+
+      // Parallel truck updates
+      await Promise.all(
+        truckUpdates.map(u => 
+          supabase.from('route_trucks').update({ total_weight_kg: u.total_weight_kg, total_orders: u.total_orders }).eq('id', u.id)
+        )
+      );
 
       // Update route status to 'loading' (ready for loading manifest)
       console.log('[distributeLoad] Updating route status to loading for routeId:', routeId);
