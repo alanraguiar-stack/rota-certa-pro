@@ -461,6 +461,51 @@ export default function RouteDetails() {
           </Card>
         )}
 
+        {/* Recovery Alert - Opposite case: status advanced but no assignments (failed distribution) */}
+        {!hasAssignments && hasTrucks && (route.status === 'loading' || route.status === 'distributed' || route.status === 'loading_confirmed') && (
+          <Card className="border-destructive bg-destructive/5">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-destructive" />
+                  <div>
+                    <p className="font-medium">Distribuição inconsistente</p>
+                    <p className="text-sm text-muted-foreground">
+                      O status indica que a carga foi distribuída, mas nenhum pedido está atribuído aos caminhões. Reprocesse a distribuição.
+                    </p>
+                  </div>
+                </div>
+                <Button 
+                  variant="destructive"
+                  disabled={distributeLoad.isPending}
+                  onClick={async () => {
+                    try {
+                      // Reset truck totals first
+                      const { supabase } = await import('@/integrations/supabase/client');
+                      await Promise.all(
+                        route.route_trucks.map(rt =>
+                          supabase.from('route_trucks').update({ total_weight_kg: 0, total_orders: 0 }).eq('id', rt.id)
+                        )
+                      );
+                      // Reset status to trucks_assigned so distributeLoad can run
+                      await supabase.from('routes').update({ status: 'trucks_assigned' }).eq('id', route.id);
+                      await refetch();
+                      // Now run distribution
+                      await distributeLoad.mutateAsync();
+                      await refetch();
+                      toast({ title: 'Distribuição reprocessada com sucesso!' });
+                    } catch (err: any) {
+                      toast({ title: 'Erro ao reprocessar', description: err.message, variant: 'destructive' });
+                    }
+                  }}
+                >
+                  {distributeLoad.isPending ? 'Reprocessando...' : 'Reprocessar Distribuição'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* ============================================ */}
         {/* ETAPA 1: SELECIONAR CAMINHÕES               */}
         {/* (Only shown if fleet wasn't configured in wizard) */}
