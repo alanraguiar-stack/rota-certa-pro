@@ -1,36 +1,12 @@
 
+# Bloquear acesso do motorista à página de Configurações
 
-# Fix: Carga não distribuída — pedido_id inválido no preComputedAutoResult
+O motorista consegue acessar `/configuracoes` diretamente (mesmo sem o link no menu). A página Settings precisa verificar o role e redirecionar motoristas.
 
-## Causa raiz
+## Correção
 
-O `preComputedAutoResult` é gerado no wizard (`NewRoute.tsx`) antes dos pedidos serem inseridos no banco de dados. Nesse momento, os `ParsedOrder` não possuem `pedido_id` (é `undefined`) ou possuem IDs temporários que **não correspondem** aos UUIDs gerados pelo banco ao salvar.
+**Arquivo:** `src/pages/Settings.tsx`
 
-Quando `distributeLoadMutation` usa `order_id: o.pedido_id!` (linha 459), o valor é `undefined` ou inválido. O insert no `order_assignments` falha silenciosamente (FK violation) ou insere 0 registros. Resultado: todos os caminhões ficam com 0 entregas.
+No componente `Settings`, usar `useUserRole()` para verificar se o usuário é motorista. Se `isMotorista === true`, renderizar `<Navigate to="/motorista" replace />` em vez do conteúdo da página.
 
-## Solução
-
-Não usar o `preComputedAutoResult` diretamente para os IDs dos pedidos. Em vez disso, **sempre recomputar** o `autoComposeRoute` dentro do `distributeLoadMutation` usando os pedidos reais do banco (que possuem IDs corretos).
-
-Manter o conceito de "pre-computed" apenas para reutilizar a **estratégia e configuração**, não os dados de pedidos em si. Isso é mais seguro e o custo de performance é desprezível (o engine roda em <100ms para 100 pedidos).
-
-### Mudanças em `src/hooks/useRoutes.ts`
-
-- Remover o branch `if (preComputedResult)` que reutiliza o resultado do wizard
-- Sempre recalcular com os pedidos reais do banco de dados
-- Manter o error handling no insert para capturar falhas
-
-### Mudanças em `src/pages/RouteDetails.tsx` e `src/pages/NewRoute.tsx`
-
-- Remover passagem e recepção de `preComputedAutoResult` via `location.state`
-- Remover state `preComputedAutoResult` no RouteDetails
-- Simplifica o código e elimina a fonte do bug
-
-## Arquivos afetados
-
-| Arquivo | Mudança |
-|---|---|
-| `src/hooks/useRoutes.ts` | Remover branch de preComputedResult; sempre recalcular |
-| `src/pages/RouteDetails.tsx` | Remover state e uso de preComputedAutoResult |
-| `src/pages/NewRoute.tsx` | Remover passagem de autoResult no location.state |
-
+Isso garante que mesmo acessando a URL diretamente, o motorista será redirecionado para seu dashboard.
