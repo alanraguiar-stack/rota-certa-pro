@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useRouteDetails } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
+import { AutoRouterResult } from '@/lib/autoRouterEngine';
 
 import { Truck as TruckType, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -80,7 +81,7 @@ export default function RouteDetails() {
   
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
-
+  const [preComputedAutoResult, setPreComputedAutoResult] = useState<AutoRouterResult | null>(null);
   
   // Track if fleet was pre-configured in wizard
   const [fleetFromWizard, setFleetFromWizard] = useState(false);
@@ -104,6 +105,11 @@ export default function RouteDetails() {
     const stateStrategy = location.state?.routingStrategy as RoutingStrategy | undefined;
     const selectedTruckIdsFromWizard = location.state?.selectedTruckIds as string[] | undefined;
     const fleetAlreadyConfigured = location.state?.fleetAlreadyConfigured as boolean | undefined;
+    const wizardAutoResult = location.state?.preComputedAutoResult as AutoRouterResult | undefined;
+    
+    if (wizardAutoResult) {
+      setPreComputedAutoResult(wizardAutoResult);
+    }
     
     if (stateStrategy) {
       setRoutingStrategy(stateStrategy);
@@ -224,7 +230,8 @@ export default function RouteDetails() {
 
   // Step 1 of workflow: Distribute load (Romaneio de Carga)
   const handleDistributeLoad = async () => {
-    await distributeLoad.mutateAsync();
+    await distributeLoad.mutateAsync(preComputedAutoResult ?? undefined);
+    setPreComputedAutoResult(null); // Clear after use
     await refetch();
   };
 

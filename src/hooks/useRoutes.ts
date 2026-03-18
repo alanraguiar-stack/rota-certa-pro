@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy, OrderItem, ParsedOrderItem, ParsedOrder } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distribution';
-import { autoComposeRoute } from '@/lib/autoRouterEngine';
+import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
 import { optimizeDeliveryOrder } from '@/lib/routing';
 
 // Helper to convert Supabase order to local Order type
@@ -186,42 +186,43 @@ export function useRouteDetails(routeId: string | undefined) {
 
       if (trucksError) throw trucksError;
 
-      // Get assignments for each route_truck
-      const routeTrucksWithAssignments = await Promise.all(
-        (routeTrucks ?? []).map(async (rt) => {
-          const { data: assignments } = await supabase
-            .from('order_assignments')
-            .select(`
-              *,
-              order:orders(*)
-            `)
-            .eq('route_truck_id', rt.id)
-            .order('delivery_sequence', { ascending: true });
+      // Get ALL assignments for this route in a single query (fixes N+1)
+      const routeTruckIds = (routeTrucks ?? []).map(rt => rt.id);
+      let allAssignments: any[] = [];
+      
+      if (routeTruckIds.length > 0) {
+        const { data: assignmentsData } = await supabase
+          .from('order_assignments')
+          .select(`
+            *,
+            order:orders(*)
+          `)
+          .in('route_truck_id', routeTruckIds)
+          .order('delivery_sequence', { ascending: true });
+        
+        allAssignments = assignmentsData ?? [];
+      }
 
-          // Attach items to orders in assignments
-          const assignmentsWithItems = (assignments ?? []).map(assignment => {
-            const order = assignment.order as any;
-            if (order) {
-              return {
-                ...assignment,
-                order: {
-                  ...order,
-                  items: orderItems[order.id] || [],
-                },
-              };
-            }
-            return assignment;
-          });
+      // Group assignments by route_truck_id in memory
+      const assignmentsByTruck = new Map<string, any[]>();
+      for (const a of allAssignments) {
+        const list = assignmentsByTruck.get(a.route_truck_id) ?? [];
+        // Attach items to order
+        const order = a.order as any;
+        if (order) {
+          a.order = { ...order, items: orderItems[order.id] || [] };
+        }
+        list.push(a);
+        assignmentsByTruck.set(a.route_truck_id, list);
+      }
 
-          return {
-            ...rt,
-            assignments: assignmentsWithItems,
-            occupancy_percent: rt.truck
-              ? Math.round((Number(rt.total_weight_kg) / Number(rt.truck.capacity_kg)) * 100)
-              : 0,
-          };
-        })
-      );
+      const routeTrucksWithAssignments = (routeTrucks ?? []).map(rt => ({
+        ...rt,
+        assignments: assignmentsByTruck.get(rt.id) ?? [],
+        occupancy_percent: rt.truck
+          ? Math.round((Number(rt.total_weight_kg) / Number(rt.truck.capacity_kg)) * 100)
+          : 0,
+      }));
 
       return {
         ...route,
@@ -390,35 +391,42 @@ export function useRouteDetails(routeId: string | undefined) {
 
   // Step 1: Distribute orders to trucks (Romaneio de Carga - without route optimization)
   const distributeLoadMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (preComputedResult?: AutoRouterResult | void) => {
       const route = routeQuery.data;
       if (!route || route.route_trucks.length === 0 || route.orders.length === 0) {
         throw new Error('É necessário ter pedidos e caminhões atribuídos');
       }
 
-      // Convert DB orders to ParsedOrder format for the anchor engine
-      const parsedOrders: ParsedOrder[] = route.orders.map(o => ({
-        pedido_id: o.id,
-        client_name: o.client_name,
-        address: o.address,
-        weight_kg: Number(o.weight_kg),
-        product_description: o.product_description,
-        city: (o as any).city || undefined,
-        items: (o.items || []).map(item => ({
-          product_name: item.product_name,
-          weight_kg: Number(item.weight_kg),
-          quantity: item.quantity,
-        })),
-        isValid: true,
-      }));
+      let result: AutoRouterResult;
 
-      // Get truck objects from route_trucks
-      const trucks = route.route_trucks
-        .map(rt => rt.truck!)
-        .filter(Boolean);
+      if (preComputedResult) {
+        // Use pre-computed result from wizard — skip expensive recalculation
+        result = preComputedResult;
+        console.log('[distributeLoad] Using pre-computed autoResult from wizard');
+      } else {
+        // Convert DB orders to ParsedOrder format for the anchor engine
+        const parsedOrders: ParsedOrder[] = route.orders.map(o => ({
+          pedido_id: o.id,
+          client_name: o.client_name,
+          address: o.address,
+          weight_kg: Number(o.weight_kg),
+          product_description: o.product_description,
+          city: (o as any).city || undefined,
+          items: (o.items || []).map(item => ({
+            product_name: item.product_name,
+            weight_kg: Number(item.weight_kg),
+            quantity: item.quantity,
+          })),
+          isValid: true,
+        }));
 
-      // Use anchor-based engine instead of generic distribution
-      const result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' });
+        // Get truck objects from route_trucks
+        const trucks = route.route_trucks
+          .map(rt => rt.truck!)
+          .filter(Boolean);
+
+        result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' });
+      }
 
       console.log('[distributeLoad] autoComposeRoute result:', {
         compositions: result.compositions.map(c => ({
@@ -430,35 +438,45 @@ export function useRouteDetails(routeId: string | undefined) {
         reasoning: result.reasoning,
       });
 
-      // Clear existing assignments
-      for (const rt of route.route_trucks) {
-        await supabase.from('order_assignments').delete().eq('route_truck_id', rt.id);
-      }
+      // Clear existing assignments in parallel
+      await Promise.all(
+        route.route_trucks.map(rt => 
+          supabase.from('order_assignments').delete().eq('route_truck_id', rt.id)
+        )
+      );
 
-      // Map compositions back to route_trucks by truck ID
+      // Collect all inserts and updates
+      const allAssignmentsToInsert: Array<{ order_id: string; route_truck_id: string; delivery_sequence: number }> = [];
+      const truckUpdates: Array<{ id: string; total_weight_kg: number; total_orders: number }> = [];
+
       for (const comp of result.compositions) {
         const rt = route.route_trucks.find(r => r.truck?.id === comp.truck.id);
         if (!rt) continue;
 
         if (comp.orders.length > 0) {
-          const assignmentsToInsert = comp.orders.map((o, idx) => ({
-            order_id: o.pedido_id!, // pedido_id is the order.id from DB
-            route_truck_id: rt.id,
-            delivery_sequence: idx + 1,
-          }));
-
-          await supabase.from('order_assignments').insert(assignmentsToInsert);
+          comp.orders.forEach((o, idx) => {
+            allAssignmentsToInsert.push({
+              order_id: o.pedido_id!,
+              route_truck_id: rt.id,
+              delivery_sequence: idx + 1,
+            });
+          });
         }
 
-        // Update route_truck totals
-        await supabase
-          .from('route_trucks')
-          .update({
-            total_weight_kg: comp.totalWeight,
-            total_orders: comp.orders.length,
-          })
-          .eq('id', rt.id);
+        truckUpdates.push({ id: rt.id, total_weight_kg: comp.totalWeight, total_orders: comp.orders.length });
       }
+
+      // Single batch insert for all assignments
+      if (allAssignmentsToInsert.length > 0) {
+        await supabase.from('order_assignments').insert(allAssignmentsToInsert);
+      }
+
+      // Parallel truck updates
+      await Promise.all(
+        truckUpdates.map(u => 
+          supabase.from('route_trucks').update({ total_weight_kg: u.total_weight_kg, total_orders: u.total_orders }).eq('id', u.id)
+        )
+      );
 
       // Update route status to 'loading' (ready for loading manifest)
       console.log('[distributeLoad] Updating route status to loading for routeId:', routeId);
@@ -530,7 +548,10 @@ export function useRouteDetails(routeId: string | undefined) {
 
       const ordersMap = new Map(route.orders.map(o => [o.id, toOrder(o)]).filter((entry): entry is [string, Order] => entry[1] !== undefined));
 
-      // Optimize each truck's route
+      // Optimize each truck's route and collect all DB updates
+      const allSeqUpdates: Array<{ id: string; delivery_sequence: number }> = [];
+      const allTruckMetricUpdates: Array<{ id: string; estimated_distance_km: number; estimated_time_minutes: number }> = [];
+
       for (const rt of route.route_trucks) {
         const assignments = rt.assignments || [];
         const truckOrders = assignments
@@ -539,30 +560,38 @@ export function useRouteDetails(routeId: string | undefined) {
 
         if (truckOrders.length === 0) continue;
 
-        // Optimize route based on actual addresses
         const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
 
-        // Update assignment sequences based on optimized route
         for (let i = 0; i < optimizedRoute.orderedDeliveries.length; i++) {
           const delivery = optimizedRoute.orderedDeliveries[i];
           const assignment = assignments.find(a => a.order?.id === delivery.order.id);
           if (assignment) {
-            await supabase
-              .from('order_assignments')
-              .update({ delivery_sequence: i + 1 })
-              .eq('id', assignment.id);
+            allSeqUpdates.push({ id: assignment.id, delivery_sequence: i + 1 });
           }
         }
 
-        // Update route_truck with distance and time estimates
-        await supabase
-          .from('route_trucks')
-          .update({
-            estimated_distance_km: optimizedRoute.totalDistance,
-            estimated_time_minutes: optimizedRoute.estimatedMinutes,
-          })
-          .eq('id', rt.id);
+        allTruckMetricUpdates.push({
+          id: rt.id,
+          estimated_distance_km: optimizedRoute.totalDistance,
+          estimated_time_minutes: optimizedRoute.estimatedMinutes,
+        });
       }
+
+      // Batch sequence updates in parallel (chunks of 50)
+      const SEQ_CHUNK = 50;
+      for (let i = 0; i < allSeqUpdates.length; i += SEQ_CHUNK) {
+        const chunk = allSeqUpdates.slice(i, i + SEQ_CHUNK);
+        await Promise.all(
+          chunk.map(u => supabase.from('order_assignments').update({ delivery_sequence: u.delivery_sequence }).eq('id', u.id))
+        );
+      }
+
+      // Batch truck metric updates in parallel
+      await Promise.all(
+        allTruckMetricUpdates.map(u => 
+          supabase.from('route_trucks').update({ estimated_distance_km: u.estimated_distance_km, estimated_time_minutes: u.estimated_time_minutes }).eq('id', u.id)
+        )
+      );
 
       // Update route status to 'distributed'
       await supabase
@@ -971,37 +1000,36 @@ export function useRouteDetails(routeId: string | undefined) {
       const currentSequence = currentAssignment.delivery_sequence;
       const isMovingUp = newSequence < currentSequence;
       
-      // Update other assignments' sequences
+      // Collect all sequence updates
+      const seqUpdates: Array<{ id: string; seq: number }> = [];
+
       for (const a of assignments) {
         if (a.id === currentAssignment.id) continue;
         
         let newSeq = a.delivery_sequence;
         
         if (isMovingUp) {
-          // Moving up: shift others down
           if (a.delivery_sequence >= newSequence && a.delivery_sequence < currentSequence) {
             newSeq = a.delivery_sequence + 1;
           }
         } else {
-          // Moving down: shift others up
           if (a.delivery_sequence > currentSequence && a.delivery_sequence <= newSequence) {
             newSeq = a.delivery_sequence - 1;
           }
         }
         
         if (newSeq !== a.delivery_sequence) {
-          await supabase
-            .from('order_assignments')
-            .update({ delivery_sequence: newSeq })
-            .eq('id', a.id);
+          seqUpdates.push({ id: a.id, seq: newSeq });
         }
       }
       
-      // Update the moved assignment
-      await supabase
-        .from('order_assignments')
-        .update({ delivery_sequence: newSequence })
-        .eq('id', currentAssignment.id);
+      // Add the moved assignment
+      seqUpdates.push({ id: currentAssignment.id, seq: newSequence });
+
+      // Execute all updates in parallel
+      await Promise.all(
+        seqUpdates.map(u => supabase.from('order_assignments').update({ delivery_sequence: u.seq }).eq('id', u.id))
+      );
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
