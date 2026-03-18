@@ -226,8 +226,7 @@ export default function RouteDetails() {
 
   // Step 1 of workflow: Distribute load (Romaneio de Carga)
   const handleDistributeLoad = async () => {
-    await distributeLoad.mutateAsync(preComputedAutoResult ?? undefined);
-    setPreComputedAutoResult(null); // Clear after use
+    await distributeLoad.mutateAsync();
     await refetch();
   };
 
