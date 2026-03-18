@@ -391,7 +391,7 @@ export function useRouteDetails(routeId: string | undefined) {
 
   // Step 1: Distribute orders to trucks (Romaneio de Carga - without route optimization)
   const distributeLoadMutation = useMutation({
-    mutationFn: async (preComputedResult?: AutoRouterResult) => {
+    mutationFn: async (preComputedResult?: AutoRouterResult | void) => {
       const route = routeQuery.data;
       if (!route || route.route_trucks.length === 0 || route.orders.length === 0) {
         throw new Error('É necessário ter pedidos e caminhões atribuídos');
