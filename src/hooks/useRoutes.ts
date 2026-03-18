@@ -397,6 +397,9 @@ export function useRouteDetails(routeId: string | undefined) {
         throw new Error('É necessário ter pedidos e caminhões atribuídos');
       }
 
+      // UUID validation regex
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
       // Always recalculate using real DB orders (with valid UUIDs)
       const parsedOrders: ParsedOrder[] = route.orders.map(o => ({
         pedido_id: o.id,
@@ -413,6 +416,13 @@ export function useRouteDetails(routeId: string | undefined) {
         isValid: true,
       }));
 
+      // Validate ALL order IDs are real UUIDs before proceeding
+      const invalidIds = parsedOrders.filter(o => !o.pedido_id || !UUID_RE.test(o.pedido_id));
+      if (invalidIds.length > 0) {
+        console.error('[distributeLoad] Invalid order IDs found:', invalidIds.map(o => o.pedido_id));
+        throw new Error(`${invalidIds.length} pedido(s) com ID inválido. Recarregue a página e tente novamente.`);
+      }
+
       // Get truck objects from route_trucks
       const trucks = route.route_trucks
         .map(rt => rt.truck!)
@@ -427,15 +437,20 @@ export function useRouteDetails(routeId: string | undefined) {
           cities: c.cities,
         })),
         warnings: result.warnings,
-        reasoning: result.reasoning,
       });
 
-      // Clear existing assignments in parallel
-      await Promise.all(
-        route.route_trucks.map(rt => 
-          supabase.from('order_assignments').delete().eq('route_truck_id', rt.id)
-        )
-      );
+      // Clear existing assignments in a single batch query
+      const routeTruckIds = route.route_trucks.map(rt => rt.id);
+      if (routeTruckIds.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('order_assignments')
+          .delete()
+          .in('route_truck_id', routeTruckIds);
+        if (deleteError) {
+          console.error('[distributeLoad] Failed to delete old assignments:', deleteError);
+          throw new Error(`Erro ao limpar atribuições anteriores: ${deleteError.message}`);
+        }
+      }
 
       // Collect all inserts and updates
       const allAssignmentsToInsert: Array<{ order_id: string; route_truck_id: string; delivery_sequence: number }> = [];
@@ -458,36 +473,48 @@ export function useRouteDetails(routeId: string | undefined) {
         truckUpdates.push({ id: rt.id, total_weight_kg: comp.totalWeight, total_orders: comp.orders.length });
       }
 
-      // Single batch insert for all assignments
+      // Single batch insert for all assignments — WITH error checking
       if (allAssignmentsToInsert.length > 0) {
-        await supabase.from('order_assignments').insert(allAssignmentsToInsert);
+        const { data: insertedAssignments, error: insertError } = await supabase
+          .from('order_assignments')
+          .insert(allAssignmentsToInsert)
+          .select('id');
+
+        if (insertError) {
+          console.error('[distributeLoad] Failed to insert assignments:', insertError);
+          throw new Error(`Erro ao atribuir pedidos aos caminhões: ${insertError.message}`);
+        }
+
+        if (!insertedAssignments || insertedAssignments.length === 0) {
+          throw new Error('Nenhuma atribuição foi criada. Verifique as permissões.');
+        }
+
+        console.log(`[distributeLoad] Successfully inserted ${insertedAssignments.length} assignments`);
+      } else {
+        throw new Error('O motor de composição não atribuiu nenhum pedido. Verifique a frota e os pedidos.');
       }
 
-      // Parallel truck updates
+      // Only update truck totals and status AFTER assignments are confirmed
       await Promise.all(
-        truckUpdates.map(u => 
-          supabase.from('route_trucks').update({ total_weight_kg: u.total_weight_kg, total_orders: u.total_orders }).eq('id', u.id)
-        )
+        truckUpdates.map(async u => {
+          const { error } = await supabase
+            .from('route_trucks')
+            .update({ total_weight_kg: u.total_weight_kg, total_orders: u.total_orders })
+            .eq('id', u.id);
+          if (error) console.error(`[distributeLoad] Failed to update truck ${u.id}:`, error);
+        })
       );
 
-      // Update route status to 'loading' (ready for loading manifest)
-      console.log('[distributeLoad] Updating route status to loading for routeId:', routeId);
-      
-      const { error: statusError, data: statusData } = await supabase
+      // Update route status to 'loading'
+      const { error: statusError } = await supabase
         .from('routes')
         .update({ status: 'loading' })
         .eq('id', routeId!)
         .select();
 
-      console.log('[distributeLoad] Status update result:', { statusData, statusError });
-
       if (statusError) {
         console.error('[distributeLoad] Failed to update route status:', statusError);
         throw new Error(`Erro ao atualizar status: ${statusError.message}`);
-      }
-
-      if (!statusData || statusData.length === 0) {
-        console.warn('[distributeLoad] No rows updated - RLS policy may be blocking the update');
       }
     },
     onSuccess: () => {
