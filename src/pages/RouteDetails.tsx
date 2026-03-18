@@ -105,12 +105,8 @@ export default function RouteDetails() {
     const stateStrategy = location.state?.routingStrategy as RoutingStrategy | undefined;
     const selectedTruckIdsFromWizard = location.state?.selectedTruckIds as string[] | undefined;
     const fleetAlreadyConfigured = location.state?.fleetAlreadyConfigured as boolean | undefined;
-    const wizardAutoResult = location.state?.preComputedAutoResult as AutoRouterResult | undefined;
     
-    if (wizardAutoResult) {
-      setPreComputedAutoResult(wizardAutoResult);
-    }
-    
+
     if (stateStrategy) {
       setRoutingStrategy(stateStrategy);
     }
