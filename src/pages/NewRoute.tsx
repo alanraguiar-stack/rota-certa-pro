@@ -161,9 +161,10 @@ export default function NewRoute() {
       navigate(`/rota/${route.id}`, {
         state: { 
           pendingOrders: validOrders,
-          selectedTruckIds, // Pass the already-selected trucks
+          selectedTruckIds,
           routingStrategy,
-          fleetAlreadyConfigured: true, // Signal that fleet was configured in wizard
+          fleetAlreadyConfigured: true,
+          preComputedAutoResult: autoResult,
         },
       });
     } catch (error) {
