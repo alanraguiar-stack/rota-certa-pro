@@ -88,11 +88,16 @@ export default function NewRoute() {
       // Generate history hints for the current orders
       const hints = getHintsForOrders(parsedOrders);
       
+      // Get tomorrow's allowed cities from schedule
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const allowedCities = getCitiesForDate(tomorrow) || undefined;
+      
       const result = autoComposeRoute(parsedOrders, activeTrucks, {
         strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
-      }, hints.length > 0 ? hints : undefined, extractedPatterns);
+      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities);
       setAutoResult(result);
       
       if (hints.length > 0) {
