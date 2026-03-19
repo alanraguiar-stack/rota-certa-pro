@@ -208,6 +208,12 @@ export default function NewRoute() {
     setIsCreating(true);
     try {
       const route = await createRoute.mutateAsync(routeName);
+
+      // Mark recovered backlog orders as routed
+      if (recoveredOrders.length > 0) {
+        await markAsRouted(recoveredOrders.map(o => o.id), route.id);
+      }
+
       navigate(`/rota/${route.id}`, {
         state: { 
           pendingOrders: validOrders,
