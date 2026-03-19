@@ -269,7 +269,7 @@ export default function NewRoute() {
         </div>
 
         {/* Wizard Stepper */}
-        <Card className="shadow-soft">
+        <Card>
           <CardContent className="py-5">
             <WizardStepper
               currentStep={currentStep}
