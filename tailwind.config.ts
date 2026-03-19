@@ -91,14 +91,7 @@ export default {
         "3xl": "calc(var(--radius) + 16px)",
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-      },
-      boxShadow: {
-        'soft': '0 2px 8px -2px hsl(var(--foreground) / 0.06), 0 6px 18px -6px hsl(var(--foreground) / 0.08)',
-        'soft-lg': '0 4px 16px -4px hsl(var(--foreground) / 0.1), 0 12px 36px -8px hsl(var(--foreground) / 0.1)',
-        'glow': '0 0 24px hsl(var(--accent) / 0.2)',
-        'glow-cta': '0 0 24px hsl(var(--cta) / 0.25)',
-        'glow-accent': '0 0 24px hsl(var(--accent) / 0.25)',
+        sans: ['-apple-system', 'BlinkMacSystemFont', 'Inter', 'system-ui', 'sans-serif'],
       },
       keyframes: {
         "accordion-down": {
@@ -108,10 +101,6 @@ export default {
         "accordion-up": {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
-        },
-        "slide-in-right": {
-          from: { transform: "translateX(100%)", opacity: "0" },
-          to: { transform: "translateX(0)", opacity: "1" },
         },
         "slide-up": {
           from: { transform: "translateY(10px)", opacity: "0" },
@@ -125,34 +114,13 @@ export default {
           from: { transform: "scale(0.95)", opacity: "0" },
           to: { transform: "scale(1)", opacity: "1" },
         },
-        "pulse-slow": {
-          "0%, 100%": { opacity: "0.4" },
-          "50%": { opacity: "0.8" },
-        },
-        "float": {
-          "0%, 100%": { transform: "translateY(0) rotate(0deg)" },
-          "50%": { transform: "translateY(-20px) rotate(3deg)" },
-        },
-        shimmer: {
-          "0%": { backgroundPosition: "-200% 0" },
-          "100%": { backgroundPosition: "200% 0" },
-        },
-        "glow-pulse": {
-          "0%, 100%": { boxShadow: "0 0 20px hsl(var(--accent) / 0.2)" },
-          "50%": { boxShadow: "0 0 35px hsl(var(--accent) / 0.35)" },
-        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
-        "slide-in-right": "slide-in-right 0.3s ease-out",
-        "slide-up": "slide-up 0.4s ease-out",
-        "fade-in": "fade-in 0.3s ease-out",
+        "slide-up": "slide-up 0.3s ease-out",
+        "fade-in": "fade-in 0.2s ease-out",
         "scale-in": "scale-in 0.2s ease-out",
-        "pulse-slow": "pulse-slow 4s ease-in-out infinite",
-        "float": "float 6s ease-in-out infinite",
-        "shimmer": "shimmer 2.5s linear infinite",
-        "glow-pulse": "glow-pulse 3s ease-in-out infinite",
       },
     },
   },
