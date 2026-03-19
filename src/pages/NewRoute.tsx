@@ -280,7 +280,7 @@ export default function NewRoute() {
         </Card>
 
         {/* Step Content */}
-        <Card className="shadow-elevated">
+        <Card>
           <CardHeader className="border-b pb-5">
             <CardTitle className="flex items-center gap-3 text-xl">
               {currentStep === 'orders' && (
