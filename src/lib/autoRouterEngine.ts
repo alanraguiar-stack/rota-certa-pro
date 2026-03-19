@@ -588,7 +588,10 @@ export function autoComposeRoute(
   const allAssigned = new Set(
     compositions.flatMap(c => c.orders.map(o => orderKey(o)))
   );
-  const unassignedOrders = validOrders.filter(o => !allAssigned.has(orderKey(o)));
+  const unassignedOrders = [
+    ...filteredOutOrders,
+    ...validOrders.filter(o => !allAssigned.has(orderKey(o))),
+  ];
 
   if (unassignedOrders.length > 0) {
     warnings.push(`${unassignedOrders.length} pedidos não puderam ser atribuídos`);
