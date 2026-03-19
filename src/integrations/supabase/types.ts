@@ -338,6 +338,57 @@ export type Database = {
           },
         ]
       }
+      pending_orders: {
+        Row: {
+          address: string
+          city: string
+          client_name: string
+          created_at: string | null
+          id: string
+          original_upload_date: string
+          pedido_id: string | null
+          product_description: string | null
+          route_id: string | null
+          routed_at: string | null
+          status: string
+          target_day_of_week: number | null
+          user_id: string
+          weight_kg: number
+        }
+        Insert: {
+          address: string
+          city: string
+          client_name: string
+          created_at?: string | null
+          id?: string
+          original_upload_date?: string
+          pedido_id?: string | null
+          product_description?: string | null
+          route_id?: string | null
+          routed_at?: string | null
+          status?: string
+          target_day_of_week?: number | null
+          user_id: string
+          weight_kg?: number
+        }
+        Update: {
+          address?: string
+          city?: string
+          client_name?: string
+          created_at?: string | null
+          id?: string
+          original_upload_date?: string
+          pedido_id?: string | null
+          product_description?: string | null
+          route_id?: string | null
+          routed_at?: string | null
+          status?: string
+          target_day_of_week?: number | null
+          user_id?: string
+          weight_kg?: number
+        }
+        Relationships: []
+      }
       product_units: {
         Row: {
           created_at: string | null
