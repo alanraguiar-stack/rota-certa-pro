@@ -50,6 +50,11 @@ export default function NewRoute() {
   // Track if fleet was already configured (prevents re-selection)
   const [fleetConfirmed, setFleetConfirmed] = useState(false);
 
+  // Backlog state
+  const [recoveredOrders, setRecoveredOrders] = useState<PendingOrder[]>([]);
+  const [storedOrders, setStoredOrders] = useState<ParsedOrder[]>([]);
+  const [storedCount, setStoredCount] = useState(0);
+
   // Pedidos válidos são os que têm endereço (podem ser roterizados)
   const validOrders = orders.filter((o) => o.isValid);
   
