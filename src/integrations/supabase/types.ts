@@ -41,6 +41,30 @@ export type Database = {
         }
         Relationships: []
       }
+      city_delivery_schedule: {
+        Row: {
+          city_name: string
+          created_at: string | null
+          day_of_week: number
+          id: string
+          user_id: string
+        }
+        Insert: {
+          city_name: string
+          created_at?: string | null
+          day_of_week: number
+          id?: string
+          user_id: string
+        }
+        Update: {
+          city_name?: string
+          created_at?: string | null
+          day_of_week?: number
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       delivery_executions: {
         Row: {
           created_at: string

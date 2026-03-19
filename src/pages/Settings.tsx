@@ -15,8 +15,9 @@ import { useTheme } from '@/hooks/useTheme';
 import { useUserRole, useUserManagement, AppRole } from '@/hooks/useUserRole';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy, CalendarDays } from 'lucide-react';
 import { ProductUnitsImporter } from '@/components/route/ProductUnitsImporter';
+import { CityScheduleTab } from '@/components/settings/CityScheduleTab';
 import { RouteHistoryImporter } from '@/components/route/RouteHistoryImporter';
 
 interface UserProfile {
@@ -228,10 +229,14 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="account" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-5">
+          <TabsList className="grid w-full grid-cols-5 lg:grid-cols-6">
             <TabsTrigger value="account" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Conta
+            </TabsTrigger>
+            <TabsTrigger value="calendar" className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4" />
+              Calendário
             </TabsTrigger>
             <TabsTrigger value="products" className="flex items-center gap-2">
               <Package className="h-4 w-4" />
@@ -329,6 +334,11 @@ export default function Settings() {
                 </Button>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Calendar Tab */}
+          <TabsContent value="calendar" className="space-y-4">
+            <CityScheduleTab />
           </TabsContent>
 
           {/* Products Tab */}

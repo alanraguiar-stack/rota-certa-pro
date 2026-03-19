@@ -19,6 +19,7 @@ import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
 import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
+import { useCitySchedule } from '@/hooks/useCitySchedule';
 import { analyzeFleetRequirements, validateFinalResult } from '@/lib/routeIntelligence';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
@@ -29,6 +30,7 @@ export default function NewRoute() {
   const { activeTrucks } = useTrucks();
   const { getHintsForOrders, patternsCount, extractedPatterns } = useHistoryPatterns();
   const { toast } = useToast();
+  const { getCitiesForDate } = useCitySchedule();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
   const [completedSteps, setCompletedSteps] = useState<RouteWizardStep[]>([]);
@@ -86,11 +88,16 @@ export default function NewRoute() {
       // Generate history hints for the current orders
       const hints = getHintsForOrders(parsedOrders);
       
+      // Get tomorrow's allowed cities from schedule
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const allowedCities = getCitiesForDate(tomorrow) || undefined;
+      
       const result = autoComposeRoute(parsedOrders, activeTrucks, {
         strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
-      }, hints.length > 0 ? hints : undefined, extractedPatterns);
+      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities);
       setAutoResult(result);
       
       if (hints.length > 0) {

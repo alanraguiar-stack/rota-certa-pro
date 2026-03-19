@@ -130,7 +130,8 @@ export function autoComposeRoute(
   availableTrucks: Truck[],
   config: Partial<AutoRouterConfig> = {},
   historyHints?: RoutingHint[],
-  extractedPatterns?: ExtractedPatterns
+  extractedPatterns?: ExtractedPatterns,
+  allowedCities?: Set<string>
 ): AutoRouterResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const warnings: string[] = [];
@@ -145,7 +146,29 @@ export function autoComposeRoute(
     };
   }
   
-  const validOrders = orders.filter(o => o.isValid);
+  let validOrders = orders.filter(o => o.isValid);
+  const filteredOutOrders: ParsedOrder[] = [];
+  
+  // Filter by allowed cities (city schedule) if provided
+  if (allowedCities && allowedCities.size > 0) {
+    const before = validOrders.length;
+    const kept: ParsedOrder[] = [];
+    for (const o of validOrders) {
+      const parsed = parseAddress(o.address);
+      const city = normalizeCityName(parsed.city);
+      if (allowedCities.has(city)) {
+        kept.push(o);
+      } else {
+        filteredOutOrders.push(o);
+      }
+    }
+    validOrders = kept;
+    if (filteredOutOrders.length > 0) {
+      warnings.push(`${filteredOutOrders.length} pedido(s) removidos pelo calendário de entregas (cidades fora do dia)`);
+      reasoning.push(`Calendário: ${before} pedidos → ${kept.length} após filtro de cidades do dia`);
+    }
+  }
+  
   const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
   const totalOrders = validOrders.length;
   
@@ -565,7 +588,10 @@ export function autoComposeRoute(
   const allAssigned = new Set(
     compositions.flatMap(c => c.orders.map(o => orderKey(o)))
   );
-  const unassignedOrders = validOrders.filter(o => !allAssigned.has(orderKey(o)));
+  const unassignedOrders = [
+    ...filteredOutOrders,
+    ...validOrders.filter(o => !allAssigned.has(orderKey(o))),
+  ];
 
   if (unassignedOrders.length > 0) {
     warnings.push(`${unassignedOrders.length} pedidos não puderam ser atribuídos`);
