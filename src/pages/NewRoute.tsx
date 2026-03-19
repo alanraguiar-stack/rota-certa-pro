@@ -19,6 +19,7 @@ import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
 import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
+import { useCitySchedule } from '@/hooks/useCitySchedule';
 import { analyzeFleetRequirements, validateFinalResult } from '@/lib/routeIntelligence';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
