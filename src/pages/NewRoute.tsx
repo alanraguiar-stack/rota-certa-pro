@@ -369,6 +369,18 @@ export default function NewRoute() {
 
             {currentStep === 'validation' && (
               <div className="space-y-6">
+                {/* Backlog info card */}
+                <PendingOrdersCard
+                  recoveredOrders={recoveredOrders}
+                  storedOrders={storedOrders}
+                  storedCount={storedCount}
+                  onCancelRecovered={async (ids) => {
+                    await cancelPending(ids);
+                    setRecoveredOrders(prev => prev.filter(o => !ids.includes(o.id)));
+                    // Remove from orders too
+                    setOrders(prev => prev.filter(o => !(o as any)._backlogId || !ids.includes((o as any)._backlogId)));
+                  }}
+                />
                 <div className="space-y-2">
                   <label className="text-sm font-semibold">Nome da Rota *</label>
                   <Input
