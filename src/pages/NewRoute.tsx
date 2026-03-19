@@ -282,53 +282,22 @@ export default function NewRoute() {
         {/* Step Content */}
         <Card>
           <CardHeader className="border-b pb-5">
-            <CardTitle className="flex items-center gap-3 text-xl">
-              {currentStep === 'orders' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
-                    <Zap className="h-5 w-5 text-accent" />
-                  </div>
-                  Inserir Pedidos
-                </>
-              )}
-              {currentStep === 'validation' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10">
-                    <Check className="h-5 w-5 text-info" />
-                  </div>
-                  Validar Peso Total
-                </>
-              )}
+            <CardTitle className="text-xl font-semibold">
+              {currentStep === 'orders' && 'Inserir Pedidos'}
+              {currentStep === 'validation' && 'Validar Peso Total'}
               {currentStep === 'fleet' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
-                    <Truck className="h-5 w-5 text-success" />
-                  </div>
+                <span className="flex items-center gap-2">
                   Definir Frota
                   {fleetConfirmed && (
-                    <Badge variant="outline" className="ml-2 text-success border-success/30 bg-success/10">
+                    <Badge variant="outline" className="text-success border-success/30 bg-success/10">
                       <Check className="h-3 w-3 mr-1" />
                       Confirmada
                     </Badge>
                   )}
-                </>
+                </span>
               )}
-              {currentStep === 'strategy' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                    <RouteIcon className="h-5 w-5 text-primary" />
-                  </div>
-                  Estratégia de Roteirização
-                </>
-              )}
-              {currentStep === 'distribution' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cta/10">
-                    <Sparkles className="h-5 w-5 text-cta" />
-                  </div>
-                  Criar Rota
-                </>
-              )}
+              {currentStep === 'strategy' && 'Estratégia de Roteirização'}
+              {currentStep === 'distribution' && 'Criar Rota'}
             </CardTitle>
             <CardDescription className="pl-[52px] pt-1">
               {currentStep === 'orders' && 'Carregue as vendas do dia para roteirização automática'}
