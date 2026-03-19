@@ -130,7 +130,8 @@ export function autoComposeRoute(
   availableTrucks: Truck[],
   config: Partial<AutoRouterConfig> = {},
   historyHints?: RoutingHint[],
-  extractedPatterns?: ExtractedPatterns
+  extractedPatterns?: ExtractedPatterns,
+  allowedCities?: Set<string>
 ): AutoRouterResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const warnings: string[] = [];
