@@ -32,7 +32,8 @@ export default function NewRoute() {
   const { activeTrucks } = useTrucks();
   const { getHintsForOrders, patternsCount, extractedPatterns } = useHistoryPatterns();
   const { toast } = useToast();
-  const { getCitiesForDate } = useCitySchedule();
+  const { getCitiesForDate, isEnabled: isCalendarEnabled, schedule: citySchedule, getScheduleMap } = useCitySchedule();
+  const { savePendingOrders, getPendingOrdersForDate, markAsRouted, cancelPending, toParsedOrders } = usePendingOrders();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
   const [completedSteps, setCompletedSteps] = useState<RouteWizardStep[]>([]);
