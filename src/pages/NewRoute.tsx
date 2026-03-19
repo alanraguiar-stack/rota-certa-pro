@@ -460,7 +460,7 @@ export default function NewRoute() {
                     size="lg"
                     onClick={handleCreateRoute}
                     disabled={isCreating}
-                    className="h-14 min-w-[240px] bg-gradient-to-r from-cta to-warning text-lg font-semibold shadow-glow-cta hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
+                    className="h-14 min-w-[240px] text-lg font-semibold"
                   >
                     {isCreating ? 'Criando...' : 'Criar Rota e Continuar'}
                     <ArrowRight className="ml-3 h-5 w-5" />
