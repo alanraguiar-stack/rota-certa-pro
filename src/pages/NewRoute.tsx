@@ -88,24 +88,60 @@ export default function NewRoute() {
   };
 
   // Handle data from dual file upload (auto mode)
-  const handleAutoDataReady = (parsedOrders: ParsedOrder[], hasItemDetails: boolean) => {
-    setOrders(parsedOrders);
+  const handleAutoDataReady = async (parsedOrders: ParsedOrder[], hasItemDetails: boolean) => {
+    // Calculate allowed cities for tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const allowedCities = getCitiesForDate(tomorrow) || undefined;
+
+    let filteredOrders = parsedOrders;
+    let filteredOut: ParsedOrder[] = [];
+
+    // If calendar is active, separate allowed vs filtered-out orders
+    if (isCalendarEnabled && allowedCities) {
+      filteredOrders = parsedOrders.filter(o => !o.city || allowedCities.has(o.city));
+      filteredOut = parsedOrders.filter(o => o.city && !allowedCities.has(o.city));
+
+      // Save filtered-out orders to backlog
+      if (filteredOut.length > 0) {
+        const savedCount = await savePendingOrders(filteredOut, getScheduleMap());
+        setStoredOrders(filteredOut);
+        setStoredCount(savedCount);
+      }
+
+      // Recover pending orders from backlog for tomorrow's cities
+      const recovered = await getPendingOrdersForDate(allowedCities);
+      setRecoveredOrders(recovered);
+
+      // Merge recovered backlog orders with current allowed orders
+      if (recovered.length > 0) {
+        const backlogParsed = toParsedOrders(recovered);
+        filteredOrders = [...filteredOrders, ...backlogParsed];
+        toast({
+          title: `${recovered.length} pedido(s) do backlog recuperado(s)`,
+          description: 'Pedidos de uploads anteriores foram incluídos nesta rota',
+        });
+      }
+
+      if (filteredOut.length > 0) {
+        toast({
+          title: `${filteredOut.length} pedido(s) guardado(s) no backlog`,
+          description: 'Cidades sem entrega amanhã — serão incluídos automaticamente no dia correto',
+        });
+      }
+    }
+
+    setOrders(filteredOrders);
     
     // Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
-      // Generate history hints for the current orders
-      const hints = getHintsForOrders(parsedOrders);
+      const hints = getHintsForOrders(filteredOrders);
       
-      // Get tomorrow's allowed cities from schedule
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const allowedCities = getCitiesForDate(tomorrow) || undefined;
-      
-      const result = autoComposeRoute(parsedOrders, activeTrucks, {
+      const result = autoComposeRoute(filteredOrders, activeTrucks, {
         strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
-      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities);
+      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities ? allowedCities : undefined);
       setAutoResult(result);
       
       if (hints.length > 0) {
@@ -115,7 +151,6 @@ export default function NewRoute() {
         });
       }
       
-      // Auto-select trucks used in composition
       const usedTruckIds = result.compositions
         .filter(c => c.orders.length > 0)
         .map(c => c.truck.id);
