@@ -229,10 +229,14 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="account" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-5">
+          <TabsList className="grid w-full grid-cols-5 lg:grid-cols-6">
             <TabsTrigger value="account" className="flex items-center gap-2">
               <User className="h-4 w-4" />
               Conta
+            </TabsTrigger>
+            <TabsTrigger value="calendar" className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4" />
+              Calendário
             </TabsTrigger>
             <TabsTrigger value="products" className="flex items-center gap-2">
               <Package className="h-4 w-4" />
