@@ -299,7 +299,7 @@ export default function NewRoute() {
               {currentStep === 'strategy' && 'Estratégia de Roteirização'}
               {currentStep === 'distribution' && 'Criar Rota'}
             </CardTitle>
-            <CardDescription className="pl-[52px] pt-1">
+            <CardDescription>
               {currentStep === 'orders' && 'Carregue as vendas do dia para roteirização automática'}
               {currentStep === 'validation' && 'Confirme o peso total e dê um nome para a rota'}
               {currentStep === 'fleet' && (
