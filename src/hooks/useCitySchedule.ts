@@ -106,5 +106,10 @@ export function useCitySchedule() {
     return cities;
   }, [isEnabled, schedule]);
 
-  return { schedule, isEnabled, loading, toggleEnabled, saveSchedule, getCitiesForDate };
+  /** Get the raw schedule map for use in pending orders */
+  const getScheduleMap = useCallback((): Record<string, Set<number>> => {
+    return schedule;
+  }, [schedule]);
+
+  return { schedule, isEnabled, loading, toggleEnabled, saveSchedule, getCitiesForDate, getScheduleMap };
 }
