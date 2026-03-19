@@ -146,7 +146,29 @@ export function autoComposeRoute(
     };
   }
   
-  const validOrders = orders.filter(o => o.isValid);
+  let validOrders = orders.filter(o => o.isValid);
+  const filteredOutOrders: ParsedOrder[] = [];
+  
+  // Filter by allowed cities (city schedule) if provided
+  if (allowedCities && allowedCities.size > 0) {
+    const before = validOrders.length;
+    const kept: ParsedOrder[] = [];
+    for (const o of validOrders) {
+      const parsed = parseAddress(o.address);
+      const city = normalizeCityName(parsed.city);
+      if (allowedCities.has(city)) {
+        kept.push(o);
+      } else {
+        filteredOutOrders.push(o);
+      }
+    }
+    validOrders = kept;
+    if (filteredOutOrders.length > 0) {
+      warnings.push(`${filteredOutOrders.length} pedido(s) removidos pelo calendário de entregas (cidades fora do dia)`);
+      reasoning.push(`Calendário: ${before} pedidos → ${kept.length} após filtro de cidades do dia`);
+    }
+  }
+  
   const totalWeight = validOrders.reduce((sum, o) => sum + o.weight_kg, 0);
   const totalOrders = validOrders.length;
   
