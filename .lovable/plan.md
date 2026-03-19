@@ -1,98 +1,95 @@
 
 
-# Backlog de Pedidos — Cidades Fora do Calendário
+# Redesign Visual Apple-Inspired — Apenas Layout e CSS
 
-## Problema
+## Filosofia
 
-Quando o calendário de entregas está ativo e o relatório de vendas contém cidades sem entrega no dia seguinte, esses pedidos são descartados (`filteredOutOrders`). O usuário precisa lembrar manualmente de incluí-los no dia correto — propenso a erro e perda de vendas.
+Inspiração Apple: **clareza, espaço, tipografia como protagonista, cores neutras com acentos mínimos, superfícies limpas sem bordas pesadas**. Menos decoração, mais respiração. Eliminar gradientes excessivos, glow effects, e animações chamativas. Manter a estrutura funcional intacta.
 
-## Solução
+## Princípios de Mudança
 
-Criar um **backlog de pedidos pendentes** que armazena automaticamente os pedidos filtrados pelo calendário e os re-injeta na roteirização quando o dia da cidade chegar.
+1. **Remover ruído visual** — gradients backgrounds, glow effects, grid patterns, accent bars laterais, floating labels
+2. **Tipografia limpa** — SF Pro / Inter com hierarquia clara via peso e tamanho, não via cor
+3. **Superfícies** — cards sem sombras pesadas, bordas sutis (`border-border/50`), sem `shadow-elevated`
+4. **Espaço negativo** — padding generoso, menos densidade de informação por card
+5. **Cores** — paleta neutra (cinza quente) com um único accent (azul Apple `210 100% 50%`), sem teal/coral/orange
+6. **Animações** — transições suaves de 200ms, sem float/pulse/shimmer/glow
 
-## Fluxo
+## Mudanças por Arquivo
 
-```text
-Upload vendas (dia D)
-    │
-    ├── Pedidos de cidades com entrega em D+1 → roteirização normal
-    │
-    └── Pedidos de cidades SEM entrega em D+1 → backlog (banco)
-                                                    │
-                                        Próximo upload (dia D+N)
-                                                    │
-                                        Sistema puxa backlog de cidades
-                                        com entrega em D+N+1 e JUNTA
-                                        com os pedidos novos do arquivo
-```
+### 1. `src/index.css` — Paleta de cores Apple
 
-## Mudanças Técnicas
+Substituir as CSS variables por uma paleta neutra Apple-like:
+- **Primary**: azul Apple (`210 100% 50%`) em vez de navy
+- **Background**: branco puro / cinza ultra-leve (`0 0% 98%`)
+- **Cards**: branco com borda sutil, sem sombra pesada
+- **Accent**: mesmo azul primary (Apple usa uma cor só)
+- **Remover**: variáveis `--cta`, `--gradient-*`, `--glow-*`
+- **Remover**: utilitários `.glass`, `.glass-dark`, `.glow-*`, `.bg-mesh-gradient`, `.bg-hero-gradient`, `.animate-float`, `.animate-shimmer`, etc.
+- **Sidebar**: fundo cinza claro (`220 10% 96%`) em vez de navy escuro
 
-### 1. Nova tabela `pending_orders`
+### 2. `tailwind.config.ts` — Simplificar
 
-```sql
-CREATE TABLE pending_orders (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  client_name text NOT NULL,
-  address text NOT NULL,
-  city text NOT NULL,
-  weight_kg numeric NOT NULL DEFAULT 0,
-  pedido_id text,
-  product_description text,
-  original_upload_date date NOT NULL DEFAULT CURRENT_DATE,
-  target_day_of_week integer, -- dia em que essa cidade tem entrega (0-6)
-  status text NOT NULL DEFAULT 'pending', -- 'pending' | 'routed' | 'cancelled'
-  routed_at timestamptz,
-  route_id uuid,
-  created_at timestamptz DEFAULT now()
-);
--- RLS: user CRUD own records
-```
+- Remover sombras customizadas (`glow`, `glow-cta`, `glow-accent`)
+- Remover animações excessivas (`float`, `shimmer`, `glow-pulse`)
+- Manter apenas: `fade-in`, `slide-up`, `accordion-*`
 
-### 2. Hook `usePendingOrders.ts`
+### 3. `src/components/layout/AppSidebar.tsx` — Sidebar Apple
 
-- `savePendingOrders(orders, targetDate)` — persiste pedidos filtrados com a cidade e o dia-alvo
-- `getPendingOrdersForDate(date)` — busca pedidos pendentes cujas cidades têm entrega nesse dia (cruza com `city_delivery_schedule`)
-- `markAsRouted(orderIds, routeId)` — marca como roterizados ao criar a rota
-- `cancelPending(orderIds)` — permite cancelar manualmente
+- Fundo claro (`bg-muted/50`) em vez de escuro
+- Ícones monocromáticos sem wrappers com bg
+- Logo simplificado: texto + ícone sem gradientes/blur
+- Items de menu: hover com `bg-muted` sutil, sem chevron animado
+- Active state: `font-semibold text-primary` com pill background sutil
 
-### 3. Integração no wizard (`NewRoute.tsx`)
+### 4. `src/components/layout/AppLayout.tsx` — Layout limpo
 
-Ao processar o upload:
-1. Calcular `allowedCities` para amanhã (já existe)
-2. Pedidos filtrados → salvar em `pending_orders` automaticamente
-3. Buscar pedidos pendentes de uploads anteriores cujas cidades SÃO permitidas amanhã
-4. Juntar pedidos do backlog com pedidos novos do arquivo antes de roteirizar
-5. Exibir card informativo: "X pedidos recuperados do backlog" + "Y pedidos guardados para dias futuros"
+- Remover `animate-fade-in` do container
+- Padding mais generoso (`p-8 md:p-10`)
 
-### 4. UI no wizard — Card de Backlog
+### 5. `src/pages/Index.tsx` — Dashboard Apple
 
-No passo de **validação** (step 2), mostrar:
-- **Pedidos recuperados**: lista de pedidos do backlog que entram na rota de amanhã (com data original do upload)
-- **Pedidos guardados**: lista de pedidos que ficaram para outro dia (com indicação do próximo dia de entrega)
-- Botão para cancelar pedidos do backlog se não forem mais necessários
+- **Hero**: remover o bloco gradiente navy inteiro. Substituir por header simples: título grande + data + botão "Nova Rota" azul plano
+- **StatsCard**: simplificar — remover accent bar, hover gradient, icon wrapper grande. Manter: valor grande + label + ícone pequeno inline
+- **RouteVisualization**: remover SVG animado. Substituir por um card limpo com placeholder minimal
+- **Recent Routes**: cards com hover sutil, sem status indicator bar animada
+- **Quick Actions**: cards flat sem hover-translate
 
-### 5. Tela de gestão do backlog (em Configurações ou menu lateral)
+### 6. `src/pages/Auth.tsx` — Login Apple
 
-Página simples para visualizar/gerenciar todos os pedidos pendentes:
-- Filtro por cidade, status, data de upload
-- Ações: cancelar, forçar inclusão na próxima rota
+- Remover AnimatedTruck, AnimatedRoutes, SVG backgrounds
+- Fundo branco limpo ou cinza muito claro
+- Card de login centralizado, sem sombras pesadas
+- Logo simples no topo
 
-### Arquivos afetados
+### 7. `src/pages/Fleet.tsx`, `History.tsx`, `Settings.tsx`, `NewRoute.tsx`
 
-| Arquivo | Mudança |
+- Aplicar mesma linguagem: remover sombras `shadow-elevated`, substituir por `shadow-sm` ou `border`
+- Headers de página: título grande (text-3xl font-semibold) + subtítulo em muted, sem ícones em wrappers decorativos
+- Botões: estilo flat (`bg-primary rounded-lg`), sem gradients
+
+### 8. `src/components/ui/button.tsx` — Botão Apple
+
+- Border radius mais suave (`rounded-xl`)
+- Remover variante implícita de gradient (CTA orange)
+
+## Resultado Esperado
+
+Interface limpa, arejada, profissional. Parece um app Apple (Stocks, Health, Reminders): fundo claro, tipografia forte, uma cor de destaque, zero decoração desnecessária. Toda a funcionalidade permanece intacta — muda apenas a camada visual.
+
+## Arquivos afetados
+
+| Arquivo | Tipo de mudança |
 |---|---|
-| Migração SQL | Criar `pending_orders` + RLS |
-| `src/hooks/usePendingOrders.ts` | Novo hook CRUD |
-| `src/pages/NewRoute.tsx` | Salvar filtrados + recuperar backlog + UI informativa |
-| `src/hooks/useCitySchedule.ts` | Helper para próximo dia de entrega de uma cidade |
-| `src/components/route/PendingOrdersCard.tsx` | Card visual no wizard |
-
-### Regras de negócio
-
-- Pedidos no backlog são **por usuário** (RLS)
-- Ao criar a rota, pedidos do backlog usados são marcados `status = 'routed'` com o `route_id`
-- Pedidos pendentes há mais de 7 dias geram warning visual
-- Se o calendário for desativado (toggle OFF), backlog para de acumular e todos os pedidos vão direto para roteirização
+| `src/index.css` | Reescrever paleta + remover utilitários decorativos |
+| `tailwind.config.ts` | Simplificar sombras e animações |
+| `src/components/layout/AppSidebar.tsx` | Sidebar clara e minimal |
+| `src/components/layout/AppLayout.tsx` | Layout mais limpo |
+| `src/pages/Index.tsx` | Dashboard sem hero gradient, cards flat |
+| `src/pages/Auth.tsx` | Login limpo sem animações |
+| `src/pages/Fleet.tsx` | Cards e headers simplificados |
+| `src/pages/History.tsx` | Lista limpa |
+| `src/pages/Settings.tsx` | Tabs e cards flat |
+| `src/pages/NewRoute.tsx` | Wizard limpo |
+| `src/components/ui/button.tsx` | Border radius Apple |
 
