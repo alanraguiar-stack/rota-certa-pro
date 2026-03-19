@@ -12,14 +12,13 @@ export function useCitySchedule() {
   const [isEnabled, setIsEnabled] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Load schedule + enabled state
   useEffect(() => {
     if (!user) return;
 
     const load = async () => {
       setLoading(true);
 
-      // Load toggle state from app_settings
+      // Load toggle state
       const { data: settingData } = await supabase
         .from('app_settings')
         .select('setting_value')
@@ -29,15 +28,15 @@ export function useCitySchedule() {
 
       setIsEnabled(settingData?.setting_value === 'true');
 
-      // Load schedule entries
-      const { data: entries } = await supabase
+      // Load schedule entries via raw query workaround for unsynced types
+      const { data: entries } = await (supabase as any)
         .from('city_delivery_schedule')
         .select('city_name, day_of_week')
         .eq('user_id', user.id);
 
       if (entries) {
         const map: CitySchedule = {};
-        for (const e of entries) {
+        for (const e of entries as { city_name: string; day_of_week: number }[]) {
           if (!map[e.city_name]) map[e.city_name] = new Set();
           map[e.city_name].add(e.day_of_week);
         }
@@ -76,8 +75,8 @@ export function useCitySchedule() {
   const saveSchedule = useCallback(async (newSchedule: CitySchedule) => {
     if (!user) return;
 
-    // Delete all existing entries
-    await supabase
+    // Delete all existing
+    await (supabase as any)
       .from('city_delivery_schedule')
       .delete()
       .eq('user_id', user.id);
@@ -91,7 +90,7 @@ export function useCitySchedule() {
     }
 
     if (rows.length > 0) {
-      await supabase.from('city_delivery_schedule').insert(rows);
+      await (supabase as any).from('city_delivery_schedule').insert(rows);
     }
 
     setSchedule(newSchedule);
@@ -99,7 +98,7 @@ export function useCitySchedule() {
 
   const getCitiesForDate = useCallback((date: Date): Set<string> | null => {
     if (!isEnabled) return null; // null = no filtering
-    const dow = date.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const dow = date.getDay();
     const cities = new Set<string>();
     for (const [city, days] of Object.entries(schedule)) {
       if (days.has(dow)) cities.add(city);
