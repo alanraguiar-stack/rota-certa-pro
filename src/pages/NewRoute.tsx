@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, AlertTriangle, Sparkles } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -13,9 +13,11 @@ import { WeightValidation } from '@/components/route/WeightValidation';
 import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
+import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
+import { usePendingOrders, PendingOrder } from '@/hooks/usePendingOrders';
 import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
