@@ -254,16 +254,10 @@ export default function NewRoute() {
       <div className="mx-auto max-w-5xl space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
-                <Sparkles className="h-5 w-5 text-accent" />
-              </div>
-              <h1 className="text-2xl font-bold">Nova Rota</h1>
-            </div>
-            <p className="text-muted-foreground pl-[52px]">Siga os passos para criar uma rota otimizada</p>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Nova Rota</h1>
+            <p className="mt-1 text-muted-foreground">Siga os passos para criar uma rota otimizada</p>
           </div>
-          {/* Summary badges */}
           <div className="flex gap-2">
             {getStepSummary().map((item, i) => (
               <Badge key={i} variant="secondary" className="gap-1.5 px-3 py-1">
@@ -275,7 +269,7 @@ export default function NewRoute() {
         </div>
 
         {/* Wizard Stepper */}
-        <Card className="shadow-soft">
+        <Card>
           <CardContent className="py-5">
             <WizardStepper
               currentStep={currentStep}
@@ -286,57 +280,26 @@ export default function NewRoute() {
         </Card>
 
         {/* Step Content */}
-        <Card className="shadow-elevated">
+        <Card>
           <CardHeader className="border-b pb-5">
-            <CardTitle className="flex items-center gap-3 text-xl">
-              {currentStep === 'orders' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
-                    <Zap className="h-5 w-5 text-accent" />
-                  </div>
-                  Inserir Pedidos
-                </>
-              )}
-              {currentStep === 'validation' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-info/10">
-                    <Check className="h-5 w-5 text-info" />
-                  </div>
-                  Validar Peso Total
-                </>
-              )}
+            <CardTitle className="text-xl font-semibold">
+              {currentStep === 'orders' && 'Inserir Pedidos'}
+              {currentStep === 'validation' && 'Validar Peso Total'}
               {currentStep === 'fleet' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10">
-                    <Truck className="h-5 w-5 text-success" />
-                  </div>
+                <span className="flex items-center gap-2">
                   Definir Frota
                   {fleetConfirmed && (
-                    <Badge variant="outline" className="ml-2 text-success border-success/30 bg-success/10">
+                    <Badge variant="outline" className="text-success border-success/30 bg-success/10">
                       <Check className="h-3 w-3 mr-1" />
                       Confirmada
                     </Badge>
                   )}
-                </>
+                </span>
               )}
-              {currentStep === 'strategy' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-                    <RouteIcon className="h-5 w-5 text-primary" />
-                  </div>
-                  Estratégia de Roteirização
-                </>
-              )}
-              {currentStep === 'distribution' && (
-                <>
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cta/10">
-                    <Sparkles className="h-5 w-5 text-cta" />
-                  </div>
-                  Criar Rota
-                </>
-              )}
+              {currentStep === 'strategy' && 'Estratégia de Roteirização'}
+              {currentStep === 'distribution' && 'Criar Rota'}
             </CardTitle>
-            <CardDescription className="pl-[52px] pt-1">
+            <CardDescription>
               {currentStep === 'orders' && 'Carregue as vendas do dia para roteirização automática'}
               {currentStep === 'validation' && 'Confirme o peso total e dê um nome para a rota'}
               {currentStep === 'fleet' && (
@@ -497,7 +460,7 @@ export default function NewRoute() {
                     size="lg"
                     onClick={handleCreateRoute}
                     disabled={isCreating}
-                    className="h-14 min-w-[240px] bg-gradient-to-r from-cta to-warning text-lg font-semibold shadow-glow-cta hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
+                    className="h-14 min-w-[240px] text-lg font-semibold"
                   >
                     {isCreating ? 'Criando...' : 'Criar Rota e Continuar'}
                     <ArrowRight className="ml-3 h-5 w-5" />

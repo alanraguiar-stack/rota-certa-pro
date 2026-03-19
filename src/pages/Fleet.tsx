@@ -485,7 +485,7 @@ export default function Fleet() {
                       <Badge 
                         variant={truck.is_active ? "default" : "secondary"}
                         className={cn(
-                          truck.is_active ? 'bg-green-600 hover:bg-green-700' : ''
+                          truck.is_active ? 'bg-success hover:bg-success/90' : ''
                         )}
                       >
                         {truck.is_active ? 'Ativo' : 'Inativo'}
