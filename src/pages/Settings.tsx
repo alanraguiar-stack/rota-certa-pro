@@ -336,6 +336,11 @@ export default function Settings() {
             </Card>
           </TabsContent>
 
+          {/* Calendar Tab */}
+          <TabsContent value="calendar" className="space-y-4">
+            <CityScheduleTab />
+          </TabsContent>
+
           {/* Products Tab */}
           <TabsContent value="products" className="space-y-4">
             <ProductUnitsImporter />
