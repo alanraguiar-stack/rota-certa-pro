@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, AlertTriangle, Sparkles } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -13,9 +13,11 @@ import { WeightValidation } from '@/components/route/WeightValidation';
 import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
+import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
+import { usePendingOrders, PendingOrder } from '@/hooks/usePendingOrders';
 import { RouteWizardStep, ParsedOrder, RoutingStrategy } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
@@ -30,7 +32,8 @@ export default function NewRoute() {
   const { activeTrucks } = useTrucks();
   const { getHintsForOrders, patternsCount, extractedPatterns } = useHistoryPatterns();
   const { toast } = useToast();
-  const { getCitiesForDate } = useCitySchedule();
+  const { getCitiesForDate, isEnabled: isCalendarEnabled, schedule: citySchedule, getScheduleMap } = useCitySchedule();
+  const { savePendingOrders, getPendingOrdersForDate, markAsRouted, cancelPending, toParsedOrders } = usePendingOrders();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
   const [completedSteps, setCompletedSteps] = useState<RouteWizardStep[]>([]);
@@ -46,6 +49,11 @@ export default function NewRoute() {
   
   // Track if fleet was already configured (prevents re-selection)
   const [fleetConfirmed, setFleetConfirmed] = useState(false);
+
+  // Backlog state
+  const [recoveredOrders, setRecoveredOrders] = useState<PendingOrder[]>([]);
+  const [storedOrders, setStoredOrders] = useState<ParsedOrder[]>([]);
+  const [storedCount, setStoredCount] = useState(0);
 
   // Pedidos válidos são os que têm endereço (podem ser roterizados)
   const validOrders = orders.filter((o) => o.isValid);
@@ -80,24 +88,60 @@ export default function NewRoute() {
   };
 
   // Handle data from dual file upload (auto mode)
-  const handleAutoDataReady = (parsedOrders: ParsedOrder[], hasItemDetails: boolean) => {
-    setOrders(parsedOrders);
+  const handleAutoDataReady = async (parsedOrders: ParsedOrder[], hasItemDetails: boolean) => {
+    // Calculate allowed cities for tomorrow
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const allowedCities = getCitiesForDate(tomorrow) || undefined;
+
+    let filteredOrders = parsedOrders;
+    let filteredOut: ParsedOrder[] = [];
+
+    // If calendar is active, separate allowed vs filtered-out orders
+    if (isCalendarEnabled && allowedCities) {
+      filteredOrders = parsedOrders.filter(o => !o.city || allowedCities.has(o.city));
+      filteredOut = parsedOrders.filter(o => o.city && !allowedCities.has(o.city));
+
+      // Save filtered-out orders to backlog
+      if (filteredOut.length > 0) {
+        const savedCount = await savePendingOrders(filteredOut, getScheduleMap());
+        setStoredOrders(filteredOut);
+        setStoredCount(savedCount);
+      }
+
+      // Recover pending orders from backlog for tomorrow's cities
+      const recovered = await getPendingOrdersForDate(allowedCities);
+      setRecoveredOrders(recovered);
+
+      // Merge recovered backlog orders with current allowed orders
+      if (recovered.length > 0) {
+        const backlogParsed = toParsedOrders(recovered);
+        filteredOrders = [...filteredOrders, ...backlogParsed];
+        toast({
+          title: `${recovered.length} pedido(s) do backlog recuperado(s)`,
+          description: 'Pedidos de uploads anteriores foram incluídos nesta rota',
+        });
+      }
+
+      if (filteredOut.length > 0) {
+        toast({
+          title: `${filteredOut.length} pedido(s) guardado(s) no backlog`,
+          description: 'Cidades sem entrega amanhã — serão incluídos automaticamente no dia correto',
+        });
+      }
+    }
+
+    setOrders(filteredOrders);
     
     // Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
-      // Generate history hints for the current orders
-      const hints = getHintsForOrders(parsedOrders);
+      const hints = getHintsForOrders(filteredOrders);
       
-      // Get tomorrow's allowed cities from schedule
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const allowedCities = getCitiesForDate(tomorrow) || undefined;
-      
-      const result = autoComposeRoute(parsedOrders, activeTrucks, {
+      const result = autoComposeRoute(filteredOrders, activeTrucks, {
         strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
-      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities);
+      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities ? allowedCities : undefined);
       setAutoResult(result);
       
       if (hints.length > 0) {
@@ -107,7 +151,6 @@ export default function NewRoute() {
         });
       }
       
-      // Auto-select trucks used in composition
       const usedTruckIds = result.compositions
         .filter(c => c.orders.length > 0)
         .map(c => c.truck.id);
@@ -165,6 +208,12 @@ export default function NewRoute() {
     setIsCreating(true);
     try {
       const route = await createRoute.mutateAsync(routeName);
+
+      // Mark recovered backlog orders as routed
+      if (recoveredOrders.length > 0) {
+        await markAsRouted(recoveredOrders.map(o => o.id), route.id);
+      }
+
       navigate(`/rota/${route.id}`, {
         state: { 
           pendingOrders: validOrders,
@@ -320,6 +369,18 @@ export default function NewRoute() {
 
             {currentStep === 'validation' && (
               <div className="space-y-6">
+                {/* Backlog info card */}
+                <PendingOrdersCard
+                  recoveredOrders={recoveredOrders}
+                  storedOrders={storedOrders}
+                  storedCount={storedCount}
+                  onCancelRecovered={async (ids) => {
+                    await cancelPending(ids);
+                    setRecoveredOrders(prev => prev.filter(o => !ids.includes(o.id)));
+                    // Remove from orders too
+                    setOrders(prev => prev.filter(o => !(o as any)._backlogId || !ids.includes((o as any)._backlogId)));
+                  }}
+                />
                 <div className="space-y-2">
                   <label className="text-sm font-semibold">Nome da Rota *</label>
                   <Input
