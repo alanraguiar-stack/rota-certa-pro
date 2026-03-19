@@ -254,16 +254,10 @@ export default function NewRoute() {
       <div className="mx-auto max-w-5xl space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/10">
-                <Sparkles className="h-5 w-5 text-accent" />
-              </div>
-              <h1 className="text-2xl font-bold">Nova Rota</h1>
-            </div>
-            <p className="text-muted-foreground pl-[52px]">Siga os passos para criar uma rota otimizada</p>
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Nova Rota</h1>
+            <p className="mt-1 text-muted-foreground">Siga os passos para criar uma rota otimizada</p>
           </div>
-          {/* Summary badges */}
           <div className="flex gap-2">
             {getStepSummary().map((item, i) => (
               <Badge key={i} variant="secondary" className="gap-1.5 px-3 py-1">
