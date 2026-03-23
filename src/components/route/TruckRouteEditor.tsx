@@ -507,6 +507,8 @@ function TruckTab({
                   setDropTargetIndex(null);
                 }}
                 isDragTarget={dropTargetIndex === idx && draggedOrderId !== order.id}
+                isHighlighted={highlightedOrderId === order.id}
+                orderRef={highlightedOrderId === order.id ? highlightRef : undefined}
               />
             ))}
           </div>
