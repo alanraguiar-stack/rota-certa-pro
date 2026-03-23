@@ -1112,6 +1112,72 @@ function sortWithinCity(a: GeocodedOrder, b: GeocodedOrder): number {
   return a.distanceFromCD - b.distanceFromCD;
 }
 
+/**
+ * Nearest-neighbor sequencing within a city block.
+ * Uses real coordinates with bonuses for same street/neighborhood.
+ * Falls back to CEP sort if orders lack real coordinates.
+ */
+function nearestNeighborWithinCity(orders: GeocodedOrder[], startLat: number, startLng: number): void {
+  if (orders.length <= 1) return;
+
+  // Check if orders have real coordinates (not just hash estimates)
+  const hasRealCoords = orders.some(o => o.latitude && o.longitude);
+  
+  if (!hasRealCoords) {
+    // Fallback: use CEP-based sorting when no real coordinates available
+    orders.sort((a, b) => sortWithinCity(a, b));
+    streetGroupSweep(orders);
+    return;
+  }
+
+  const result: GeocodedOrder[] = [];
+  const remaining = [...orders];
+  let currentLat = startLat;
+  let currentLng = startLng;
+
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const o = remaining[i];
+      const lat = o.geocoded.estimatedLat;
+      const lng = o.geocoded.estimatedLng;
+      
+      let distance = calculateDistance(currentLat, currentLng, lat, lng);
+
+      // Bonus for same street (reduce effective distance by 85%)
+      if (result.length > 0) {
+        const lastOrder = result[result.length - 1];
+        const sameStreet = (o.geocoded.street || '').toLowerCase() === (lastOrder.geocoded.street || '').toLowerCase()
+          && (o.geocoded.street || '').length > 0;
+        const sameNeighborhood = normalizeNeighborhood(o.geocoded.neighborhood || '') === 
+          normalizeNeighborhood(lastOrder.geocoded.neighborhood || '');
+
+        if (sameStreet) {
+          distance *= 0.15;
+        } else if (sameNeighborhood) {
+          distance *= 0.30;
+        }
+      }
+
+      if (distance < bestScore) {
+        bestScore = distance;
+        bestIdx = i;
+      }
+    }
+
+    const chosen = remaining.splice(bestIdx, 1)[0];
+    result.push(chosen);
+    currentLat = chosen.geocoded.estimatedLat;
+    currentLng = chosen.geocoded.estimatedLng;
+  }
+
+  // Replace in-place
+  orders.length = 0;
+  orders.push(...result);
+}
+
 // ================================================================
 // SUMMARY
 // ================================================================
