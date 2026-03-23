@@ -66,7 +66,8 @@ function formatWeight(weight: number): string {
   return `${weight.toFixed(1)}kg`;
 }
 
-function normalizeText(text: string): string {
+function normalizeText(text: string | null | undefined): string {
+  if (!text) return '';
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
