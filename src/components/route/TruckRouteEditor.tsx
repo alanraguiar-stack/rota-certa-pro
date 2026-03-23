@@ -121,10 +121,12 @@ function OrderCard({
   
   return (
     <div 
+      ref={orderRef}
       className={cn(
         "rounded-lg border bg-card transition-all",
         isLocked ? "opacity-75" : "hover:shadow-md",
         isDragTarget && "border-primary border-2 shadow-lg",
+        isHighlighted && "ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-900/20",
         !isLocked && "cursor-grab active:cursor-grabbing"
       )}
       draggable={!isLocked}
