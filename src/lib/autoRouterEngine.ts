@@ -181,10 +181,15 @@ export function autoComposeRoute(
     };
   }
   
-  // Step 1: Geocode all orders
+  // Step 1: Geocode all orders (use real coordinates when available)
   const cd = getDistributionCenterCoords();
   const geocodedOrders: GeocodedOrder[] = validOrders.map(order => {
     const geocoded = parseAddress(order.address);
+    // Override estimated coords with real geocoded coords if available
+    if (order.latitude && order.longitude) {
+      geocoded.estimatedLat = order.latitude;
+      geocoded.estimatedLng = order.longitude;
+    }
     const distanceFromCD = calculateDistance(
       cd.lat, cd.lng, geocoded.estimatedLat, geocoded.estimatedLng
     );
@@ -898,10 +903,9 @@ function optimizeDeliverySequence(
     regularOrders.push(...orders);
   }
 
-  // Sort priority orders by street grouping
+  // Sort priority orders by nearest-neighbor from CD
   if (priorityOrders.length > 1) {
-    priorityOrders.sort((a, b) => sortWithinCity(a, b));
-    streetGroupSweep(priorityOrders);
+    nearestNeighborWithinCity(priorityOrders, startLat, startLng);
   }
 
   // Step 2: Group regular orders by city
@@ -938,7 +942,7 @@ function optimizeDeliverySequence(
     if (anchorRule) {
       const insertionRules = anchorRule.neighborhoodExceptions.filter(e => e.insertAfterNeighborhood);
       if (insertionRules.length > 0) {
-        cityOrders.sort((a, b) => sortWithinCity(a, b));
+        nearestNeighborWithinCity(cityOrders, startLat, startLng);
 
         for (const rule of insertionRules) {
           const targetNh = normalizeNeighborhood(rule.insertAfterNeighborhood!);
@@ -973,21 +977,27 @@ function optimizeDeliverySequence(
           }
         }
 
-        // Apply street grouping sweep
-        streetGroupSweep(cityOrders);
+        // Apply nearest-neighbor after insertion rules
+        const lastResult = result[result.length - 1];
+        const nnLat = lastResult ? lastResult.geocoded.estimatedLat : startLat;
+        const nnLng = lastResult ? lastResult.geocoded.estimatedLng : startLng;
+        nearestNeighborWithinCity(cityOrders, nnLat, nnLng);
         result.push(...cityOrders);
         continue;
       }
     }
 
-    // Anchor city: sort by distance from CD (ascending) for progressive outward route
+    // Use nearest-neighbor for geographic sequencing (with fallback to CEP sort)
     if (anchorCity && cityGroup.city === anchorCity) {
-      cityOrders.sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+      // Anchor city: start from CD
+      nearestNeighborWithinCity(cityOrders, startLat, startLng);
     } else {
-      cityOrders.sort((a, b) => sortWithinCity(a, b));
+      // Fill cities: continue from last position
+      const lastOrder = result[result.length - 1];
+      const fromLat = lastOrder ? lastOrder.geocoded.estimatedLat : startLat;
+      const fromLng = lastOrder ? lastOrder.geocoded.estimatedLng : startLng;
+      nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
     }
-    // Apply street grouping sweep
-    streetGroupSweep(cityOrders);
     result.push(...cityOrders);
   }
 
@@ -1105,6 +1115,72 @@ function sortWithinCity(a: GeocodedOrder, b: GeocodedOrder): number {
   if (stA !== stB) return stA.localeCompare(stB);
 
   return a.distanceFromCD - b.distanceFromCD;
+}
+
+/**
+ * Nearest-neighbor sequencing within a city block.
+ * Uses real coordinates with bonuses for same street/neighborhood.
+ * Falls back to CEP sort if orders lack real coordinates.
+ */
+function nearestNeighborWithinCity(orders: GeocodedOrder[], startLat: number, startLng: number): void {
+  if (orders.length <= 1) return;
+
+  // Check if orders have real coordinates (not just hash estimates)
+  const hasRealCoords = orders.some(o => o.latitude && o.longitude);
+  
+  if (!hasRealCoords) {
+    // Fallback: use CEP-based sorting when no real coordinates available
+    orders.sort((a, b) => sortWithinCity(a, b));
+    streetGroupSweep(orders);
+    return;
+  }
+
+  const result: GeocodedOrder[] = [];
+  const remaining = [...orders];
+  let currentLat = startLat;
+  let currentLng = startLng;
+
+  while (remaining.length > 0) {
+    let bestIdx = 0;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const o = remaining[i];
+      const lat = o.geocoded.estimatedLat;
+      const lng = o.geocoded.estimatedLng;
+      
+      let distance = calculateDistance(currentLat, currentLng, lat, lng);
+
+      // Bonus for same street (reduce effective distance by 85%)
+      if (result.length > 0) {
+        const lastOrder = result[result.length - 1];
+        const sameStreet = (o.geocoded.street || '').toLowerCase() === (lastOrder.geocoded.street || '').toLowerCase()
+          && (o.geocoded.street || '').length > 0;
+        const sameNeighborhood = normalizeNeighborhood(o.geocoded.neighborhood || '') === 
+          normalizeNeighborhood(lastOrder.geocoded.neighborhood || '');
+
+        if (sameStreet) {
+          distance *= 0.15;
+        } else if (sameNeighborhood) {
+          distance *= 0.30;
+        }
+      }
+
+      if (distance < bestScore) {
+        bestScore = distance;
+        bestIdx = i;
+      }
+    }
+
+    const chosen = remaining.splice(bestIdx, 1)[0];
+    result.push(chosen);
+    currentLat = chosen.geocoded.estimatedLat;
+    currentLng = chosen.geocoded.estimatedLng;
+  }
+
+  // Replace in-place
+  orders.length = 0;
+  orders.push(...result);
 }
 
 // ================================================================

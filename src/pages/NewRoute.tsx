@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, AlertTriangle, Sparkles } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, AlertTriangle, Sparkles, MapPin } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
+import { GeocodingProgress } from '@/components/route/GeocodingProgress';
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
@@ -25,6 +26,7 @@ import { useCitySchedule } from '@/hooks/useCitySchedule';
 import { analyzeFleetRequirements, validateFinalResult } from '@/lib/routeIntelligence';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { geocodeAddress } from '@/lib/nominatimGeocoding';
 
 export default function NewRoute() {
   const navigate = useNavigate();
@@ -54,6 +56,12 @@ export default function NewRoute() {
   const [recoveredOrders, setRecoveredOrders] = useState<PendingOrder[]>([]);
   const [storedOrders, setStoredOrders] = useState<ParsedOrder[]>([]);
   const [storedCount, setStoredCount] = useState(0);
+
+  // Geocoding state
+  const [geocodingProgress, setGeocodingProgress] = useState({
+    current: 0, total: 0, status: 'idle' as 'idle' | 'processing' | 'complete' | 'error',
+    successCount: 0, failedCount: 0, currentAddress: undefined as string | undefined,
+  });
 
   // Pedidos válidos são os que têm endereço (podem ser roterizados)
   const validOrders = orders.filter((o) => o.isValid);
@@ -133,7 +141,59 @@ export default function NewRoute() {
 
     setOrders(filteredOrders);
     
-    // Auto-compose trucks if not already configured
+    // Step 2: Geocode addresses for real coordinates before routing
+    const ordersNeedingGeocode = filteredOrders.filter(o => !o.latitude || !o.longitude);
+    if (ordersNeedingGeocode.length > 0) {
+      setGeocodingProgress({
+        current: 0, total: ordersNeedingGeocode.length, status: 'processing',
+        successCount: 0, failedCount: 0, currentAddress: undefined,
+      });
+
+      let successCount = 0;
+      let failedCount = 0;
+      const geocodedMap = new Map<string, { lat: number; lng: number }>();
+
+      for (let i = 0; i < ordersNeedingGeocode.length; i++) {
+        const order = ordersNeedingGeocode[i];
+        setGeocodingProgress(prev => ({
+          ...prev, current: i + 1, currentAddress: order.address,
+        }));
+
+        try {
+          const result = await geocodeAddress(order.address);
+          if (result.status === 'success') {
+            geocodedMap.set(order.address, { lat: result.lat, lng: result.lng });
+            successCount++;
+          } else {
+            failedCount++;
+          }
+        } catch {
+          failedCount++;
+        }
+
+        setGeocodingProgress(prev => ({ ...prev, successCount, failedCount }));
+      }
+
+      // Update orders with real coordinates
+      filteredOrders = filteredOrders.map(o => {
+        const coords = geocodedMap.get(o.address);
+        return coords ? { ...o, latitude: coords.lat, longitude: coords.lng } : o;
+      });
+      setOrders(filteredOrders);
+
+      setGeocodingProgress(prev => ({
+        ...prev, status: 'complete', current: ordersNeedingGeocode.length, currentAddress: undefined,
+      }));
+
+      toast({
+        title: `Geocodificação: ${successCount} de ${ordersNeedingGeocode.length}`,
+        description: failedCount > 0 
+          ? `${failedCount} endereço(s) não encontrados — usarão estimativa por CEP`
+          : 'Todos os endereços localizados com coordenadas reais',
+      });
+    }
+
+    // Step 3: Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
       const hints = getHintsForOrders(filteredOrders);
       
@@ -332,6 +392,17 @@ export default function NewRoute() {
 
             {currentStep === 'validation' && (
               <div className="space-y-6">
+                {/* Geocoding progress */}
+                {geocodingProgress.status !== 'idle' && (
+                  <GeocodingProgress
+                    current={geocodingProgress.current}
+                    total={geocodingProgress.total}
+                    currentAddress={geocodingProgress.currentAddress}
+                    status={geocodingProgress.status}
+                    successCount={geocodingProgress.successCount}
+                    failedCount={geocodingProgress.failedCount}
+                  />
+                )}
                 {/* Backlog info card */}
                 <PendingOrdersCard
                   recoveredOrders={recoveredOrders}
@@ -340,7 +411,6 @@ export default function NewRoute() {
                   onCancelRecovered={async (ids) => {
                     await cancelPending(ids);
                     setRecoveredOrders(prev => prev.filter(o => !ids.includes(o.id)));
-                    // Remove from orders too
                     setOrders(prev => prev.filter(o => !(o as any)._backlogId || !ids.includes((o as any)._backlogId)));
                   }}
                 />
