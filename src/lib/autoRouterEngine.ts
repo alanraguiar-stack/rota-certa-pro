@@ -569,6 +569,71 @@ export function autoComposeRoute(
     }
   }
 
+  // Step 5d.5: Fallback distribution — collect orphaned orders and assign to trucks with capacity
+  const orphanedOrders = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
+  if (orphanedOrders.length > 0) {
+    reasoning.push(`[Fallback] ${orphanedOrders.length} pedidos órfãos detectados — distribuindo por nearest-fit`);
+
+    // Sort orphans by weight descending (heavier first for better packing)
+    orphanedOrders.sort((a, b) => b.weight_kg - a.weight_kg);
+
+    for (const orphan of orphanedOrders) {
+      const orphanCity = normalizeCityName(orphan.city || orphan.geocoded.city || '');
+
+      // Score each composition by affinity (prefer trucks with same/neighbor cities)
+      let bestComp: TruckComposition | null = null;
+      let bestScore = -Infinity;
+
+      for (const comp of compositions) {
+        const capacity = Number(comp.truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+        const maxDel = comp.truck.max_deliveries ? Number(comp.truck.max_deliveries) : 25;
+        const remainingWeight = capacity - comp.totalWeight;
+        const remainingSlots = maxDel - comp.orders.length;
+
+        if (remainingWeight < orphan.weight_kg || remainingSlots <= 0) continue;
+
+        // Affinity score: same city = 100, neighbor city = 50, any = 10
+        let score = 10;
+        if (comp.cities.includes(orphanCity)) {
+          score = 100;
+        } else {
+          // Check if any city in truck is a neighbor
+          const neighbors = TERRITORY_RULES.flatMap(r => 
+            r.anchorCity === orphanCity ? r.allowedFillCities : 
+            r.allowedFillCities.includes(orphanCity) ? [r.anchorCity] : []
+          );
+          if (comp.cities.some(c => neighbors.includes(c))) {
+            score = 50;
+          }
+        }
+
+        // Prefer trucks with more remaining capacity (better balance)
+        score += (remainingWeight / capacity) * 10;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestComp = comp;
+        }
+      }
+
+      if (bestComp) {
+        bestComp.orders.push(orphan);
+        bestComp.totalWeight += orphan.weight_kg;
+        bestComp.occupancyPercent = Math.round(
+          (bestComp.totalWeight / Number(bestComp.truck.capacity_kg)) * 100
+        );
+        bestComp.estimatedDeliveries = bestComp.orders.length;
+        if (!bestComp.cities.includes(orphanCity) && orphanCity) {
+          bestComp.cities.push(orphanCity);
+        }
+        assignedOrderKeys.add(orderKey(orphan));
+        reasoning.push(`[Fallback] ${orphan.client_name} (${orphanCity}) → ${bestComp.truck.plate}`);
+      } else {
+        warnings.push(`Sem capacidade para: ${orphan.client_name} (${orphanCity}, ${orphan.weight_kg}kg)`);
+      }
+    }
+  }
+
   // Step 5e: Rebalance between internal (non-support, non-third-party) trucks
   rebalanceInternalTrucks(compositions, reasoning, warnings);
 

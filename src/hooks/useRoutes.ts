@@ -505,7 +505,31 @@ export function useRouteDetails(routeId: string | undefined) {
         })
       );
 
-      // Update route status to 'loading'
+      // Check if all orders were assigned
+      const totalOrdersInRoute = route.orders.length;
+      const totalAssigned = allAssignmentsToInsert.length;
+      const missingCount = totalOrdersInRoute - totalAssigned;
+
+      if (missingCount > 0) {
+        // Find which orders are missing
+        const assignedOrderIds = new Set(allAssignmentsToInsert.map(a => a.order_id));
+        const missingOrders = route.orders.filter(o => !assignedOrderIds.has(o.id));
+        const missingCities = [...new Set(missingOrders.map(o => (o as any).city || 'desconhecida'))];
+        
+        console.warn(`[distributeLoad] ${missingCount} pedidos não atribuídos:`, 
+          missingOrders.map(o => ({ id: o.id, client: o.client_name, city: (o as any).city }))
+        );
+
+        // Block status advance — keep at trucks_assigned
+        toast({
+          title: `⚠️ Distribuição incompleta: ${missingCount} pedido(s) não atribuído(s)`,
+          description: `Cidades: ${missingCities.join(', ')}. Redistribua as cargas.`,
+          variant: 'destructive',
+        });
+        return; // Do NOT advance status
+      }
+
+      // Update route status to 'loading' — only if ALL orders assigned
       const { error: statusError } = await supabase
         .from('routes')
         .update({ status: 'loading' })
