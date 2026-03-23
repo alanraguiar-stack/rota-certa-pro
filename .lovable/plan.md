@@ -1,36 +1,22 @@
 
 
-# Campo de Busca no Ajuste Manual de Rotas
+# Fix: Busca não encontra entregas — Guard contra null + debug
 
-## Objetivo
+## Causa raiz
 
-Adicionar um campo de busca no `TruckRouteEditor` que permite digitar nome do cliente ou endereço e localizar em qual caminhão está a entrega, com destaque visual e navegação automática para a tab correta.
+A função `normalizeText` em `TruckRouteEditor.tsx` não tem guard contra `null`/`undefined`. Se qualquer pedido tiver `client_name` ou `address` nulo (o campo `address` pode ser null em `pending_orders`, e o `order` object pode vir com campos undefined do join), o `useMemo` lança uma exceção silenciosa e retorna array vazio — "Nenhuma entrega encontrada" para qualquer busca.
 
-## Mudanças em `src/components/route/TruckRouteEditor.tsx`
+Além disso, o campo `address` no tipo Order pode não conter o endereço completo que o usuário espera — pode estar em campos separados como `city`, `neighborhood`, etc.
 
-1. **Campo de busca** no header do card principal (entre o título "Ajuste Manual das Rotas" e o badge de confirmadas)
-   - Input com ícone de lupa, placeholder "Buscar cliente ou endereço..."
-   - Busca em tempo real (onChange) com debounce visual
+## Correção em `src/components/route/TruckRouteEditor.tsx`
 
-2. **Lógica de busca**
-   - Filtrar `client_name` e `address` de todos os pedidos de todos os caminhões (case-insensitive, normalize accents)
-   - Retornar lista de matches com: nome, endereço, placa do caminhão, sequência
-   - Se houver matches, mostrar dropdown de resultados abaixo do input
+1. **Guard null em `normalizeText`**: adicionar `if (!text) return ''` no início da função
 
-3. **Navegação ao clicar no resultado**
-   - Trocar `activeTab` para o `routeTruckId` do caminhão que contém o pedido
-   - Scrollar até o OrderCard correspondente (via ref ou `scrollIntoView`)
-   - Highlight temporário no OrderCard (ring amarelo por 2 segundos)
+2. **Expandir campos de busca**: além de `client_name` e `address`, buscar também em `city`, `neighborhood` e `pedido_id` (se disponíveis no objeto Order)
 
-4. **Estado de highlight no OrderCard**
-   - Novo prop `isHighlighted` que aplica `ring-2 ring-amber-400 bg-amber-50/50` com transição
-
-5. **Resultado inline (alternativa ao dropdown)**
-   - Quando há texto no campo, mostrar um mini-resumo: "Encontrado em **EEF1G40** — Entrega #5" com link para navegar
-
-## Arquivo afetado
+3. **Log de debug temporário**: adicionar `console.log` no `searchMatches` para validar quantos trucks/orders estão sendo pesquisados (remover depois de confirmar)
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/route/TruckRouteEditor.tsx` | Campo de busca, lógica de match, navegação entre tabs, highlight no OrderCard |
+| `src/components/route/TruckRouteEditor.tsx` | Guard null no normalizeText, expandir campos de busca |
 
