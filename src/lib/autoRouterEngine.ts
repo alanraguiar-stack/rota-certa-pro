@@ -984,14 +984,17 @@ function optimizeDeliverySequence(
       }
     }
 
-    // Anchor city: sort by distance from CD (ascending) for progressive outward route
+    // Use nearest-neighbor for geographic sequencing (with fallback to CEP sort)
     if (anchorCity && cityGroup.city === anchorCity) {
-      cityOrders.sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+      // Anchor city: start from CD
+      nearestNeighborWithinCity(cityOrders, startLat, startLng);
     } else {
-      cityOrders.sort((a, b) => sortWithinCity(a, b));
+      // Fill cities: continue from last position
+      const lastOrder = result[result.length - 1];
+      const fromLat = lastOrder ? lastOrder.geocoded.estimatedLat : startLat;
+      const fromLng = lastOrder ? lastOrder.geocoded.estimatedLng : startLng;
+      nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
     }
-    // Apply street grouping sweep
-    streetGroupSweep(cityOrders);
     result.push(...cityOrders);
   }
 
