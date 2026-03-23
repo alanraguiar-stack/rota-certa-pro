@@ -280,6 +280,14 @@ function TruckTab({
   const { toast } = useToast();
   const [draggedOrderId, setDraggedOrderId] = useState<string | null>(null);
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
+  
+  // Scroll to highlighted order
+  useEffect(() => {
+    if (highlightedOrderId && highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [highlightedOrderId]);
   
   const handleMoveToTruck = useCallback(async (orderId: string, toTruckId: string) => {
     try {
