@@ -1,57 +1,53 @@
 
 
-# Fix: Pedidos Não Distribuídos + Detecção de Atribuição Parcial
+# Plano: Geocodificação Real + Nearest-Neighbor por Cidade
 
-## Causa Raiz
+## Contexto
 
-Dois problemas combinados:
+A mudança de sequenciamento (nearest-neighbor) **não afeta** a divisão de cidades/territórios nem o agrupamento por caminhão. Ela atua apenas na ordenação DENTRO de cada bloco de cidade já atribuído.
 
-### Problema 1: Pedidos órfãos no autoComposeRoute
-A rota tem 58 pedidos mas apenas 3 caminhões (EUK5J26, FDK8A66, TRC1Z00). O motor de territórios tem 6 territórios (Barueri, Osasco, Carapicuíba, Jandira, Embu, Apoio). Com 3 caminhões, apenas 3 territórios recebem caminhão. Os outros territórios (Jandira, Embu, Apoio) ficam sem caminhão e seus pedidos **nunca são atribuídos**.
+Porém, aplicar nearest-neighbor com coordenadas falsas (hash) seria contraproducente. O plano correto é em duas etapas.
 
-O Step 5c (non-territory trucks) deveria pegar esses pedidos, mas a lista `nonTerritoryTrucks` está vazia — todos os 3 caminhões já foram usados nos territórios.
+## Etapa 1: Forçar geocodificação antes do sequenciamento
 
-Cidades não atribuídas na rota atual: Embu(5), São Paulo(5), Caieiras(3), Itapevi(2), Santana de Parnaíba(2), Jandira(1), Pirapora do Bom Jesus(1) = **19 pedidos perdidos**.
+### `src/pages/NewRoute.tsx` / fluxo de criação de rota
 
-### Problema 2: Card de recuperação não aparece
-A condição do alerta de inconsistência é `!hasAssignments` — mas a rota TEM 39 assignments. O card só aparece quando há ZERO assignments. **Atribuição parcial** (39 de 58) não é detectada.
+- Após importar pedidos e antes de rodar `autoComposeRoute`, verificar quantos pedidos têm `geocoding_status != 'success'`
+- Se houver pedidos sem coordenadas reais, rodar `geocodeOrders` automaticamente (já existe o hook `useGeocoding`)
+- Mostrar progresso da geocodificação no wizard (componente `GeocodingProgress` já existe)
+- Só prosseguir para distribuição após geocodificação concluída
 
-## Solução
+### `src/lib/autoRouterEngine.ts`
 
-### Mudança 1: `src/lib/autoRouterEngine.ts` — Fallback para pedidos órfãos
+- No `optimizeDeliverySequence`, checar se o pedido tem `latitude/longitude` reais (não estimados)
+- Se sim: usar coordenadas reais no nearest-neighbor
+- Se não: manter fallback por CEP sort (comportamento atual)
 
-Após o Step 5d (consolidação) e antes do Step 5e (rebalanceamento), adicionar um **Step 5d.5: Fallback distribution**:
-- Coletar todos os pedidos que não foram atribuídos a nenhum caminhão
-- Distribuir por nearest-fit nos caminhões que ainda têm capacidade (peso e entregas)
-- Priorizar caminhões com cidades vizinhas ao pedido órfão
-- Se nenhum caminhão tem capacidade, o pedido vai para `unassignedOrders` com warning explícito
+## Etapa 2: Nearest-neighbor dentro de cada cidade
 
-### Mudança 2: `src/pages/RouteDetails.tsx` — Detecção de atribuição parcial
+### `src/lib/autoRouterEngine.ts`
 
-Substituir a condição `!hasAssignments` por detecção inteligente:
-- Calcular `totalAssigned` (soma de assignments de todos os route_trucks)
-- Comparar com `route.total_orders`
-- Se `totalAssigned > 0 && totalAssigned < route.total_orders`: mostrar card "Distribuição incompleta" com botão "Redistribuir Cargas"
-- Manter o card existente para `totalAssigned === 0`
+Nova função `nearestNeighborWithinCity(orders, startLat, startLng)`:
+- Nearest-neighbor puro com bônus de mesma rua (×0.15) e mesmo bairro (×0.30)
+- Usado no `optimizeDeliverySequence` para CADA bloco de cidade
+- Cidade âncora: ponto de partida = CD
+- Cidades fill: ponto de partida = última posição do bloco anterior
 
-### Mudança 3: `src/hooks/useRoutes.ts` — Bloquear avanço com pedidos não atribuídos
+### O que NÃO muda
 
-No `distributeLoadMutation`, após o insert de assignments:
-- Comparar total de assignments inseridos com total de pedidos da rota
-- Se não baterem, adicionar warning no toast mas **não avançar status para 'loading'** — manter em 'trucks_assigned' para forçar redistribuição
-- Logar detalhadamente quais pedidos ficaram de fora e porquê
-
-### Mudança 4: Card de redistribuição sempre visível
-
-No `RouteDetails.tsx`, na etapa `distribute_load` e `loading_manifest`:
-- Se houver pedidos não atribuídos, mostrar card com lista das cidades/pedidos faltantes
-- Botão "Redistribuir Cargas" que chama `distributeLoad.mutateAsync()` novamente
+| Componente | Status |
+|---|---|
+| Territórios e atribuição cidade→caminhão | Intacto |
+| Agrupamento por cidade dentro do caminhão | Intacto |
+| Ordem dos blocos de cidade (âncora → fills) | Intacto |
+| Priority neighborhoods e insertion rules | Intacto |
+| Rebalanceamento entre caminhões | Intacto |
+| Fallback distribution (Step 5d.5) | Intacto |
 
 ## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/autoRouterEngine.ts` | Step 5d.5: fallback distribution para pedidos órfãos |
-| `src/pages/RouteDetails.tsx` | Detecção de atribuição parcial + card de redistribuição |
-| `src/hooks/useRoutes.ts` | Bloquear avanço de status quando há pedidos não atribuídos |
+| `src/lib/autoRouterEngine.ts` | `nearestNeighborWithinCity` + integração no `optimizeDeliverySequence` |
+| `src/pages/NewRoute.tsx` | Forçar geocodificação antes de roteirizar |
 
