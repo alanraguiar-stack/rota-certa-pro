@@ -66,7 +66,8 @@ function formatWeight(weight: number): string {
   return `${weight.toFixed(1)}kg`;
 }
 
-function normalizeText(text: string): string {
+function normalizeText(text: string | null | undefined): string {
+  if (!text) return '';
   return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
@@ -542,9 +543,8 @@ export function TruckRouteEditor({
     const matches: SearchMatch[] = [];
     for (const truck of trucks) {
       truck.orders.forEach((order, idx) => {
-        const nameMatch = normalizeText(order.client_name).includes(q);
-        const addrMatch = normalizeText(order.address).includes(q);
-        if (nameMatch || addrMatch) {
+        const searchText = [order.client_name, order.address, order.city].filter(Boolean).map(normalizeText).join(' ');
+        if (searchText.includes(q)) {
           matches.push({
             orderId: order.id,
             clientName: order.client_name,
