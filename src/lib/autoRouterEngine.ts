@@ -942,7 +942,7 @@ function optimizeDeliverySequence(
     if (anchorRule) {
       const insertionRules = anchorRule.neighborhoodExceptions.filter(e => e.insertAfterNeighborhood);
       if (insertionRules.length > 0) {
-        cityOrders.sort((a, b) => sortWithinCity(a, b));
+        nearestNeighborWithinCity(cityOrders, startLat, startLng);
 
         for (const rule of insertionRules) {
           const targetNh = normalizeNeighborhood(rule.insertAfterNeighborhood!);
