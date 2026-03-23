@@ -141,7 +141,59 @@ export default function NewRoute() {
 
     setOrders(filteredOrders);
     
-    // Auto-compose trucks if not already configured
+    // Step 2: Geocode addresses for real coordinates before routing
+    const ordersNeedingGeocode = filteredOrders.filter(o => !o.latitude || !o.longitude);
+    if (ordersNeedingGeocode.length > 0) {
+      setGeocodingProgress({
+        current: 0, total: ordersNeedingGeocode.length, status: 'processing',
+        successCount: 0, failedCount: 0, currentAddress: undefined,
+      });
+
+      let successCount = 0;
+      let failedCount = 0;
+      const geocodedMap = new Map<string, { lat: number; lng: number }>();
+
+      for (let i = 0; i < ordersNeedingGeocode.length; i++) {
+        const order = ordersNeedingGeocode[i];
+        setGeocodingProgress(prev => ({
+          ...prev, current: i + 1, currentAddress: order.address,
+        }));
+
+        try {
+          const result = await geocodeAddress(order.address);
+          if (result.status === 'success') {
+            geocodedMap.set(order.address, { lat: result.lat, lng: result.lng });
+            successCount++;
+          } else {
+            failedCount++;
+          }
+        } catch {
+          failedCount++;
+        }
+
+        setGeocodingProgress(prev => ({ ...prev, successCount, failedCount }));
+      }
+
+      // Update orders with real coordinates
+      filteredOrders = filteredOrders.map(o => {
+        const coords = geocodedMap.get(o.address);
+        return coords ? { ...o, latitude: coords.lat, longitude: coords.lng } : o;
+      });
+      setOrders(filteredOrders);
+
+      setGeocodingProgress(prev => ({
+        ...prev, status: 'complete', current: ordersNeedingGeocode.length, currentAddress: undefined,
+      }));
+
+      toast({
+        title: `Geocodificação: ${successCount} de ${ordersNeedingGeocode.length}`,
+        description: failedCount > 0 
+          ? `${failedCount} endereço(s) não encontrados — usarão estimativa por CEP`
+          : 'Todos os endereços localizados com coordenadas reais',
+      });
+    }
+
+    // Step 3: Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
       const hints = getHintsForOrders(filteredOrders);
       
