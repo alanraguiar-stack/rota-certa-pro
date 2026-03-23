@@ -903,10 +903,9 @@ function optimizeDeliverySequence(
     regularOrders.push(...orders);
   }
 
-  // Sort priority orders by street grouping
+  // Sort priority orders by nearest-neighbor from CD
   if (priorityOrders.length > 1) {
-    priorityOrders.sort((a, b) => sortWithinCity(a, b));
-    streetGroupSweep(priorityOrders);
+    nearestNeighborWithinCity(priorityOrders, startLat, startLng);
   }
 
   // Step 2: Group regular orders by city
