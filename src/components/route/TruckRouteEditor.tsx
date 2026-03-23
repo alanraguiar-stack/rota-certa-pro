@@ -266,6 +266,7 @@ function TruckTab({
   onLockTruck,
   onUnlockTruck,
   isProcessing,
+  highlightedOrderId,
 }: {
   truckData: TruckData;
   otherTrucks: TruckData[];
@@ -274,6 +275,7 @@ function TruckTab({
   onLockTruck: (truckId: string) => Promise<void>;
   onUnlockTruck: (truckId: string) => Promise<void>;
   isProcessing?: boolean;
+  highlightedOrderId?: string | null;
 }) {
   const { toast } = useToast();
   const [draggedOrderId, setDraggedOrderId] = useState<string | null>(null);
