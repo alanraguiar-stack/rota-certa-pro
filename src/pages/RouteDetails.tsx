@@ -461,50 +461,67 @@ export default function RouteDetails() {
           </Card>
         )}
 
-        {/* Recovery Alert - Opposite case: status advanced but no assignments (failed distribution) */}
-        {!hasAssignments && hasTrucks && (route.status === 'loading' || route.status === 'distributed' || route.status === 'loading_confirmed') && (
-          <Card className="border-destructive bg-destructive/5">
-            <CardContent className="py-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <AlertCircle className="h-5 w-5 text-destructive" />
-                  <div>
-                    <p className="font-medium">Distribuição inconsistente</p>
-                    <p className="text-sm text-muted-foreground">
-                      O status indica que a carga foi distribuída, mas nenhum pedido está atribuído aos caminhões. Reprocesse a distribuição.
-                    </p>
+        {/* Recovery Alert - No assignments OR partial assignments */}
+        {(() => {
+          const totalAssigned = route.route_trucks.reduce(
+            (sum, rt) => sum + (rt.assignments?.length ?? 0), 0
+          );
+          const totalOrders = route.total_orders;
+          const isPartial = totalAssigned > 0 && totalAssigned < totalOrders;
+          const isZero = !hasAssignments && hasTrucks;
+          const isInconsistent = (isZero || isPartial) && 
+            (route.status === 'loading' || route.status === 'distributed' || route.status === 'loading_confirmed' || route.status === 'trucks_assigned');
+          
+          if (!isInconsistent) return null;
+
+          const missingCount = totalOrders - totalAssigned;
+
+          return (
+            <Card className="border-destructive bg-destructive/5">
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className="h-5 w-5 text-destructive" />
+                    <div>
+                      <p className="font-medium">
+                        {isZero ? 'Distribuição inconsistente' : 'Distribuição incompleta'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {isZero 
+                          ? 'Nenhum pedido está atribuído aos caminhões. Reprocesse a distribuição.'
+                          : `${totalAssigned} de ${totalOrders} pedidos atribuídos — ${missingCount} pedido(s) ficaram de fora. Redistribua as cargas.`
+                        }
+                      </p>
+                    </div>
                   </div>
+                  <Button 
+                    variant="destructive"
+                    disabled={distributeLoad.isPending}
+                    onClick={async () => {
+                      try {
+                        const { supabase } = await import('@/integrations/supabase/client');
+                        await Promise.all(
+                          route.route_trucks.map(rt =>
+                            supabase.from('route_trucks').update({ total_weight_kg: 0, total_orders: 0 }).eq('id', rt.id)
+                          )
+                        );
+                        await supabase.from('routes').update({ status: 'trucks_assigned' }).eq('id', route.id);
+                        await refetch();
+                        await distributeLoad.mutateAsync();
+                        await refetch();
+                        toast({ title: 'Distribuição reprocessada com sucesso!' });
+                      } catch (err: any) {
+                        toast({ title: 'Erro ao reprocessar', description: err.message, variant: 'destructive' });
+                      }
+                    }}
+                  >
+                    {distributeLoad.isPending ? 'Reprocessando...' : 'Redistribuir Cargas'}
+                  </Button>
                 </div>
-                <Button 
-                  variant="destructive"
-                  disabled={distributeLoad.isPending}
-                  onClick={async () => {
-                    try {
-                      // Reset truck totals first
-                      const { supabase } = await import('@/integrations/supabase/client');
-                      await Promise.all(
-                        route.route_trucks.map(rt =>
-                          supabase.from('route_trucks').update({ total_weight_kg: 0, total_orders: 0 }).eq('id', rt.id)
-                        )
-                      );
-                      // Reset status to trucks_assigned so distributeLoad can run
-                      await supabase.from('routes').update({ status: 'trucks_assigned' }).eq('id', route.id);
-                      await refetch();
-                      // Now run distribution
-                      await distributeLoad.mutateAsync();
-                      await refetch();
-                      toast({ title: 'Distribuição reprocessada com sucesso!' });
-                    } catch (err: any) {
-                      toast({ title: 'Erro ao reprocessar', description: err.message, variant: 'destructive' });
-                    }
-                  }}
-                >
-                  {distributeLoad.isPending ? 'Reprocessando...' : 'Reprocessar Distribuição'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              </CardContent>
+            </Card>
+          );
+        })()}
 
         {/* ============================================ */}
         {/* ETAPA 1: SELECIONAR CAMINHÕES               */}
