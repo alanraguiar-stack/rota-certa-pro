@@ -742,6 +742,7 @@ export function TruckRouteEditor({
                 onLockTruck={onLockTruck}
                 onUnlockTruck={onUnlockTruck}
                 isProcessing={isProcessing}
+                highlightedOrderId={highlightedOrderId}
               />
             </TabsContent>
           ))}
