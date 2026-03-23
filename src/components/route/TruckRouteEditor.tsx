@@ -66,6 +66,19 @@ function formatWeight(weight: number): string {
   return `${weight.toFixed(1)}kg`;
 }
 
+function normalizeText(text: string): string {
+  return text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+interface SearchMatch {
+  orderId: string;
+  clientName: string;
+  address: string;
+  truckPlate: string;
+  routeTruckId: string;
+  sequence: number;
+}
+
 function OrderCard({ 
   order, 
   sequence, 
@@ -81,6 +94,8 @@ function OrderCard({
   onDrop,
   onDragEnd,
   isDragTarget,
+  isHighlighted,
+  orderRef,
 }: { 
   order: Order; 
   sequence: number;
@@ -96,6 +111,8 @@ function OrderCard({
   onDrop?: (e: React.DragEvent) => void;
   onDragEnd?: () => void;
   isDragTarget?: boolean;
+  isHighlighted?: boolean;
+  orderRef?: React.Ref<HTMLDivElement>;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
