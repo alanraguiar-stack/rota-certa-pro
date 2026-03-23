@@ -201,6 +201,8 @@ export interface ParsedOrder {
   product_description?: string; // Legacy single product field
   items: ParsedOrderItem[]; // Multiple items
   city?: string; // City extracted from address for regionalization
+  latitude?: number | null; // Real geocoded latitude
+  longitude?: number | null; // Real geocoded longitude
   isValid: boolean;
   error?: string;
 }

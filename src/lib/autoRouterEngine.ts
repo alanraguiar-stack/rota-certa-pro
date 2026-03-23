@@ -181,10 +181,15 @@ export function autoComposeRoute(
     };
   }
   
-  // Step 1: Geocode all orders
+  // Step 1: Geocode all orders (use real coordinates when available)
   const cd = getDistributionCenterCoords();
   const geocodedOrders: GeocodedOrder[] = validOrders.map(order => {
     const geocoded = parseAddress(order.address);
+    // Override estimated coords with real geocoded coords if available
+    if (order.latitude && order.longitude) {
+      geocoded.estimatedLat = order.latitude;
+      geocoded.estimatedLng = order.longitude;
+    }
     const distanceFromCD = calculateDistance(
       cd.lat, cd.lng, geocoded.estimatedLat, geocoded.estimatedLng
     );
