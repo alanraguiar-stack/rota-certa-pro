@@ -977,8 +977,11 @@ function optimizeDeliverySequence(
           }
         }
 
-        // Apply street grouping sweep
-        streetGroupSweep(cityOrders);
+        // Apply nearest-neighbor after insertion rules
+        const lastResult = result[result.length - 1];
+        const nnLat = lastResult ? lastResult.geocoded.estimatedLat : startLat;
+        const nnLng = lastResult ? lastResult.geocoded.estimatedLng : startLng;
+        nearestNeighborWithinCity(cityOrders, nnLat, nnLng);
         result.push(...cityOrders);
         continue;
       }
