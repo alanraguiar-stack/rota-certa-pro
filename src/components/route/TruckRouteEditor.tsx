@@ -3,7 +3,7 @@
  * Interface com tabs por caminhão, drag-and-drop, recálculo em tempo real
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   Truck, 
   GripVertical, 
@@ -16,8 +16,11 @@ import {
   Unlock,
   ChevronDown,
   ChevronUp,
-  Package
+  Package,
+  Search,
+  X
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
