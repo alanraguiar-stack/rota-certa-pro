@@ -57,6 +57,12 @@ export default function NewRoute() {
   const [storedOrders, setStoredOrders] = useState<ParsedOrder[]>([]);
   const [storedCount, setStoredCount] = useState(0);
 
+  // Geocoding state
+  const [geocodingProgress, setGeocodingProgress] = useState({
+    current: 0, total: 0, status: 'idle' as 'idle' | 'processing' | 'complete' | 'error',
+    successCount: 0, failedCount: 0, currentAddress: undefined as string | undefined,
+  });
+
   // Pedidos válidos são os que têm endereço (podem ser roterizados)
   const validOrders = orders.filter((o) => o.isValid);
   
