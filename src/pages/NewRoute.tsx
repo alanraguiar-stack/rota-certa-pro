@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, AlertTriangle, Sparkles } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Zap, Check, Truck, Route as RouteIcon, AlertTriangle, Sparkles, MapPin } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
+import { GeocodingProgress } from '@/components/route/GeocodingProgress';
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
@@ -25,6 +26,7 @@ import { useCitySchedule } from '@/hooks/useCitySchedule';
 import { analyzeFleetRequirements, validateFinalResult } from '@/lib/routeIntelligence';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
+import { geocodeAddress } from '@/lib/nominatimGeocoding';
 
 export default function NewRoute() {
   const navigate = useNavigate();
