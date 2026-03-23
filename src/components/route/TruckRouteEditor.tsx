@@ -529,9 +529,43 @@ export function TruckRouteEditor({
   isProcessing,
 }: TruckRouteEditorProps) {
   const [activeTab, setActiveTab] = useState(trucks[0]?.routeTruckId || '');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   
   const allLocked = trucks.every(t => t.isLocked);
   const lockedCount = trucks.filter(t => t.isLocked).length;
+  
+  // Search matches
+  const searchMatches = useMemo<SearchMatch[]>(() => {
+    if (!searchQuery || searchQuery.length < 2) return [];
+    const q = normalizeText(searchQuery);
+    const matches: SearchMatch[] = [];
+    for (const truck of trucks) {
+      truck.orders.forEach((order, idx) => {
+        const nameMatch = normalizeText(order.client_name).includes(q);
+        const addrMatch = normalizeText(order.address).includes(q);
+        if (nameMatch || addrMatch) {
+          matches.push({
+            orderId: order.id,
+            clientName: order.client_name,
+            address: order.address,
+            truckPlate: truck.truck.plate,
+            routeTruckId: truck.routeTruckId,
+            sequence: idx + 1,
+          });
+        }
+      });
+    }
+    return matches;
+  }, [searchQuery, trucks]);
+  
+  const handleSelectMatch = useCallback((match: SearchMatch) => {
+    setActiveTab(match.routeTruckId);
+    setHighlightedOrderId(match.orderId);
+    setSearchQuery('');
+    // Clear highlight after 3 seconds
+    setTimeout(() => setHighlightedOrderId(null), 3000);
+  }, []);
   
   // Summary stats
   const totalOrders = trucks.reduce((sum, t) => sum + t.orders.length, 0);
@@ -582,7 +616,59 @@ export function TruckRouteEditor({
           </div>
         </CardHeader>
         
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar cliente ou endereço..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 pr-9"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => { setSearchQuery(''); setHighlightedOrderId(null); }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+            
+            {/* Search Results Dropdown */}
+            {searchMatches.length > 0 && (
+              <div className="absolute z-50 top-full mt-1 w-full rounded-lg border bg-popover shadow-md max-h-64 overflow-y-auto">
+                {searchMatches.map((match) => (
+                  <button
+                    key={match.orderId}
+                    onClick={() => handleSelectMatch(match)}
+                    className="w-full text-left px-4 py-2.5 hover:bg-muted/50 transition-colors border-b last:border-b-0"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">{match.clientName}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          <MapPin className="inline h-3 w-3 mr-1" />
+                          {match.address}
+                        </p>
+                      </div>
+                      <Badge variant="secondary" className="shrink-0 text-xs">
+                        <Truck className="h-3 w-3 mr-1" />
+                        {match.truckPlate} • #{match.sequence}
+                      </Badge>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {searchQuery.length >= 2 && searchMatches.length === 0 && (
+              <div className="absolute z-50 top-full mt-1 w-full rounded-lg border bg-popover shadow-md p-4 text-center text-sm text-muted-foreground">
+                Nenhuma entrega encontrada
+              </div>
+            )}
+          </div>
+          
           {/* Quick Stats */}
           <div className="grid grid-cols-4 gap-4 text-center">
             <div className="rounded-lg bg-muted/50 p-3">
