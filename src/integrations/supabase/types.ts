@@ -178,6 +178,56 @@ export type Database = {
           },
         ]
       }
+      fleet_decision_history: {
+        Row: {
+          cities: string[]
+          city_count: number
+          created_at: string
+          id: string
+          route_id: string | null
+          routing_strategy: string | null
+          total_orders: number
+          total_weight: number
+          truck_plates: string[]
+          trucks_selected: number
+          user_id: string
+        }
+        Insert: {
+          cities?: string[]
+          city_count?: number
+          created_at?: string
+          id?: string
+          route_id?: string | null
+          routing_strategy?: string | null
+          total_orders: number
+          total_weight: number
+          truck_plates?: string[]
+          trucks_selected: number
+          user_id: string
+        }
+        Update: {
+          cities?: string[]
+          city_count?: number
+          created_at?: string
+          id?: string
+          route_id?: string | null
+          routing_strategy?: string | null
+          total_orders?: number
+          total_weight?: number
+          truck_plates?: string[]
+          trucks_selected?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fleet_decision_history_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       geocoding_cache: {
         Row: {
           address_hash: string
@@ -463,6 +513,7 @@ export type Database = {
           state: string | null
           truck_label: string
           user_id: string
+          was_manually_moved: boolean
         }
         Insert: {
           address?: string | null
@@ -477,6 +528,7 @@ export type Database = {
           state?: string | null
           truck_label: string
           user_id: string
+          was_manually_moved?: boolean
         }
         Update: {
           address?: string | null
@@ -491,6 +543,7 @@ export type Database = {
           state?: string | null
           truck_label?: string
           user_id?: string
+          was_manually_moved?: boolean
         }
         Relationships: []
       }
@@ -591,6 +644,42 @@ export type Database = {
           status?: string
           total_orders?: number
           total_weight_kg?: number
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      territory_overrides: {
+        Row: {
+          city: string
+          created_at: string
+          id: string
+          is_active: boolean
+          occurrences: number
+          override_type: string
+          territory_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          city: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          occurrences?: number
+          override_type?: string
+          territory_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          city?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          occurrences?: number
+          override_type?: string
+          territory_id?: string
           updated_at?: string
           user_id?: string
         }
