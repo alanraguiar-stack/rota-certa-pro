@@ -82,6 +82,9 @@ export default function RouteDetails() {
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
   
+  // Track orders that were manually moved between trucks
+  const [manuallyMovedOrderIds, setManuallyMovedOrderIds] = useState<Set<string>>(new Set());
+  
   
   // Track if fleet was pre-configured in wizard
   const [fleetFromWizard, setFleetFromWizard] = useState(false);
@@ -265,6 +268,8 @@ export default function RouteDetails() {
     toTruckId: string, 
     newSequence: number
   ) => {
+    // Track this order as manually moved
+    setManuallyMovedOrderIds(prev => new Set([...prev, orderId]));
     await moveOrderToTruck.mutateAsync({ 
       orderId, 
       fromRouteTruckId: fromTruckId, 
@@ -305,27 +310,38 @@ export default function RouteDetails() {
     // Save snapshot to route_history_patterns for learning
     try {
       const { supabase } = await import('@/integrations/supabase/client');
+      const { parseAddress } = await import('@/lib/geocoding');
       const { data: { user } } = await supabase.auth.getUser();
       if (user && route) {
         const today = new Date().toISOString().split('T')[0];
         const patterns: any[] = [];
+        const truckPlates: string[] = [];
+        const citiesSet = new Set<string>();
 
         for (const rt of route.route_trucks) {
           const plate = rt.truck?.plate || 'SEM-PLACA';
+          truckPlates.push(plate);
           const assignments = rt.assignments || [];
           for (const a of assignments) {
             const order = a.order;
             if (!order) continue;
+            
+            // Extract neighborhood and state from address
+            const parsed = parseAddress(order.address);
+            const city = order.city || parsed.city || null;
+            if (city) citiesSet.add(city);
+            
             patterns.push({
               user_id: user.id,
               truck_label: plate,
               client_name: order.client_name,
               address: order.address,
-              city: order.city || null,
-              neighborhood: null,
+              city,
+              neighborhood: parsed.neighborhood || null,
+              state: parsed.state || null,
               sequence_order: a.delivery_sequence ?? 0,
               route_date: today,
-              state: null,
+              was_manually_moved: manuallyMovedOrderIds.has(order.id),
             });
           }
         }
@@ -334,6 +350,20 @@ export default function RouteDetails() {
           await supabase.from('route_history_patterns').insert(patterns);
           console.log(`[PatternLearning] Saved ${patterns.length} patterns from confirmed routes`);
         }
+        
+        // Save fleet decision history
+        await supabase.from('fleet_decision_history').insert({
+          user_id: user.id,
+          route_id: route.id,
+          total_weight: Number(route.total_weight_kg),
+          total_orders: route.total_orders,
+          city_count: citiesSet.size,
+          cities: Array.from(citiesSet),
+          trucks_selected: route.route_trucks.length,
+          truck_plates: truckPlates,
+          routing_strategy: routingStrategy,
+        });
+        console.log(`[FleetHistory] Saved fleet decision: ${truckPlates.length} trucks, ${citiesSet.size} cities`);
       }
     } catch (err) {
       console.error('[PatternLearning] Error saving patterns:', err);

@@ -514,6 +514,129 @@ function formatWeight(weightKg: number): string {
   return `${weightKg.toFixed(2).replace('.', ',')} kg`;
 }
 
+// ============================================
+// FLEET HISTORY INTELLIGENCE
+// ============================================
+
+export interface FleetHistoryInsight {
+  hasHistory: boolean;
+  similarRouteCount: number;
+  mostCommonTruckCount: number;
+  mostCommonTruckCountFrequency: number;
+  mostCommonStrategy: string | null;
+  strategyFrequency: number;
+  reasoning: string[];
+}
+
+/**
+ * Analyzes fleet decision history to provide insights for current route.
+ * Finds similar routes by weight range and city overlap.
+ */
+export function analyzeFleetHistory(
+  history: Array<{
+    total_weight: number;
+    total_orders: number;
+    city_count: number;
+    cities: string[];
+    trucks_selected: number;
+    truck_plates: string[];
+    routing_strategy: string | null;
+  }>,
+  currentWeight: number,
+  currentCities: string[]
+): FleetHistoryInsight {
+  const reasoning: string[] = [];
+  
+  if (history.length === 0) {
+    return {
+      hasHistory: false,
+      similarRouteCount: 0,
+      mostCommonTruckCount: 0,
+      mostCommonTruckCountFrequency: 0,
+      mostCommonStrategy: null,
+      strategyFrequency: 0,
+      reasoning: ['Sem histórico de decisões de frota disponível'],
+    };
+  }
+
+  // Find similar routes: weight within ±30% and at least 1 city overlap
+  const weightLow = currentWeight * 0.7;
+  const weightHigh = currentWeight * 1.3;
+  const currentCitiesSet = new Set(currentCities.map(c => c.toLowerCase()));
+
+  const similar = history.filter(h => {
+    const weightMatch = h.total_weight >= weightLow && h.total_weight <= weightHigh;
+    const cityOverlap = h.cities.some(c => currentCitiesSet.has(c.toLowerCase()));
+    return weightMatch && cityOverlap;
+  });
+
+  if (similar.length === 0) {
+    return {
+      hasHistory: true,
+      similarRouteCount: 0,
+      mostCommonTruckCount: 0,
+      mostCommonTruckCountFrequency: 0,
+      mostCommonStrategy: null,
+      strategyFrequency: 0,
+      reasoning: [`${history.length} rotas no histórico, mas nenhuma com perfil similar`],
+    };
+  }
+
+  // Count truck quantities
+  const truckCounts = new Map<number, number>();
+  for (const s of similar) {
+    truckCounts.set(s.trucks_selected, (truckCounts.get(s.trucks_selected) || 0) + 1);
+  }
+  
+  let mostCommonTruckCount = 0;
+  let mostCommonFreq = 0;
+  for (const [count, freq] of truckCounts) {
+    if (freq > mostCommonFreq) {
+      mostCommonTruckCount = count;
+      mostCommonFreq = freq;
+    }
+  }
+
+  // Count strategies
+  const strategyCounts = new Map<string, number>();
+  for (const s of similar) {
+    const strat = s.routing_strategy || 'padrao';
+    strategyCounts.set(strat, (strategyCounts.get(strat) || 0) + 1);
+  }
+  
+  let mostCommonStrategy: string | null = null;
+  let strategyFreq = 0;
+  for (const [strat, freq] of strategyCounts) {
+    if (freq > strategyFreq) {
+      mostCommonStrategy = strat;
+      strategyFreq = freq;
+    }
+  }
+
+  const pct = Math.round((mostCommonFreq / similar.length) * 100);
+  reasoning.push(
+    `📊 ${similar.length} rotas similares encontradas no histórico`
+  );
+  reasoning.push(
+    `🚚 Em ${pct}% das vezes (${mostCommonFreq}/${similar.length}), você usou ${mostCommonTruckCount} caminhões`
+  );
+  if (mostCommonStrategy && strategyFreq > 1) {
+    reasoning.push(
+      `🗺️ Estratégia mais usada: ${mostCommonStrategy} (${strategyFreq}x)`
+    );
+  }
+
+  return {
+    hasHistory: true,
+    similarRouteCount: similar.length,
+    mostCommonTruckCount,
+    mostCommonTruckCountFrequency: mostCommonFreq,
+    mostCommonStrategy,
+    strategyFrequency: strategyFreq,
+    reasoning,
+  };
+}
+
 /**
  * Calcula a quantidade mínima de caminhões necessária
  * Raciocínio simples: peso total / capacidade média
