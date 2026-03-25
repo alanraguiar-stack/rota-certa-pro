@@ -268,6 +268,8 @@ export default function RouteDetails() {
     toTruckId: string, 
     newSequence: number
   ) => {
+    // Track this order as manually moved
+    setManuallyMovedOrderIds(prev => new Set([...prev, orderId]));
     await moveOrderToTruck.mutateAsync({ 
       orderId, 
       fromRouteTruckId: fromTruckId, 
