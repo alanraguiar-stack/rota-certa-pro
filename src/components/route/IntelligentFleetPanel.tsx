@@ -13,7 +13,8 @@ import {
   AlertTriangle, 
   Info,
   Scale,
-  Target
+  Target,
+  History,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,9 +27,13 @@ import {
   analyzeFleetRequirements, 
   generateReasoningExplanation,
   isFleetSelectionValid,
-  FleetAnalysis
+  FleetAnalysis,
+  analyzeFleetHistory,
+  FleetHistoryInsight,
 } from '@/lib/routeIntelligence';
 import { TERRITORY_RULES } from '@/lib/anchorRules';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface IntelligentFleetPanelProps {
   trucks: Truck[];
@@ -61,6 +66,29 @@ export function IntelligentFleetPanel({
   disabled = false,
 }: IntelligentFleetPanelProps) {
   const [showAllTrucks, setShowAllTrucks] = useState(false);
+  const { user } = useAuth();
+  const [historyInsight, setHistoryInsight] = useState<FleetHistoryInsight | null>(null);
+
+  // Fetch fleet decision history
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchHistory = async () => {
+      const { data } = await supabase
+        .from('fleet_decision_history')
+        .select('total_weight, total_orders, city_count, cities, trucks_selected, truck_plates, routing_strategy')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      if (data && data.length > 0) {
+        // Extract current cities from orders
+        const currentCities = [...new Set(orders.map(o => o.city).filter(Boolean))] as string[];
+        const insight = analyzeFleetHistory(data as any, totalWeight, currentCities);
+        setHistoryInsight(insight);
+      }
+    };
+    fetchHistory();
+  }, [user?.id, totalWeight, orders]);
 
   // Análise inteligente da frota
   const fleetAnalysis = useMemo(() => 
@@ -176,6 +204,25 @@ export function IntelligentFleetPanel({
           </CardContent>
         </Card>
       </div>
+
+      {/* Historical Insight Card */}
+      {historyInsight?.hasHistory && historyInsight.similarRouteCount > 0 && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="py-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shrink-0 mt-0.5">
+                <History className="h-4 w-4 text-primary" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-semibold text-sm">Insights do Histórico</p>
+                {historyInsight.reasoning.map((r, i) => (
+                  <p key={i} className="text-sm text-muted-foreground">{r}</p>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Status da Seleção */}
       <Card className={cn(
