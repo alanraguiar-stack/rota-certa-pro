@@ -82,6 +82,9 @@ export default function RouteDetails() {
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
   
+  // Track orders that were manually moved between trucks
+  const [manuallyMovedOrderIds, setManuallyMovedOrderIds] = useState<Set<string>>(new Set());
+  
   
   // Track if fleet was pre-configured in wizard
   const [fleetFromWizard, setFleetFromWizard] = useState(false);
