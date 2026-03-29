@@ -66,7 +66,7 @@ export function FuturisticStatsCard({
   return (
     <div
       className={cn(
-        "group relative overflow-hidden rounded-2xl border bg-card p-5 transition-all duration-500",
+        "group relative overflow-hidden rounded-2xl border bg-card p-4 sm:p-5 transition-all duration-500",
         "hover:-translate-y-1 hover:border-primary/30",
         config.borderGlow,
         glowing && "animate-glow-pulse",
@@ -95,7 +95,7 @@ export function FuturisticStatsCard({
       <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1 space-y-2">
           <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <p className="text-4xl font-bold tracking-tight">{value}</p>
+          <p className="text-2xl sm:text-4xl font-bold tracking-tight">{value}</p>
           {subtitle && (
             <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
           )}
@@ -118,7 +118,7 @@ export function FuturisticStatsCard({
         </div>
 
         <div className={cn(
-          "flex h-14 w-14 shrink-0 items-center justify-center rounded-xl transition-all duration-300",
+          "flex h-10 w-10 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl transition-all duration-300",
           "group-hover:scale-110 group-hover:rotate-3",
           config.iconBg
         )}>

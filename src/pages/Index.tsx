@@ -66,11 +66,11 @@ export default function Index() {
 
   return (
     <AppLayout>
-      <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Painel de Operações</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Painel de Operações</h1>
             <p className="mt-1 flex items-center gap-2 text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span className="capitalize">{getTodayDate()}</span>
@@ -124,10 +124,10 @@ export default function Index() {
                     <Link
                       key={route.id}
                       to={`/rota/${route.id}`}
-                      className="flex items-center justify-between rounded-lg p-3 transition-colors duration-150 hover:bg-muted/50"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg p-3 gap-1 sm:gap-3 transition-colors duration-150 hover:bg-muted/50"
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium">{route.name}</p>
                           <Badge variant={statusConfig.variant} className="text-xs">
                             {statusConfig.label}
@@ -138,7 +138,7 @@ export default function Index() {
                         </p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-sm text-muted-foreground">{formatDate(route.created_at)}</span>
+                        <span className="text-xs sm:text-sm text-muted-foreground">{formatDate(route.created_at)}</span>
                         <ArrowRight className="h-4 w-4 text-muted-foreground" />
                       </div>
                     </Link>

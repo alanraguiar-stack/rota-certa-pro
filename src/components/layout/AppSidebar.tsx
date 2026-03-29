@@ -1,11 +1,13 @@
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Truck, Route, History, LogOut, Settings, HelpCircle, Navigation } from 'lucide-react';
+import { LayoutDashboard, Truck, Route, History, LogOut, Settings, HelpCircle, Navigation, Menu } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserRole } from '@/hooks/useUserRole';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
+import { useState } from 'react';
 
 const adminMenuItems = [
   { title: 'Dashboard', url: '/', icon: LayoutDashboard },
@@ -22,7 +24,7 @@ const secondaryMenuItems = [
   { title: 'Configurações', url: '/configuracoes', icon: Settings },
 ];
 
-export function AppSidebar() {
+function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { signOut, user } = useAuth();
   const { isMotorista } = useUserRole();
   const navigate = useNavigate();
@@ -33,8 +35,12 @@ export function AppSidebar() {
     navigate('/login', { replace: true });
   };
 
+  const handleNavClick = () => {
+    onNavigate?.();
+  };
+
   return (
-    <aside className="flex h-screen w-60 flex-col border-r border-border bg-sidebar">
+    <div className="flex h-full flex-col">
       {/* Header */}
       <div className="border-b border-border px-5 py-5">
         <div className="flex items-center gap-3">
@@ -64,6 +70,7 @@ export function AppSidebar() {
                   "hover:bg-muted hover:text-foreground",
                 )}
                 activeClassName="bg-primary/10 text-primary font-semibold"
+                onClick={handleNavClick}
               >
                 <item.icon className="h-[18px] w-[18px] shrink-0" />
                 <span className="text-sm">{item.title}</span>
@@ -87,6 +94,7 @@ export function AppSidebar() {
                   "hover:bg-muted hover:text-foreground",
                 )}
                 activeClassName="bg-primary/10 text-primary font-semibold"
+                onClick={handleNavClick}
               >
                 <item.icon className="h-[18px] w-[18px] shrink-0" />
                 <span className="text-sm">{item.title}</span>
@@ -128,6 +136,33 @@ export function AppSidebar() {
           <span className="text-sm">Sair</span>
         </Button>
       </div>
+    </div>
+  );
+}
+
+export function MobileMenuTrigger() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger asChild>
+        <Button variant="ghost" size="icon" className="md:hidden">
+          <Menu className="h-5 w-5" />
+          <span className="sr-only">Menu</span>
+        </Button>
+      </SheetTrigger>
+      <SheetContent side="left" className="w-60 p-0">
+        <SheetTitle className="sr-only">Menu de navegação</SheetTitle>
+        <SidebarContent onNavigate={() => setOpen(false)} />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function AppSidebar() {
+  return (
+    <aside className="hidden md:flex h-screen w-60 flex-col border-r border-border bg-sidebar">
+      <SidebarContent />
     </aside>
   );
 }
