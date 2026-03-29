@@ -66,11 +66,11 @@ export default function Index() {
 
   return (
     <AppLayout>
-      <div className="space-y-8">
+      <div className="space-y-6 sm:space-y-8">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Painel de Operações</h1>
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Painel de Operações</h1>
             <p className="mt-1 flex items-center gap-2 text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span className="capitalize">{getTodayDate()}</span>
