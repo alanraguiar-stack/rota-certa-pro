@@ -92,40 +92,40 @@ export function FuturisticStatsCard({
       )} />
 
       {/* Content */}
-      <div className="relative z-10 flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1 space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <p className="text-2xl sm:text-4xl font-bold tracking-tight">{value}</p>
-          {subtitle && (
-            <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
-          )}
-          {trend && (
-            <div className="flex items-center gap-1.5 pt-1">
-              {trend.value >= 0 ? (
-                <TrendingUp className="h-3.5 w-3.5 text-success" />
-              ) : (
-                <TrendingDown className="h-3.5 w-3.5 text-destructive" />
-              )}
-              <span className={cn(
-                "text-xs font-semibold",
-                trend.value >= 0 ? "text-success" : "text-destructive"
-              )}>
-                {trend.value >= 0 ? '+' : ''}{trend.value}%
-              </span>
-              <span className="text-xs text-muted-foreground">{trend.label}</span>
+      <div className="relative z-10 space-y-3">
+        <div className="flex items-center gap-2.5">
+          <div className={cn(
+            "flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-xl transition-all duration-300",
+            "group-hover:scale-110 group-hover:rotate-3",
+            config.iconBg
+          )}>
+            <div className={cn("transition-colors [&>svg]:h-4 [&>svg]:w-4 sm:[&>svg]:h-5 sm:[&>svg]:w-5", config.iconColor)}>
+              {icon}
             </div>
-          )}
+          </div>
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
         </div>
 
-        <div className={cn(
-          "flex h-10 w-10 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl transition-all duration-300",
-          "group-hover:scale-110 group-hover:rotate-3",
-          config.iconBg
-        )}>
-          <div className={cn("transition-colors", config.iconColor)}>
-            {icon}
+        <p className="text-2xl sm:text-4xl font-bold tracking-tight">{value}</p>
+        {subtitle && (
+          <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
+        )}
+        {trend && (
+          <div className="flex items-center gap-1.5">
+            {trend.value >= 0 ? (
+              <TrendingUp className="h-3.5 w-3.5 text-success" />
+            ) : (
+              <TrendingDown className="h-3.5 w-3.5 text-destructive" />
+            )}
+            <span className={cn(
+              "text-xs font-semibold",
+              trend.value >= 0 ? "text-success" : "text-destructive"
+            )}>
+              {trend.value >= 0 ? '+' : ''}{trend.value}%
+            </span>
+            <span className="text-xs text-muted-foreground">{trend.label}</span>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Corner decoration */}
