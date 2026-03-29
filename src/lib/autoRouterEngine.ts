@@ -595,7 +595,8 @@ export function autoComposeRoute(
         const remainingWeight = capacity - comp.totalWeight;
         const remainingSlots = maxDel - comp.orders.length;
 
-        if (remainingWeight < orphan.weight_kg || remainingSlots <= 0) continue;
+        if (remainingWeight < orphan.weight_kg) continue;
+        if (remainingSlots <= -3) continue; // permite até 3 extras por caminhão
 
         // Affinity score: same city = 100, neighbor city = 50, any = 10
         let score = 10;
