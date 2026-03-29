@@ -1,51 +1,47 @@
 
 
-# Plano: Painel de KPIs para Analista
+# Plano: Responsividade do Dashboard (Mobile + Tablet)
 
-## Objetivo
+## Problemas Identificados
 
-Criar uma seção de KPIs no dashboard principal (`Index.tsx`) com 5 metricas operacionais calculadas a partir dos dados existentes nas tabelas `routes`, `orders`, `route_trucks` e `delivery_executions`.
+1. **Sidebar fixa `w-60`** — no mobile ocupa 240px e não colapsa, comprimindo o conteúdo
+2. **Container `p-8 md:p-10`** — padding excessivo no mobile
+3. **KPI grid `sm:grid-cols-2 lg:grid-cols-5`** — 5 colunas com cards largos funciona, mas o valor `text-4xl` e o ícone `h-14 w-14` ficam grandes demais no mobile
+4. **Rotas recentes** — layout de cada item com data ao lado não cabe em telas estreitas
+5. **Bottom cards `lg:grid-cols-4`** — comprime demais em tablet
 
-## Metricas Propostas
+## Mudanças
 
-| # | KPI | Calculo | Fonte |
-|---|---|---|---|
-| 1 | **Pedidos no Periodo** | Total de pedidos (hoje / semana / mes) com comparativo vs periodo anterior | `routes.total_orders` |
-| 2 | **Peso Total Movimentado** | Soma de `total_weight_kg` no periodo, com trend % | `routes.total_weight_kg` |
-| 3 | **Taxa de Ocupacao Media** | Media de `(rt.total_weight_kg / truck.capacity_kg) * 100` por caminhao | `route_trucks` + `trucks` |
-| 4 | **Entregas Concluidas** | Contagem de `delivery_executions` com status `entregue` vs total | `delivery_executions` |
-| 5 | **Cidades Atendidas** | Distinct cities extraidas dos pedidos no periodo | `orders.city` |
+### 1. `AppSidebar.tsx` — Sidebar responsiva
+- No mobile (`< md`): sidebar vira um **drawer/sheet** acionado por botão hamburger
+- No desktop: sidebar fixa como está
+- Adicionar botão hamburger no header mobile
 
-## Implementacao
+### 2. `AppLayout.tsx` — Padding e header mobile
+- Reduzir padding: `p-4 sm:p-6 md:p-10`
+- Adicionar header mobile com hamburger + logo quando sidebar está escondida
 
-### 1. Hook `useKpiMetrics.ts`
-- Consulta `routes` do ultimo mes com `total_orders`, `total_weight_kg`, `created_at`
-- Consulta `route_trucks` com join em `trucks` para calcular ocupacao
-- Consulta `delivery_executions` para taxa de conclusao
-- Consulta `orders.city` distinct para cidades atendidas
-- Calcula trends comparando periodo atual vs anterior (semana atual vs anterior)
-- Filtro por periodo: hoje, 7 dias, 30 dias (selecionavel)
+### 3. `FuturisticStatsCard.tsx` — Escalar para mobile
+- Valor: `text-2xl sm:text-4xl`
+- Ícone container: `h-10 w-10 sm:h-14 sm:w-14`
+- Padding: `p-4 sm:p-5`
 
-### 2. Componente `KpiDashboard.tsx`
-- Grid de 5 cards usando o `FuturisticStatsCard` ja existente
-- Seletor de periodo (Hoje / 7 dias / 30 dias) no header
-- Progress bar na ocupacao media
-- Cada card com trend indicator (seta verde/vermelha + %)
+### 4. `KpiDashboard.tsx` — Grid mobile
+- Skeleton e grid: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-5` (já é assim, ok)
+- Period selector: botões menores no mobile `px-2 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm`
 
-### 3. Integracao no `Index.tsx`
-- Inserir o `KpiDashboard` entre o header e a secao de "Rotas Recentes"
-- Substituir os 4 `StatsCard` atuais pelo novo painel (para nao duplicar)
+### 5. `Index.tsx` — Rotas recentes e bottom cards
+- Route items: empilhar nome/badge em cima e data embaixo no mobile (`flex-col sm:flex-row`)
+- Reduzir `space-y-8` para `space-y-6` no mobile
+- Header h1: `text-2xl sm:text-3xl`
 
-## O que NAO muda
-- Nenhuma tabela nova necessaria (todos os dados ja existem)
-- Nenhuma migration
-- RLS policies existentes ja cobrem os SELECTs necessarios
+## Arquivos afetados
 
-## Arquivos
-
-| Arquivo | Mudanca |
+| Arquivo | Mudança |
 |---|---|
-| `src/hooks/useKpiMetrics.ts` | Novo — queries + calculos |
-| `src/components/dashboard/KpiDashboard.tsx` | Novo — grid de 5 KPIs com filtro de periodo |
-| `src/pages/Index.tsx` | Trocar stats cards antigos pelo KpiDashboard |
+| `src/components/layout/AppSidebar.tsx` | Drawer mobile com Sheet |
+| `src/components/layout/AppLayout.tsx` | Header mobile + padding responsivo |
+| `src/components/dashboard/FuturisticStatsCard.tsx` | Tamanhos responsivos |
+| `src/components/dashboard/KpiDashboard.tsx` | Period selector menor no mobile |
+| `src/pages/Index.tsx` | Layout responsivo para rotas e cards |
 
