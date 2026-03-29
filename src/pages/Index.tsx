@@ -13,14 +13,6 @@ export default function Index() {
   const { activeTrucks, totalCapacity, isLoading: loadingTrucks } = useTrucks();
   const { routes, isLoading: loadingRoutes } = useRoutes();
 
-  const todayRoutes = routes.filter((r) => {
-    const today = new Date().toDateString();
-    return new Date(r.created_at).toDateString() === today;
-  });
-
-  const totalOrdersToday = todayRoutes.reduce((sum, r) => sum + r.total_orders, 0);
-  const totalWeightToday = todayRoutes.reduce((sum, r) => sum + Number(r.total_weight_kg), 0);
-
   const recentRoutes = routes.slice(0, 5);
 
   const formatWeight = (weight: number) => {
