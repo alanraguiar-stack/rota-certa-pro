@@ -1,4 +1,4 @@
-import { Package, Truck, Route, Clock, ArrowRight, Plus, Activity, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { Truck, Route, Clock, ArrowRight, Plus, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -7,40 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useRoutes } from '@/hooks/useRoutes';
 import { cn } from '@/lib/utils';
-
-function StatsCard({ 
-  title, 
-  value, 
-  subtitle, 
-  icon: Icon, 
-  delay = 0 
-}: { 
-  title: string; 
-  value: string | number; 
-  subtitle: string; 
-  icon: React.ElementType;
-  delay?: number;
-}) {
-  return (
-    <Card 
-      className="border opacity-0 animate-fade-in-up"
-      style={{ animationDelay: `${delay}ms`, animationFillMode: 'forwards' }}
-    >
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-3xl font-bold tracking-tight">{value}</p>
-            <p className="text-sm text-muted-foreground">{subtitle}</p>
-          </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/8">
-            <Icon className="h-5 w-5 text-primary" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+import { KpiDashboard } from '@/components/dashboard/KpiDashboard';
 
 export default function Index() {
   const { activeTrucks, totalCapacity, isLoading: loadingTrucks } = useTrucks();
