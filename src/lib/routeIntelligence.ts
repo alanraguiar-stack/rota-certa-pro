@@ -59,6 +59,9 @@ export interface FleetAnalysis {
   recommendedTrucks: Truck[];
   reasoning: string[];
   isOptimal: boolean;
+  dominantCriteria?: 'weight' | 'volume' | 'balanced';
+  trucksByWeight?: number;
+  trucksByVolume?: number;
 }
 
 export interface DistributionValidation {
@@ -226,14 +229,58 @@ export function analyzeFleetRequirements(
     (sum, t) => sum + Number(t.capacity_kg), 0
   );
   
-  const isOptimal = totalSelectedCapacity >= totalWeightWithMargin;
+  // Passo 4: Verificar critério de volume (entregas por caminhão)
+  const totalOrders = orders.length > 0 ? orders.filter(o => o.isValid !== false).length : 0;
+  const maxDeliveriesPerTruck = 28; // 25 base + 3 margem
+  const trucksByWeight = selectedTrucks.length;
+  const trucksByVolume = totalOrders > 0 ? Math.ceil(totalOrders / maxDeliveriesPerTruck) : 0;
+
+  let dominantCriteria: 'weight' | 'volume' | 'balanced' = 'balanced';
+
+  if (totalOrders > 0 && trucksByVolume > trucksByWeight) {
+    dominantCriteria = 'volume';
+    reasoning.push(
+      `📦 ${totalOrders} pedidos ÷ ${maxDeliveriesPerTruck} entregas/caminhão = ${trucksByVolume} caminhões (por volume)`
+    );
+    reasoning.push(
+      `⚖️ Por peso: ${trucksByWeight} caminhões | Por volume: ${trucksByVolume} caminhões`
+    );
+    reasoning.push(
+      `📊 Critério dominante: **volume** → necessário ${trucksByVolume} caminhões`
+    );
+    
+    // Add more trucks to meet volume requirement
+    const sortedRemaining = [...availableTrucks]
+      .filter(t => !selectedTrucks.some(s => s.id === t.id))
+      .sort((a, b) => Number(b.capacity_kg) - Number(a.capacity_kg));
+    
+    while (selectedTrucks.length < trucksByVolume && sortedRemaining.length > 0) {
+      const extra = sortedRemaining.shift()!;
+      selectedTrucks.push(extra);
+      reasoning.push(
+        `+ ${extra.plate} (${formatWeight(Number(extra.capacity_kg))}) adicionado por critério de volume`
+      );
+    }
+  } else if (totalOrders > 0) {
+    dominantCriteria = trucksByVolume === trucksByWeight ? 'balanced' : 'weight';
+    reasoning.push(
+      `📦 ${totalOrders} pedidos ÷ ${maxDeliveriesPerTruck} = ${trucksByVolume} caminhões (por volume) — peso é o critério dominante`
+    );
+  }
+
+  // Recalculate capacity after possible additions
+  const finalCapacity = selectedTrucks.reduce(
+    (sum, t) => sum + Number(t.capacity_kg), 0
+  );
+  
+  const isOptimal = finalCapacity >= totalWeightWithMargin;
   
   if (!isOptimal) {
     reasoning.push(
-      `⚠️ AVISO: Capacidade total da frota (${formatWeight(totalSelectedCapacity)}) é insuficiente para a carga`
+      `⚠️ AVISO: Capacidade total da frota (${formatWeight(finalCapacity)}) é insuficiente para a carga`
     );
   } else {
-    const utilizationPercent = Math.round((totalWeight / totalSelectedCapacity) * 100);
+    const utilizationPercent = Math.round((totalWeight / finalCapacity) * 100);
     reasoning.push(
       `✓ Frota selecionada: ${selectedTrucks.length} caminhões com ${utilizationPercent}% de ocupação`
     );
@@ -247,6 +294,9 @@ export function analyzeFleetRequirements(
     recommendedTrucks: selectedTrucks,
     reasoning,
     isOptimal,
+    dominantCriteria,
+    trucksByWeight,
+    trucksByVolume,
   };
 }
 

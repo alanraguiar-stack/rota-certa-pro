@@ -595,7 +595,8 @@ export function autoComposeRoute(
         const remainingWeight = capacity - comp.totalWeight;
         const remainingSlots = maxDel - comp.orders.length;
 
-        if (remainingWeight < orphan.weight_kg || remainingSlots <= 0) continue;
+        if (remainingWeight < orphan.weight_kg) continue;
+        if (remainingSlots <= -3) continue; // permite até 3 extras por caminhão
 
         // Affinity score: same city = 100, neighbor city = 50, any = 10
         let score = 10;
@@ -634,7 +635,62 @@ export function autoComposeRoute(
         assignedOrderKeys.add(orderKey(orphan));
         reasoning.push(`[Fallback] ${orphan.client_name} (${orphanCity}) → ${bestComp.truck.plate}`);
       } else {
-        warnings.push(`Sem capacidade para: ${orphan.client_name} (${orphanCity}, ${orphan.weight_kg}kg)`);
+        // Will be handled in forced second pass below
+      }
+    }
+  }
+
+  // Step 5d.6: Forced second pass — guarantee 100% distribution (ignore delivery limits, respect weight only)
+  const stillOrphaned = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
+  if (stillOrphaned.length > 0) {
+    reasoning.push(`[Fallback Forçado] ${stillOrphaned.length} pedidos sem slot — ignorando limite de entregas`);
+
+    for (const orphan of stillOrphaned) {
+      const orphanCity = normalizeCityName(orphan.city || orphan.geocoded.city || '');
+      let bestComp: TruckComposition | null = null;
+      let bestScore = -Infinity;
+
+      for (const comp of compositions) {
+        const capacity = Number(comp.truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+        const remainingWeight = capacity - comp.totalWeight;
+        if (remainingWeight < orphan.weight_kg) continue; // only respect weight
+
+        let score = 10;
+        if (comp.cities.includes(orphanCity)) {
+          score = 100; // same city — best fit
+        } else {
+          const neighbors = TERRITORY_RULES.flatMap(r => 
+            r.anchorCity === orphanCity ? r.allowedFillCities : 
+            r.allowedFillCities.includes(orphanCity) ? [r.anchorCity] : []
+          );
+          if (comp.cities.some(c => neighbors.includes(c))) {
+            score = 50;
+          }
+        }
+        score += (remainingWeight / capacity) * 10;
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestComp = comp;
+        }
+      }
+
+      if (bestComp) {
+        bestComp.orders.push(orphan);
+        bestComp.totalWeight += orphan.weight_kg;
+        bestComp.occupancyPercent = Math.round(
+          (bestComp.totalWeight / Number(bestComp.truck.capacity_kg)) * 100
+        );
+        bestComp.estimatedDeliveries = bestComp.orders.length;
+        if (!bestComp.cities.includes(orphanCity) && orphanCity) {
+          bestComp.cities.push(orphanCity);
+        }
+        assignedOrderKeys.add(orderKey(orphan));
+        const maxDel = bestComp.truck.max_deliveries ? Number(bestComp.truck.max_deliveries) : 25;
+        warnings.push(`${orphan.client_name} (${orphanCity}) alocado acima do limite ideal (${bestComp.orders.length}/${maxDel}) em ${bestComp.truck.plate}`);
+        reasoning.push(`[Forçado] ${orphan.client_name} (${orphanCity}) → ${bestComp.truck.plate}`);
+      } else {
+        warnings.push(`Sem capacidade de peso para: ${orphan.client_name} (${orphanCity}, ${orphan.weight_kg}kg)`);
       }
     }
   }

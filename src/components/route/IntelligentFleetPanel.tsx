@@ -142,7 +142,7 @@ export function IntelligentFleetPanel({
   return (
     <div className={cn("space-y-6", disabled && "opacity-70 pointer-events-none")}>
       {/* Header com Métricas Principais */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">
@@ -199,6 +199,36 @@ export function IntelligentFleetPanel({
               <div>
                 <p className="text-2xl font-bold">{utilizationPercent}%</p>
                 <p className="text-sm text-muted-foreground">Ocupação</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* New: Volume card */}
+        <Card className={cn(
+          "border",
+          fleetAnalysis.dominantCriteria === 'volume' 
+            ? "bg-warning/5 border-warning/30" 
+            : "bg-muted/5"
+        )}>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                "flex h-10 w-10 items-center justify-center rounded-lg",
+                fleetAnalysis.dominantCriteria === 'volume' ? "bg-warning/10" : "bg-muted/20"
+              )}>
+                <Sparkles className={cn(
+                  "h-5 w-5",
+                  fleetAnalysis.dominantCriteria === 'volume' ? "text-warning" : "text-muted-foreground"
+                )} />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{totalOrders}</p>
+                <p className="text-sm text-muted-foreground">
+                  {fleetAnalysis.dominantCriteria === 'volume' 
+                    ? 'Volume é dominante' 
+                    : 'Pedidos'}
+                </p>
               </div>
             </div>
           </CardContent>
