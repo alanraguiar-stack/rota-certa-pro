@@ -80,13 +80,13 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
   const fetchAccessCodes = async (userIds: string[]) => {
     const { data } = await supabase
       .from('driver_access_codes')
-      .select('user_id, access_code, driver_password')
+      .select('user_id, access_code')
       .in('user_id', userIds);
 
     if (data) {
       const map: Record<string, DriverAccessInfo> = {};
       for (const d of data) {
-        map[d.user_id] = { access_code: d.access_code, driver_password: d.driver_password };
+        map[d.user_id] = { access_code: d.access_code, driver_password: '' };
       }
       setDriverAccessInfo(prev => ({ ...prev, ...map }));
     }

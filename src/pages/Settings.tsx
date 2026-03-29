@@ -80,12 +80,12 @@ export default function Settings() {
       // Fetch access codes for all drivers
       const { data: codes } = await supabase
         .from('driver_access_codes')
-        .select('user_id, access_code, driver_password');
+        .select('user_id, access_code');
       
       if (codes) {
         const codesMap: Record<string, { accessCode: string; password: string }> = {};
         for (const c of codes) {
-          codesMap[c.user_id] = { accessCode: c.access_code, password: c.driver_password };
+          codesMap[c.user_id] = { accessCode: c.access_code, password: '' };
         }
         setAccessCodes(codesMap);
       }
@@ -199,10 +199,10 @@ export default function Settings() {
       const allUsers = await getAllUsers();
       setUsers(allUsers);
       // Refresh access codes
-      const { data: codes } = await supabase.from('driver_access_codes').select('user_id, access_code, driver_password');
+      const { data: codes } = await supabase.from('driver_access_codes').select('user_id, access_code');
       if (codes) {
         const codesMap: Record<string, { accessCode: string; password: string }> = {};
-        for (const c of codes) codesMap[c.user_id] = { accessCode: c.access_code, password: c.driver_password };
+        for (const c of codes) codesMap[c.user_id] = { accessCode: c.access_code, password: '' };
         setAccessCodes(codesMap);
       }
     } catch (err: any) {
