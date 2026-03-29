@@ -1,69 +1,102 @@
 
 
-# Plano: Garantir 100% de Distribuição + Recomendação Inteligente de Frota
+# Plano: Corrigir Todas as Vulnerabilidades de Segurança (1 Error + 4 Warnings)
 
-## Mudança 1: Margem de +3 pedidos no fallback (autoRouterEngine.ts)
+## Resumo Rápido
 
-Na linha 598, o fallback atual bloqueia pedidos quando `remainingSlots <= 0`. A mudança:
+| # | Severidade | Problema | Status |
+|---|---|---|---|
+| 1 | ERROR | Senhas expostas via RLS anon | **Já corrigido** — a migration `20260329201451` já removeu a política. O scan está desatualizado. |
+| 2 | WARN | Perfil sem DELETE (GDPR) | Precisa de migration |
+| 3 | WARN | Senhas em texto simples | Precisa de bcrypt nas edge functions |
+| 4 | WARN | Leaked password protection desabilitado | Configuração no Cloud |
+| 5 | WARN | Vulnerabilidade no pacote xlsx | Atualizar dependência |
 
-```
-// ANTES
-if (remainingWeight < orphan.weight_kg || remainingSlots <= 0) continue;
+---
 
-// DEPOIS  
-if (remainingWeight < orphan.weight_kg) continue;
-if (remainingSlots <= -3) continue; // permite até 3 extras por caminhão
-```
+## Fix 1: ERROR — Anon RLS (Já Resolvido)
 
-Adicionalmente, após o loop de fallback (linha 636-639), adicionar uma **segunda passagem forçada** para quaisquer pedidos que ainda sobrarem — ignorando limite de entregas completamente, respeitando apenas peso:
+A política `"Anon can read access codes for login"` já foi removida na migration `20260329201451`. A tabela `driver_access_codes` agora só tem políticas para `admin` e `motorista autenticado`. O scan precisa ser re-executado para refletir a correção.
 
-```typescript
-const stillOrphaned = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
-for (const orphan of stillOrphaned) {
-  // Encontrar caminhão com melhor afinidade de cidade + peso disponível
-  // Alocar mesmo acima do limite, gerar warning
-}
-```
+**Ação**: Nenhuma. Apenas re-rodar o scan.
 
-Isso garante que **zero pedidos** fiquem sem caminhão, desde que haja capacidade de peso.
+---
 
-## Mudança 2: Recomendação inteligente considerando volume de pedidos (routeIntelligence.ts)
+## Fix 2: WARN — Política DELETE no profiles (GDPR)
 
-A função `analyzeFleetRequirements` hoje usa apenas **peso** para recomendar frota. Adicionar lógica de **entregas por caminhão**:
-
-```typescript
-// Após calcular caminhões por peso, verificar por volume de entregas
-const maxDeliveriesPerTruck = 28; // 25 + margem de 3
-const trucksByDeliveryCount = Math.ceil(totalOrders / maxDeliveriesPerTruck);
-
-// Usar o MAIOR entre os dois critérios
-const minimumTrucks = Math.max(trucksByWeight, trucksByDeliveryCount);
+Migration SQL:
+```sql
+CREATE POLICY "Users can delete their own profile"
+  ON public.profiles FOR DELETE
+  USING (auth.uid() = user_id);
 ```
 
-Raciocínio adicionado ao reasoning:
-- "102 pedidos ÷ 28 entregas/caminhão = 4 caminhões (por volume)"
-- "8.500kg ÷ 3.000kg/caminhão = 3 caminhões (por peso)"
-- "Critério dominante: volume → 4 caminhões"
+Isso permite que usuários exerçam direito de exclusão de dados. Motoristas (gerenciados por admin) não conseguem deletar porque o admin controla a conta — mas o mecanismo fica disponível.
 
-Se o número de caminhões por volume for maior que por peso, o sistema avisa: "A quantidade de entregas exige mais caminhões do que o peso sozinho."
+---
 
-## Mudança 3: Conciliar peso e volume no IntelligentFleetPanel
+## Fix 3: WARN — Senhas em Texto Simples → bcrypt
 
-No painel de frota, mostrar ambos os critérios (peso e volume) para o analista entender:
-- Card adicional mostrando "Entregas/caminhão" ao lado de "Peso/caminhão"
-- Se o critério dominante for volume, destacar visualmente
+Duas edge functions precisam de alteração:
 
-## O que NÃO muda
+### `create-test-driver/index.ts`
+- Importar bcrypt: `import * as bcrypt from 'https://deno.land/x/bcrypt@v0.4.1/mod.ts'`
+- Antes de salvar em `driver_access_codes`, hashear a senha:
+  ```typescript
+  const hashedPassword = await bcrypt.hash(password)
+  // Salvar hashedPassword na coluna driver_password
+  ```
+- Continuar usando a senha original para criar o user no Auth (o Auth tem seu próprio hash interno)
+- Retornar a senha original na response (para o admin copiar e dar ao motorista)
 
-- Divisão de territórios e agrupamento por cidade
-- Sequenciamento (nearest-neighbor)
-- Regras de âncora e prioridade de bairros
+### `driver-login/index.ts`
+- Importar bcrypt
+- Substituir comparação de string por:
+  ```typescript
+  const valid = await bcrypt.compare(password, codeData.driver_password)
+  if (!valid) return 401
+  ```
+- Para o `signInWithPassword`, usar a senha fornecida pelo usuário (não o hash)
 
-## Arquivos afetados
+### `DriverAssignment.tsx`
+- O componente mostra `accessInfo.driver_password` para o admin copiar. Após o hash, esse campo terá o hash (inútil para o admin).
+- Solução: Não exibir a senha armazenada. Ao invés disso, mostrar apenas na criação do motorista (quando a senha original é retornada pela edge function). Remover a exibição de senha do painel de atribuição ou adicionar um botão "Resetar senha" que gera nova senha via edge function.
+
+### Migração de senhas existentes
+- Criar edge function `migrate-driver-passwords` que lê todas as senhas plaintext, hasheia com bcrypt, e atualiza. Executar uma vez e deletar.
+
+---
+
+## Fix 4: WARN — Leaked Password Protection (HIBP)
+
+Usar a ferramenta `configure_auth` para habilitar o HIBP check. Isso bloqueia senhas que apareceram em vazamentos conhecidos.
+
+---
+
+## Fix 5: WARN — Vulnerabilidade no xlsx
+
+O pacote `xlsx@^0.18.5` tem vulnerabilidades de Prototype Pollution e ReDoS. Substituir por `xlsx` versão mais recente ou usar alternativa segura como `read-excel-file` ou `exceljs`. Verificar uso no código e trocar se necessário.
+
+---
+
+## Ordem de Execução
+
+1. Migration DELETE policy (profiles) — rápido, sem impacto
+2. Habilitar HIBP — configuração
+3. Atualizar bcrypt nas edge functions (create-test-driver + driver-login)
+4. Criar edge function de migração de senhas existentes
+5. Ajustar DriverAssignment.tsx para não exibir hash
+6. Atualizar/substituir xlsx
+
+## Arquivos Afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/autoRouterEngine.ts` | Margem de +3 no fallback + segunda passagem forçada |
-| `src/lib/routeIntelligence.ts` | Adicionar critério de volume na recomendação de frota |
-| `src/components/route/IntelligentFleetPanel.tsx` | Mostrar critério dominante (peso vs volume) |
+| Migration SQL | DELETE policy em profiles |
+| `supabase/functions/create-test-driver/index.ts` | bcrypt hash na criação |
+| `supabase/functions/driver-login/index.ts` | bcrypt compare no login |
+| `supabase/functions/migrate-driver-passwords/index.ts` | Nova — migração única |
+| `src/components/route/DriverAssignment.tsx` | Remover exibição de senha hasheada |
+| `package.json` | Atualizar/substituir xlsx |
+| Auth config | Habilitar HIBP |
 
