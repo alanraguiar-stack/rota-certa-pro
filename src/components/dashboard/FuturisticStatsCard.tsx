@@ -66,7 +66,7 @@ export function FuturisticStatsCard({
   return (
     <div
       className={cn(
-        "group relative overflow-hidden rounded-2xl border bg-card p-5 transition-all duration-500",
+        "group relative overflow-hidden rounded-2xl border bg-card p-4 sm:p-5 transition-all duration-500",
         "hover:-translate-y-1 hover:border-primary/30",
         config.borderGlow,
         glowing && "animate-glow-pulse",
