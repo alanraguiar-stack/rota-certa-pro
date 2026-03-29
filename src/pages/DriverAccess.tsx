@@ -24,23 +24,14 @@ export default function DriverAccess() {
     }
   }, [user, navigate]);
 
-  // Look up driver name from code
+  // Look up driver name from code via secure edge function
   useEffect(() => {
     if (!code) return;
     (async () => {
-      const { data } = await supabase
-        .from('driver_access_codes' as any)
-        .select('user_id')
-        .eq('access_code', code.toUpperCase().trim())
-        .single();
-      if (data) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('user_id', (data as any).user_id)
-          .single();
-        if (profile?.full_name) setDriverName(profile.full_name);
-      }
+      const { data } = await supabase.functions.invoke('driver-lookup', {
+        body: { accessCode: code },
+      });
+      if (data?.fullName) setDriverName(data.fullName);
     })();
   }, [code]);
 
