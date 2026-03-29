@@ -92,13 +92,8 @@ export default function Index() {
           </Button>
         </div>
 
-        {/* Stats */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatsCard title="Entregas Hoje" value={totalOrdersToday} subtitle={`${todayRoutes.length} rotas criadas`} icon={Package} delay={50} />
-          <StatsCard title="Peso Total" value={formatWeight(totalWeightToday)} subtitle="Processado hoje" icon={TrendingUp} delay={100} />
-          <StatsCard title="Frota Disponível" value={activeTrucks.length} subtitle={`Capacidade: ${formatWeight(totalCapacity)}`} icon={Truck} delay={150} />
-          <StatsCard title="Rotas Totais" value={routes.length} subtitle="No sistema" icon={Route} delay={200} />
-        </div>
+        {/* KPI Dashboard */}
+        <KpiDashboard />
 
         {/* Recent Routes */}
         <Card>
