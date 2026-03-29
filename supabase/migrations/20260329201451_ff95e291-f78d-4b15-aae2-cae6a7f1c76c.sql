@@ -1,0 +1,1 @@
+DROP POLICY "Anon can read access codes for login" ON public.driver_access_codes;
