@@ -223,7 +223,7 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
                 )}
               </div>
 
-              {/* Access info for assigned driver */}
+              {/* Access info for assigned driver — only show link, password is hashed */}
               {existing && accessInfo && (
                 <div className="ml-0 rounded-md bg-muted/50 p-2 space-y-1">
                   <div className="flex items-center gap-2 text-xs">
@@ -243,13 +243,13 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
                   <div className="flex items-center gap-2 text-xs">
                     <KeyRound className="h-3 w-3 text-muted-foreground" />
                     <span className="text-muted-foreground flex-1 font-mono">
-                      Senha: {accessInfo.driver_password}
+                      Código: {accessInfo.access_code}
                     </span>
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-6 w-6"
-                      onClick={() => copyToClipboard(accessInfo.driver_password, 'Senha')}
+                      onClick={() => copyToClipboard(accessInfo.access_code, 'Código')}
                     >
                       <Copy className="h-3 w-3" />
                     </Button>

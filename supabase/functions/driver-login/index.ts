@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import * as bcrypt from 'https://deno.land/x/bcrypt@v0.4.1/mod.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -32,8 +33,9 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Código de acesso inválido' }), { status: 404, headers: corsHeaders })
     }
 
-    // Verify password matches
-    if (codeData.driver_password !== password) {
+    // Verify password using bcrypt compare
+    const isValid = await bcrypt.compare(password, codeData.driver_password)
+    if (!isValid) {
       return new Response(JSON.stringify({ error: 'Senha incorreta' }), { status: 401, headers: corsHeaders })
     }
 
@@ -43,12 +45,12 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Usuário não encontrado' }), { status: 404, headers: corsHeaders })
     }
 
-    // Generate a session for this user
+    // Generate a session — use the plain password provided by user
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
     const loginClient = createClient(supabaseUrl, anonKey)
     const { data: session, error: loginErr } = await loginClient.auth.signInWithPassword({
       email: userData.user.email!,
-      password: codeData.driver_password,
+      password: password,
     })
 
     if (loginErr) {

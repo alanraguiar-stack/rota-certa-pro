@@ -1,4 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import * as bcrypt from 'https://deno.land/x/bcrypt@v0.4.1/mod.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -50,13 +51,16 @@ Deno.serve(async (req) => {
     const accessCode = generateAccessCode()
     const driverNumber = Date.now() % 100000
     const email = `motorista_${driverNumber}@rotacerta.internal`
-    const password = driverPassword && driverPassword.length >= 6 ? driverPassword : `rc${driverNumber}${Math.random().toString(36).substring(2, 6)}`
+    const plainPassword = driverPassword && driverPassword.length >= 6 ? driverPassword : `rc${driverNumber}${Math.random().toString(36).substring(2, 6)}`
     const fullName = driverName || `Motorista ${driverNumber}`
 
-    // Create user with email confirmed
+    // Hash the password before storing
+    const hashedPassword = await bcrypt.hash(plainPassword)
+
+    // Create user with email confirmed (Auth has its own internal hash)
     const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
       email,
-      password,
+      password: plainPassword,
       email_confirm: true,
       user_metadata: { full_name: fullName },
     })
@@ -80,15 +84,16 @@ Deno.serve(async (req) => {
       role: 'motorista',
     })
 
-    // Store access code
+    // Store access code with HASHED password
     await supabase.from('driver_access_codes').insert({
       user_id: userId,
       access_code: accessCode,
-      driver_password: password,
+      driver_password: hashedPassword,
     })
 
+    // Return plain password so admin can share it with the driver
     return new Response(
-      JSON.stringify({ accessCode, password, fullName, userId }),
+      JSON.stringify({ accessCode, password: plainPassword, fullName, userId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
