@@ -1,4 +1,4 @@
-import { Package, Truck, Route, Clock, ArrowRight, Plus, Activity, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { Truck, Route, Clock, ArrowRight, Plus, CheckCircle2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -7,52 +7,11 @@ import { Badge } from '@/components/ui/badge';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useRoutes } from '@/hooks/useRoutes';
 import { cn } from '@/lib/utils';
-
-function StatsCard({ 
-  title, 
-  value, 
-  subtitle, 
-  icon: Icon, 
-  delay = 0 
-}: { 
-  title: string; 
-  value: string | number; 
-  subtitle: string; 
-  icon: React.ElementType;
-  delay?: number;
-}) {
-  return (
-    <Card 
-      className="border opacity-0 animate-fade-in-up"
-      style={{ animationDelay: `${delay}ms`, animationFillMode: 'forwards' }}
-    >
-      <CardContent className="p-5">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <p className="text-sm text-muted-foreground">{title}</p>
-            <p className="text-3xl font-bold tracking-tight">{value}</p>
-            <p className="text-sm text-muted-foreground">{subtitle}</p>
-          </div>
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/8">
-            <Icon className="h-5 w-5 text-primary" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+import { KpiDashboard } from '@/components/dashboard/KpiDashboard';
 
 export default function Index() {
   const { activeTrucks, totalCapacity, isLoading: loadingTrucks } = useTrucks();
   const { routes, isLoading: loadingRoutes } = useRoutes();
-
-  const todayRoutes = routes.filter((r) => {
-    const today = new Date().toDateString();
-    return new Date(r.created_at).toDateString() === today;
-  });
-
-  const totalOrdersToday = todayRoutes.reduce((sum, r) => sum + r.total_orders, 0);
-  const totalWeightToday = todayRoutes.reduce((sum, r) => sum + Number(r.total_weight_kg), 0);
 
   const recentRoutes = routes.slice(0, 5);
 
@@ -125,13 +84,8 @@ export default function Index() {
           </Button>
         </div>
 
-        {/* Stats */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatsCard title="Entregas Hoje" value={totalOrdersToday} subtitle={`${todayRoutes.length} rotas criadas`} icon={Package} delay={50} />
-          <StatsCard title="Peso Total" value={formatWeight(totalWeightToday)} subtitle="Processado hoje" icon={TrendingUp} delay={100} />
-          <StatsCard title="Frota Disponível" value={activeTrucks.length} subtitle={`Capacidade: ${formatWeight(totalCapacity)}`} icon={Truck} delay={150} />
-          <StatsCard title="Rotas Totais" value={routes.length} subtitle="No sistema" icon={Route} delay={200} />
-        </div>
+        {/* KPI Dashboard */}
+        <KpiDashboard />
 
         {/* Recent Routes */}
         <Card>
