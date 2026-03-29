@@ -1,31 +1,69 @@
 
 
-# Fix: Remover Exposição de Senhas via RLS
+# Plano: Garantir 100% de Distribuição + Recomendação Inteligente de Frota
 
-## Problema
+## Mudança 1: Margem de +3 pedidos no fallback (autoRouterEngine.ts)
 
-A política `Anon can read access codes for login` permite que qualquer pessoa não autenticada leia TODAS as linhas de `driver_access_codes`, incluindo `driver_password` em texto simples.
+Na linha 598, o fallback atual bloqueia pedidos quando `remainingSlots <= 0`. A mudança:
 
-## Causa
+```
+// ANTES
+if (remainingWeight < orphan.weight_kg || remainingSlots <= 0) continue;
 
-O `DriverAccess.tsx` faz uma query client-side para buscar o nome do motorista a partir do `access_code` — por isso a política anon existe. Porém isso é desnecessário porque o login já passa pela edge function `driver-login`.
-
-## Solução
-
-1. **Remover a política RLS anon** via migration:
-```sql
-DROP POLICY "Anon can read access codes for login" ON public.driver_access_codes;
+// DEPOIS  
+if (remainingWeight < orphan.weight_kg) continue;
+if (remainingSlots <= -3) continue; // permite até 3 extras por caminhão
 ```
 
-2. **Mover a busca do nome do motorista para a edge function `driver-login`**: Retornar `fullName` na resposta da edge function (que já usa service role key e já faz o lookup do `user_id`). Adicionar uma rota ou campo que retorne o nome sem precisar de senha (apenas com `accessCode`).
+Adicionalmente, após o loop de fallback (linha 636-639), adicionar uma **segunda passagem forçada** para quaisquer pedidos que ainda sobrarem — ignorando limite de entregas completamente, respeitando apenas peso:
 
-3. **Alternativa mais simples**: Criar uma nova edge function `driver-lookup` que recebe apenas o `accessCode`, valida que existe, e retorna apenas o `full_name` — sem expor senha ou user_id.
+```typescript
+const stillOrphaned = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
+for (const orphan of stillOrphaned) {
+  // Encontrar caminhão com melhor afinidade de cidade + peso disponível
+  // Alocar mesmo acima do limite, gerar warning
+}
+```
 
-4. **Atualizar `DriverAccess.tsx`**: Substituir a query direta ao `driver_access_codes` por uma chamada à edge function `driver-lookup`.
+Isso garante que **zero pedidos** fiquem sem caminhão, desde que haja capacidade de peso.
+
+## Mudança 2: Recomendação inteligente considerando volume de pedidos (routeIntelligence.ts)
+
+A função `analyzeFleetRequirements` hoje usa apenas **peso** para recomendar frota. Adicionar lógica de **entregas por caminhão**:
+
+```typescript
+// Após calcular caminhões por peso, verificar por volume de entregas
+const maxDeliveriesPerTruck = 28; // 25 + margem de 3
+const trucksByDeliveryCount = Math.ceil(totalOrders / maxDeliveriesPerTruck);
+
+// Usar o MAIOR entre os dois critérios
+const minimumTrucks = Math.max(trucksByWeight, trucksByDeliveryCount);
+```
+
+Raciocínio adicionado ao reasoning:
+- "102 pedidos ÷ 28 entregas/caminhão = 4 caminhões (por volume)"
+- "8.500kg ÷ 3.000kg/caminhão = 3 caminhões (por peso)"
+- "Critério dominante: volume → 4 caminhões"
+
+Se o número de caminhões por volume for maior que por peso, o sistema avisa: "A quantidade de entregas exige mais caminhões do que o peso sozinho."
+
+## Mudança 3: Conciliar peso e volume no IntelligentFleetPanel
+
+No painel de frota, mostrar ambos os critérios (peso e volume) para o analista entender:
+- Card adicional mostrando "Entregas/caminhão" ao lado de "Peso/caminhão"
+- Se o critério dominante for volume, destacar visualmente
+
+## O que NÃO muda
+
+- Divisão de territórios e agrupamento por cidade
+- Sequenciamento (nearest-neighbor)
+- Regras de âncora e prioridade de bairros
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| Migration SQL | `DROP POLICY "Anon can read access codes for login"` |
-| `supabase/functions/driver-lookup/index.ts` | Nova edge function: recebe `accessCode`, retorna `full_name` |
-| `src/pages/DriverAccess.tsx` | Trocar query client-side por `supabase.functions.invoke('driver-lookup')` |
+| `src/lib/autoRouterEngine.ts` | Margem de +3 no fallback + segunda passagem forçada |
+| `src/lib/routeIntelligence.ts` | Adicionar critério de volume na recomendação de frota |
+| `src/components/route/IntelligentFleetPanel.tsx` | Mostrar critério dominante (peso vs volume) |
 
