@@ -59,6 +59,9 @@ export interface FleetAnalysis {
   recommendedTrucks: Truck[];
   reasoning: string[];
   isOptimal: boolean;
+  dominantCriteria?: 'weight' | 'volume' | 'balanced';
+  trucksByWeight?: number;
+  trucksByVolume?: number;
 }
 
 export interface DistributionValidation {
