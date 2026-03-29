@@ -124,10 +124,10 @@ export default function Index() {
                     <Link
                       key={route.id}
                       to={`/rota/${route.id}`}
-                      className="flex items-center justify-between rounded-lg p-3 transition-colors duration-150 hover:bg-muted/50"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between rounded-lg p-3 gap-1 sm:gap-3 transition-colors duration-150 hover:bg-muted/50"
                     >
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium">{route.name}</p>
                           <Badge variant={statusConfig.variant} className="text-xs">
                             {statusConfig.label}
@@ -138,7 +138,7 @@ export default function Index() {
                         </p>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-sm text-muted-foreground">{formatDate(route.created_at)}</span>
+                        <span className="text-xs sm:text-sm text-muted-foreground">{formatDate(route.created_at)}</span>
                         <ArrowRight className="h-4 w-4 text-muted-foreground" />
                       </div>
                     </Link>

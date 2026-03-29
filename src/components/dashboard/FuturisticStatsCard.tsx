@@ -118,7 +118,7 @@ export function FuturisticStatsCard({
         </div>
 
         <div className={cn(
-          "flex h-14 w-14 shrink-0 items-center justify-center rounded-xl transition-all duration-300",
+          "flex h-10 w-10 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl transition-all duration-300",
           "group-hover:scale-110 group-hover:rotate-3",
           config.iconBg
         )}>

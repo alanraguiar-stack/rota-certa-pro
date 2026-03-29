@@ -48,7 +48,7 @@ export function KpiDashboard() {
               key={p}
               onClick={() => setPeriod(p)}
               className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition-all",
+                "rounded-md px-2 py-1 sm:px-3 sm:py-1.5 text-xs sm:text-sm font-medium transition-all",
                 period === p
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
