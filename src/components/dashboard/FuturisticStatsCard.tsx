@@ -95,7 +95,7 @@ export function FuturisticStatsCard({
       <div className="relative z-10 flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1 space-y-2">
           <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <p className="text-4xl font-bold tracking-tight">{value}</p>
+          <p className="text-2xl sm:text-4xl font-bold tracking-tight">{value}</p>
           {subtitle && (
             <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
           )}
