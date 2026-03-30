@@ -143,7 +143,8 @@ export function autoComposeRoute(
   historyHints?: RoutingHint[],
   extractedPatterns?: ExtractedPatterns,
   allowedCities?: Set<string>,
-  plateOverrides?: PlateOverride[]
+  plateOverrides?: PlateOverride[],
+  customTerritoryRules?: TerritoryRule[]
 ): AutoRouterResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const warnings: string[] = [];

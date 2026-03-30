@@ -222,12 +222,14 @@ export function normalizeNeighborhood(neighborhood: string): string {
  */
 export function assignTrucksToTerritories(
   trucks: { plate: string; capacity_kg: number; max_deliveries: number | null }[],
-  citiesInOrders: Set<string>
+  citiesInOrders: Set<string>,
+  customRules?: TerritoryRule[]
 ): Map<string, typeof trucks[number]> {
   clearTruckTerritories();
 
+  const rules = customRules || TERRITORY_RULES;
   // Sort territories by priority
-  const sortedRules = [...TERRITORY_RULES].sort((a, b) => a.priority - b.priority);
+  const sortedRules = [...rules].sort((a, b) => a.priority - b.priority);
 
   // Sort trucks by capacity (best first)
   const availableTrucks = [...trucks].sort((a, b) => {
