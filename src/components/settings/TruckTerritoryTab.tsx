@@ -223,42 +223,28 @@ export function TruckTerritoryTab() {
               {/* Fill Cities */}
               <div className="space-y-2">
                 <Label>Cidades Secundárias (encaixe)</Label>
-                <div className="flex flex-wrap gap-2">
+                <div className="border rounded-lg max-h-[280px] overflow-y-auto">
                   {availableFillCities.map(city => (
-                    <label
+                    <div
                       key={city}
-                      className="flex items-center gap-1.5 text-sm cursor-pointer"
+                      className="flex items-center gap-3 px-4 py-3 border-b last:border-b-0 hover:bg-muted/50 cursor-pointer"
+                      onClick={() => toggleFillCity(config.truck_id, city)}
                     >
                       <Checkbox
+                        id={`fill-${config.truck_id}-${city}`}
                         checked={config.fill_cities.includes(city)}
                         onCheckedChange={() => toggleFillCity(config.truck_id, city)}
+                        className="h-5 w-5"
                       />
-                      {formatCityLabel(city)}
-                    </label>
+                      <Label
+                        htmlFor={`fill-${config.truck_id}-${city}`}
+                        className="text-base font-medium flex-1 cursor-pointer"
+                      >
+                        {formatCityLabel(city)}
+                      </Label>
+                    </div>
                   ))}
                 </div>
-                {config.fill_cities.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {config.fill_cities.map(city => (
-                      <Badge key={city} variant="secondary" className="text-xs">
-                        {formatCityLabel(city)}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Priority */}
-              <div className="space-y-2">
-                <Label>Prioridade (menor = primeiro)</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={99}
-                  value={config.priority}
-                  onChange={(e) => updateConfig(config.truck_id, { priority: parseInt(e.target.value) || 50 })}
-                  className="w-24"
-                />
               </div>
             </CardContent>
           </Card>
