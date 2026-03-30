@@ -735,8 +735,90 @@ export function autoComposeRoute(
     }
   }
 
+  // Step 5d.7: Last resort — force into any truck even if overweight
+  const lastResort = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
+  if (lastResort.length > 0) {
+    reasoning.push(`[Último Recurso] ${lastResort.length} pedidos restantes — forçando alocação`);
+    for (const orphan of lastResort) {
+      const orphanCity = normalizeCityName(orphan.city || orphan.geocoded.city || '');
+      // Find truck with most remaining weight capacity
+      const sorted = [...compositions]
+        .filter(c => c.orders.length > 0)
+        .sort((a, b) => {
+          // Prefer same city
+          const aHasCity = a.cities.includes(orphanCity) ? 1000 : 0;
+          const bHasCity = b.cities.includes(orphanCity) ? 1000 : 0;
+          const aRemaining = Number(a.truck.capacity_kg) - a.totalWeight;
+          const bRemaining = Number(b.truck.capacity_kg) - b.totalWeight;
+          return (bHasCity + bRemaining) - (aHasCity + aRemaining);
+        });
+      const target = sorted[0];
+      if (target) {
+        target.orders.push(orphan);
+        target.totalWeight += orphan.weight_kg;
+        target.occupancyPercent = Math.round((target.totalWeight / Number(target.truck.capacity_kg)) * 100);
+        target.estimatedDeliveries = target.orders.length;
+        if (!target.cities.includes(orphanCity) && orphanCity) {
+          target.cities.push(orphanCity);
+        }
+        assignedOrderKeys.add(orderKey(orphan));
+        reasoning.push(`[Último Recurso] ${orphan.client_name} (${orphanCity}) → ${target.truck.plate}`);
+      }
+    }
+  }
+
   // Step 5e: Rebalance between internal (non-support, non-third-party) trucks
   rebalanceInternalTrucks(compositions, reasoning, warnings);
+
+  // Step 5f: Ensure TRC1Z00 has the most deliveries
+  const trcNorm = 'TRC1Z00';
+  const trcComp = compositions.find(c => c.truck.plate.replace(/[\s-]/g, '').toUpperCase() === trcNorm);
+  if (trcComp && trcComp.orders.length > 0) {
+    const leader = compositions.reduce((a, b) => a.orders.length > b.orders.length ? a : b);
+    if (leader !== trcComp && leader.orders.length > trcComp.orders.length) {
+      const trcCapacity = Number(trcComp.truck.capacity_kg) * 0.95;
+      // Transfer non-anchor orders from leader to TRC1Z00
+      const leaderAnchor = leader.territoryRule?.anchorCity || '';
+      const transferable = leader.orders.filter(o => {
+        const city = normalizeCityName(o.city || (o as any).geocoded?.city || '');
+        return city !== leaderAnchor;
+      });
+      
+      let transferred = 0;
+      const needed = leader.orders.length - trcComp.orders.length + 1; // need at least 1 more
+      
+      for (const order of transferable) {
+        if (transferred >= needed) break;
+        if (trcComp.totalWeight + order.weight_kg > trcCapacity) continue;
+        
+        const idx = leader.orders.indexOf(order);
+        if (idx >= 0) {
+          leader.orders.splice(idx, 1);
+          leader.totalWeight -= order.weight_kg;
+          trcComp.orders.push(order);
+          trcComp.totalWeight += order.weight_kg;
+          transferred++;
+          
+          const city = normalizeCityName(order.city || (order as any).geocoded?.city || '');
+          if (!trcComp.cities.includes(city)) trcComp.cities.push(city);
+        }
+      }
+      
+      if (transferred > 0) {
+        // Update stats
+        for (const comp of [leader, trcComp]) {
+          comp.estimatedDeliveries = comp.orders.length;
+          comp.occupancyPercent = Math.round((comp.totalWeight / Number(comp.truck.capacity_kg)) * 100);
+          const cities = new Set<string>();
+          for (const o of comp.orders) {
+            cities.add(normalizeCityName(o.city || (o as any).geocoded?.city || 'desconhecida'));
+          }
+          comp.cities = Array.from(cities);
+        }
+        reasoning.push(`TRC1Z00 líder: ${transferred} entregas de ${leader.truck.plate} → TRC1Z00 (${trcComp.orders.length} entregas)`);
+      }
+    }
+  }
 
   // Step 6: Sequence optimization with street grouping
   for (const comp of compositions) {
