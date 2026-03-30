@@ -15,10 +15,11 @@ import { useTheme } from '@/hooks/useTheme';
 import { useUserRole, useUserManagement, AppRole } from '@/hooks/useUserRole';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy, CalendarDays } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy, CalendarDays, MapPin } from 'lucide-react';
 import { ProductUnitsImporter } from '@/components/route/ProductUnitsImporter';
 import { CityScheduleTab } from '@/components/settings/CityScheduleTab';
 import { RouteHistoryImporter } from '@/components/route/RouteHistoryImporter';
+import { TruckTerritoryTab } from '@/components/settings/TruckTerritoryTab';
 
 interface UserProfile {
   id: string;
