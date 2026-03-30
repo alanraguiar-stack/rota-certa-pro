@@ -429,6 +429,42 @@ export function useRouteDetails(routeId: string | undefined) {
         .map(rt => rt.truck!)
         .filter(Boolean);
 
+      // Fetch custom territory configs from DB
+      let customRules: TerritoryRule[] | undefined;
+      if (user) {
+        const { data: dbTerritories } = await supabase
+          .from('truck_territories')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('priority', { ascending: true });
+
+        if (dbTerritories && dbTerritories.length > 0) {
+          // Map truck_id to plate for fixedPlate assignment
+          const truckPlateMap = new Map(trucks.map(t => [t.id, t.plate]));
+          customRules = dbTerritories.map((t: any, idx: number) => {
+            const matchingDefault = TERRITORY_RULES.find(
+              r => r.anchorCity === t.anchor_city && !r.isSupport
+            ) || (t.is_support ? TERRITORY_RULES.find(r => r.isSupport) : null);
+
+            return {
+              id: `db_${idx}`,
+              label: t.is_support ? 'Apoio / Excedentes' : `Âncora ${t.anchor_city || 'N/A'}`,
+              anchorCity: t.anchor_city,
+              maxDeliveries: t.max_deliveries,
+              allowedFillCities: t.fill_cities || [],
+              neighborhoodFills: matchingDefault?.neighborhoodFills || [],
+              neighborhoodExceptions: matchingDefault?.neighborhoodExceptions || [],
+              excludedNeighborhoods: matchingDefault?.excludedNeighborhoods || [],
+              priorityNeighborhoods: matchingDefault?.priorityNeighborhoods || [],
+              isSupport: t.is_support,
+              priority: t.priority,
+              fixedPlate: truckPlateMap.get(t.truck_id),
+            } satisfies TerritoryRule;
+          });
+          console.log('[distributeLoad] Using custom territory rules from DB:', customRules.length);
+        }
+      }
+
       // Override temporário para esta rota — FIO0R12 restrito a Barueri (Parque Viana), Jandira, Itapevi
       // TODO: futuramente tornar configurável via UI
       const plateOverrides: PlateOverride[] = [{
@@ -439,7 +475,7 @@ export function useRouteDetails(routeId: string | undefined) {
         maxWeightKg: 450,
       }];
 
-      const result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' }, undefined, undefined, undefined, plateOverrides);
+      const result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' }, undefined, undefined, undefined, plateOverrides, customRules);
 
       console.log('[distributeLoad] autoComposeRoute result:', {
         compositions: result.compositions.map(c => ({
