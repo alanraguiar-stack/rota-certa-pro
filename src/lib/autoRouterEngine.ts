@@ -123,6 +123,17 @@ export function recommendTrucks(
 // ================================================================
 
 /**
+ * Override temporário por placa — permite injetar regras para uma rota específica
+ */
+export interface PlateOverride {
+  plate: string;
+  allowedCities: string[];
+  allowedNeighborhoods?: string[];
+  maxDeliveries: number;
+  maxWeightKg: number;
+}
+
+/**
  * Main auto-routing function — TERRITORY-BASED RULES
  */
 export function autoComposeRoute(
@@ -131,7 +142,8 @@ export function autoComposeRoute(
   config: Partial<AutoRouterConfig> = {},
   historyHints?: RoutingHint[],
   extractedPatterns?: ExtractedPatterns,
-  allowedCities?: Set<string>
+  allowedCities?: Set<string>,
+  plateOverrides?: PlateOverride[]
 ): AutoRouterResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const warnings: string[] = [];
