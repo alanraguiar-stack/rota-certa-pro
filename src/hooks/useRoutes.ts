@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Route, Order, RouteTruck, OrderAssignment, RoutingStrategy, OrderItem, ParsedOrderItem, ParsedOrder } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distribution';
-import { autoComposeRoute, AutoRouterResult } from '@/lib/autoRouterEngine';
+import { autoComposeRoute, AutoRouterResult, PlateOverride } from '@/lib/autoRouterEngine';
 import { optimizeDeliveryOrder } from '@/lib/routing';
 
 // Helper to convert Supabase order to local Order type
