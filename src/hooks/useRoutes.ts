@@ -125,6 +125,7 @@ export function useRoutes() {
 }
 
 export function useRouteDetails(routeId: string | undefined) {
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
