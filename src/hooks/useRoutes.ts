@@ -428,7 +428,17 @@ export function useRouteDetails(routeId: string | undefined) {
         .map(rt => rt.truck!)
         .filter(Boolean);
 
-      const result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' });
+      // Override temporário para esta rota — FIO0R12 restrito a Barueri (Parque Viana), Jandira, Itapevi
+      // TODO: futuramente tornar configurável via UI
+      const plateOverrides: PlateOverride[] = [{
+        plate: 'FIO0R12',
+        allowedCities: ['barueri', 'jandira', 'itapevi'],
+        allowedNeighborhoods: ['parque viana'],
+        maxDeliveries: 11,
+        maxWeightKg: 450,
+      }];
+
+      const result = autoComposeRoute(parsedOrders, trucks, { strategy: 'padrao' }, undefined, undefined, undefined, plateOverrides);
 
       console.log('[distributeLoad] autoComposeRoute result:', {
         compositions: result.compositions.map(c => ({

@@ -442,29 +442,12 @@ export function AutoCompositionView({
         </div>
       </div>
       
-      {/* Unassigned Orders */}
-      {result.unassignedOrders.length > 0 && (
-        <Card className="border-destructive/30 bg-warning/5">
-          <CardHeader>
-            <CardTitle className="text-base text-destructive flex items-center gap-2">
-              <AlertCircle className="h-4 w-4" />
-              Pedidos Não Atribuídos ({result.unassignedOrders.length})
-            </CardTitle>
-            <CardDescription>
-              Estes pedidos não puderam ser alocados nos caminhões disponíveis.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="max-h-40 overflow-y-auto space-y-1">
-              {result.unassignedOrders.map((order, idx) => (
-                <div key={idx} className="flex items-center justify-between text-sm border rounded px-3 py-2">
-                  <span>{order.client_name}</span>
-                  <Badge variant="destructive">{formatWeight(order.weight_kg)}</Badge>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Distribution confirmation */}
+      {result.unassignedOrders.length === 0 && activeCompositions.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/5 p-3 text-sm">
+          <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
+          <span className="text-success font-medium">100% da carga distribuída com sucesso</span>
+        </div>
       )}
       
       <Separator />

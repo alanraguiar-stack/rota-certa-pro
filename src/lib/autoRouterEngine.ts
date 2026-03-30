@@ -1176,6 +1176,8 @@ function optimizeDeliverySequence(
       const fromLng = lastOrder ? lastOrder.geocoded.estimatedLng : startLng;
       nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
     }
+    // Always apply street grouping sweep after nearest-neighbor
+    streetGroupSweep(cityOrders);
     result.push(...cityOrders);
   }
 
