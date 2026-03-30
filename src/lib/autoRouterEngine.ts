@@ -235,14 +235,15 @@ export function autoComposeRoute(
     capacity_kg: Number(t.capacity_kg),
     max_deliveries: t.max_deliveries,
   }));
-  const territoryAssignments = assignTrucksToTerritories(truckData, citiesInOrders);
+  const activeRules = customTerritoryRules || TERRITORY_RULES;
+  const territoryAssignments = assignTrucksToTerritories(truckData, citiesInOrders, customTerritoryRules);
 
   // Build territory → truck mapping
   const territoryTrucks: { truck: Truck; rule: TerritoryRule }[] = [];
   const assignedTruckPlates = new Set<string>();
 
   for (const [territoryId, assignedTruck] of territoryAssignments) {
-    const rule = TERRITORY_RULES.find(r => r.id === territoryId)!;
+    const rule = activeRules.find(r => r.id === territoryId)!;
     const truck = availableTrucks.find(t => t.plate === assignedTruck.plate)!;
     territoryTrucks.push({ truck, rule });
     assignedTruckPlates.add(truck.plate);
