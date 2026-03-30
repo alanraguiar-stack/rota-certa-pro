@@ -685,6 +685,53 @@ export type Database = {
         }
         Relationships: []
       }
+      truck_territories: {
+        Row: {
+          anchor_city: string
+          created_at: string | null
+          fill_cities: string[]
+          id: string
+          is_support: boolean
+          max_deliveries: number
+          priority: number
+          truck_id: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          anchor_city?: string
+          created_at?: string | null
+          fill_cities?: string[]
+          id?: string
+          is_support?: boolean
+          max_deliveries?: number
+          priority?: number
+          truck_id: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          anchor_city?: string
+          created_at?: string | null
+          fill_cities?: string[]
+          id?: string
+          is_support?: boolean
+          max_deliveries?: number
+          priority?: number
+          truck_id?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "truck_territories_truck_id_fkey"
+            columns: ["truck_id"]
+            isOneToOne: false
+            referencedRelation: "trucks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       trucks: {
         Row: {
           ano: number | null

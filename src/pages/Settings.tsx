@@ -15,10 +15,11 @@ import { useTheme } from '@/hooks/useTheme';
 import { useUserRole, useUserManagement, AppRole } from '@/hooks/useUserRole';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy, CalendarDays } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy, CalendarDays, MapPin } from 'lucide-react';
 import { ProductUnitsImporter } from '@/components/route/ProductUnitsImporter';
 import { CityScheduleTab } from '@/components/settings/CityScheduleTab';
 import { RouteHistoryImporter } from '@/components/route/RouteHistoryImporter';
+import { TruckTerritoryTab } from '@/components/settings/TruckTerritoryTab';
 
 interface UserProfile {
   id: string;
@@ -226,31 +227,35 @@ export default function Settings() {
         </div>
 
         <Tabs defaultValue="account" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-5 lg:grid-cols-6">
+          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="account" className="flex items-center gap-2">
               <User className="h-4 w-4" />
-              Conta
+              <span className="hidden sm:inline">Conta</span>
             </TabsTrigger>
             <TabsTrigger value="calendar" className="flex items-center gap-2">
               <CalendarDays className="h-4 w-4" />
-              Calendário
+              <span className="hidden sm:inline">Calendário</span>
+            </TabsTrigger>
+            <TabsTrigger value="territories" className="flex items-center gap-2">
+              <MapPin className="h-4 w-4" />
+              <span className="hidden sm:inline">Territórios</span>
             </TabsTrigger>
             <TabsTrigger value="products" className="flex items-center gap-2">
               <Package className="h-4 w-4" />
-              Produtos
+              <span className="hidden sm:inline">Produtos</span>
             </TabsTrigger>
             <TabsTrigger value="history" className="flex items-center gap-2">
               <History className="h-4 w-4" />
-              Histórico
+              <span className="hidden sm:inline">Histórico</span>
             </TabsTrigger>
             <TabsTrigger value="appearance" className="flex items-center gap-2">
               {isDark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-              Aparência
+              <span className="hidden sm:inline">Aparência</span>
             </TabsTrigger>
             {isAdmin && (
               <TabsTrigger value="users" className="flex items-center gap-2">
                 <Shield className="h-4 w-4" />
-                Usuários
+                <span className="hidden sm:inline">Usuários</span>
               </TabsTrigger>
             )}
           </TabsList>
@@ -336,6 +341,11 @@ export default function Settings() {
           {/* Calendar Tab */}
           <TabsContent value="calendar" className="space-y-4">
             <CityScheduleTab />
+          </TabsContent>
+
+          {/* Territories Tab */}
+          <TabsContent value="territories" className="space-y-4">
+            <TruckTerritoryTab />
           </TabsContent>
 
           {/* Products Tab */}
