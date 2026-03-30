@@ -123,6 +123,17 @@ export function recommendTrucks(
 // ================================================================
 
 /**
+ * Override temporário por placa — permite injetar regras para uma rota específica
+ */
+export interface PlateOverride {
+  plate: string;
+  allowedCities: string[];
+  allowedNeighborhoods?: string[];
+  maxDeliveries: number;
+  maxWeightKg: number;
+}
+
+/**
  * Main auto-routing function — TERRITORY-BASED RULES
  */
 export function autoComposeRoute(
@@ -131,7 +142,8 @@ export function autoComposeRoute(
   config: Partial<AutoRouterConfig> = {},
   historyHints?: RoutingHint[],
   extractedPatterns?: ExtractedPatterns,
-  allowedCities?: Set<string>
+  allowedCities?: Set<string>,
+  plateOverrides?: PlateOverride[]
 ): AutoRouterResult {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const warnings: string[] = [];
@@ -505,17 +517,45 @@ export function autoComposeRoute(
       remainingByCity.set(city, existing);
     }
 
-    for (const [, cityOrders] of remainingByCity) {
+    // Check if this non-territory truck has a plate override
+    const normalizedPlate = truck.plate.replace(/[\s-]/g, '').toUpperCase();
+    const override = plateOverrides?.find(po => po.plate.replace(/[\s-]/g, '').toUpperCase() === normalizedPlate);
+    
+    const effectiveCapacity = override ? override.maxWeightKg : capacity;
+    const effectiveMaxDel = override ? override.maxDeliveries : maxDel;
+    const MAX_CITIES_PER_NON_TERRITORY = 3;
+    const currentCities = new Set<string>();
+
+    for (const [cityName, cityOrders] of remainingByCity) {
+      // If override exists, only allow specified cities/neighborhoods
+      if (override) {
+        const allowedCitiesNorm = override.allowedCities.map(c => normalizeCityName(c));
+        if (!allowedCitiesNorm.includes(cityName)) continue;
+      }
+      
+      // Limit non-territory trucks to max 3 cities (unless overridden)
+      if (!override && !currentCities.has(cityName) && currentCities.size >= MAX_CITIES_PER_NON_TERRITORY) continue;
+
       for (const order of cityOrders) {
         if (assignedOrderKeys.has(orderKey(order))) continue;
-        if (currentWeight + order.weight_kg > capacity) continue;
-        if (assignedOrders.length >= maxDel) break;
+        if (currentWeight + order.weight_kg > effectiveCapacity) continue;
+        if (assignedOrders.length >= effectiveMaxDel) break;
+
+        // If override has neighborhood filter, check it
+        if (override && override.allowedNeighborhoods && override.allowedNeighborhoods.length > 0) {
+          const orderNh = normalizeNeighborhood(order.geocoded.neighborhood || '');
+          const allowedNhs = override.allowedNeighborhoods.map(n => normalizeNeighborhood(n));
+          // Only filter by neighborhood for the anchor cities, not fill cities
+          const orderCity = normalizeCityName(order.city || order.geocoded.city || '');
+          if (orderCity === normalizeCityName(override.allowedCities[0]) && !allowedNhs.includes(orderNh)) continue;
+        }
 
         assignedOrders.push(order);
         assignedOrderKeys.add(orderKey(order));
         currentWeight += order.weight_kg;
+        currentCities.add(cityName);
       }
-      if (assignedOrders.length >= maxDel) break;
+      if (assignedOrders.length >= effectiveMaxDel) break;
     }
 
     const citiesInTruck = new Set<string>();
@@ -695,8 +735,90 @@ export function autoComposeRoute(
     }
   }
 
+  // Step 5d.7: Last resort — force into any truck even if overweight
+  const lastResort = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
+  if (lastResort.length > 0) {
+    reasoning.push(`[Último Recurso] ${lastResort.length} pedidos restantes — forçando alocação`);
+    for (const orphan of lastResort) {
+      const orphanCity = normalizeCityName(orphan.city || orphan.geocoded.city || '');
+      // Find truck with most remaining weight capacity
+      const sorted = [...compositions]
+        .filter(c => c.orders.length > 0)
+        .sort((a, b) => {
+          // Prefer same city
+          const aHasCity = a.cities.includes(orphanCity) ? 1000 : 0;
+          const bHasCity = b.cities.includes(orphanCity) ? 1000 : 0;
+          const aRemaining = Number(a.truck.capacity_kg) - a.totalWeight;
+          const bRemaining = Number(b.truck.capacity_kg) - b.totalWeight;
+          return (bHasCity + bRemaining) - (aHasCity + aRemaining);
+        });
+      const target = sorted[0];
+      if (target) {
+        target.orders.push(orphan);
+        target.totalWeight += orphan.weight_kg;
+        target.occupancyPercent = Math.round((target.totalWeight / Number(target.truck.capacity_kg)) * 100);
+        target.estimatedDeliveries = target.orders.length;
+        if (!target.cities.includes(orphanCity) && orphanCity) {
+          target.cities.push(orphanCity);
+        }
+        assignedOrderKeys.add(orderKey(orphan));
+        reasoning.push(`[Último Recurso] ${orphan.client_name} (${orphanCity}) → ${target.truck.plate}`);
+      }
+    }
+  }
+
   // Step 5e: Rebalance between internal (non-support, non-third-party) trucks
   rebalanceInternalTrucks(compositions, reasoning, warnings);
+
+  // Step 5f: Ensure TRC1Z00 has the most deliveries
+  const trcNorm = 'TRC1Z00';
+  const trcComp = compositions.find(c => c.truck.plate.replace(/[\s-]/g, '').toUpperCase() === trcNorm);
+  if (trcComp && trcComp.orders.length > 0) {
+    const leader = compositions.reduce((a, b) => a.orders.length > b.orders.length ? a : b);
+    if (leader !== trcComp && leader.orders.length > trcComp.orders.length) {
+      const trcCapacity = Number(trcComp.truck.capacity_kg) * 0.95;
+      // Transfer non-anchor orders from leader to TRC1Z00
+      const leaderAnchor = leader.territoryRule?.anchorCity || '';
+      const transferable = leader.orders.filter(o => {
+        const city = normalizeCityName(o.city || (o as any).geocoded?.city || '');
+        return city !== leaderAnchor;
+      });
+      
+      let transferred = 0;
+      const needed = leader.orders.length - trcComp.orders.length + 1; // need at least 1 more
+      
+      for (const order of transferable) {
+        if (transferred >= needed) break;
+        if (trcComp.totalWeight + order.weight_kg > trcCapacity) continue;
+        
+        const idx = leader.orders.indexOf(order);
+        if (idx >= 0) {
+          leader.orders.splice(idx, 1);
+          leader.totalWeight -= order.weight_kg;
+          trcComp.orders.push(order);
+          trcComp.totalWeight += order.weight_kg;
+          transferred++;
+          
+          const city = normalizeCityName(order.city || (order as any).geocoded?.city || '');
+          if (!trcComp.cities.includes(city)) trcComp.cities.push(city);
+        }
+      }
+      
+      if (transferred > 0) {
+        // Update stats
+        for (const comp of [leader, trcComp]) {
+          comp.estimatedDeliveries = comp.orders.length;
+          comp.occupancyPercent = Math.round((comp.totalWeight / Number(comp.truck.capacity_kg)) * 100);
+          const cities = new Set<string>();
+          for (const o of comp.orders) {
+            cities.add(normalizeCityName(o.city || (o as any).geocoded?.city || 'desconhecida'));
+          }
+          comp.cities = Array.from(cities);
+        }
+        reasoning.push(`TRC1Z00 líder: ${transferred} entregas de ${leader.truck.plate} → TRC1Z00 (${trcComp.orders.length} entregas)`);
+      }
+    }
+  }
 
   // Step 6: Sequence optimization with street grouping
   for (const comp of compositions) {
@@ -1054,6 +1176,8 @@ function optimizeDeliverySequence(
       const fromLng = lastOrder ? lastOrder.geocoded.estimatedLng : startLng;
       nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
     }
+    // Always apply street grouping sweep after nearest-neighbor
+    streetGroupSweep(cityOrders);
     result.push(...cityOrders);
   }
 

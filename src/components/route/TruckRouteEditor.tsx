@@ -124,18 +124,11 @@ function OrderCard({
     <div 
       ref={orderRef}
       className={cn(
-        "rounded-lg border bg-card transition-all",
+        "rounded-lg border bg-card transition-all select-text",
         isLocked ? "opacity-75" : "hover:shadow-md",
         isDragTarget && "border-primary border-2 shadow-lg",
         isHighlighted && "ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-900/20",
-        !isLocked && "cursor-grab active:cursor-grabbing"
       )}
-      draggable={!isLocked}
-      onDragStart={(e) => {
-        if (isLocked) return;
-        e.dataTransfer.effectAllowed = 'move';
-        onDragStart?.();
-      }}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
@@ -148,10 +141,19 @@ function OrderCard({
       onDragEnd={onDragEnd}
     >
       <div className="flex items-center gap-3 p-3">
-        {/* Sequence Number & Drag Handle */}
+        {/* Drag Handle — only this element is draggable */}
         <div className="flex items-center gap-1">
           {!isLocked && (
-            <GripVertical className="h-4 w-4 text-muted-foreground" />
+            <div
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.effectAllowed = 'move';
+                onDragStart?.();
+              }}
+              className="cursor-grab active:cursor-grabbing p-0.5"
+            >
+              <GripVertical className="h-4 w-4 text-muted-foreground" />
+            </div>
           )}
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm">
             {sequence}
