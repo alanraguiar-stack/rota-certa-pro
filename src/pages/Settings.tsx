@@ -343,6 +343,11 @@ export default function Settings() {
             <CityScheduleTab />
           </TabsContent>
 
+          {/* Territories Tab */}
+          <TabsContent value="territories" className="space-y-4">
+            <TruckTerritoryTab />
+          </TabsContent>
+
           {/* Products Tab */}
           <TabsContent value="products" className="space-y-4">
             <ProductUnitsImporter />
