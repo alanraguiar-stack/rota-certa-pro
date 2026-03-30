@@ -6,6 +6,7 @@ import { useToast } from '@/hooks/use-toast';
 import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distribution';
 import { autoComposeRoute, AutoRouterResult, PlateOverride } from '@/lib/autoRouterEngine';
 import { optimizeDeliveryOrder } from '@/lib/routing';
+import { TERRITORY_RULES, TerritoryRule } from '@/lib/anchorRules';
 
 // Helper to convert Supabase order to local Order type
 function toOrder(o: unknown): Order | undefined {
