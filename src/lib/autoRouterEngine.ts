@@ -517,17 +517,45 @@ export function autoComposeRoute(
       remainingByCity.set(city, existing);
     }
 
-    for (const [, cityOrders] of remainingByCity) {
+    // Check if this non-territory truck has a plate override
+    const normalizedPlate = truck.plate.replace(/[\s-]/g, '').toUpperCase();
+    const override = plateOverrides?.find(po => po.plate.replace(/[\s-]/g, '').toUpperCase() === normalizedPlate);
+    
+    const effectiveCapacity = override ? override.maxWeightKg : capacity;
+    const effectiveMaxDel = override ? override.maxDeliveries : maxDel;
+    const MAX_CITIES_PER_NON_TERRITORY = 3;
+    const currentCities = new Set<string>();
+
+    for (const [cityName, cityOrders] of remainingByCity) {
+      // If override exists, only allow specified cities/neighborhoods
+      if (override) {
+        const allowedCitiesNorm = override.allowedCities.map(c => normalizeCityName(c));
+        if (!allowedCitiesNorm.includes(cityName)) continue;
+      }
+      
+      // Limit non-territory trucks to max 3 cities (unless overridden)
+      if (!override && !currentCities.has(cityName) && currentCities.size >= MAX_CITIES_PER_NON_TERRITORY) continue;
+
       for (const order of cityOrders) {
         if (assignedOrderKeys.has(orderKey(order))) continue;
-        if (currentWeight + order.weight_kg > capacity) continue;
-        if (assignedOrders.length >= maxDel) break;
+        if (currentWeight + order.weight_kg > effectiveCapacity) continue;
+        if (assignedOrders.length >= effectiveMaxDel) break;
+
+        // If override has neighborhood filter, check it
+        if (override && override.allowedNeighborhoods && override.allowedNeighborhoods.length > 0) {
+          const orderNh = normalizeNeighborhood(order.geocoded.neighborhood || '');
+          const allowedNhs = override.allowedNeighborhoods.map(n => normalizeNeighborhood(n));
+          // Only filter by neighborhood for the anchor cities, not fill cities
+          const orderCity = normalizeCityName(order.city || order.geocoded.city || '');
+          if (orderCity === normalizeCityName(override.allowedCities[0]) && !allowedNhs.includes(orderNh)) continue;
+        }
 
         assignedOrders.push(order);
         assignedOrderKeys.add(orderKey(order));
         currentWeight += order.weight_kg;
+        currentCities.add(cityName);
       }
-      if (assignedOrders.length >= maxDel) break;
+      if (assignedOrders.length >= effectiveMaxDel) break;
     }
 
     const citiesInTruck = new Set<string>();
