@@ -853,17 +853,14 @@ export function autoComposeRoute(
     ...validOrders.filter(o => !allAssigned.has(orderKey(o))),
   ];
 
+  const validation = validateComposition(compositions);
+
   if (unassignedOrders.length > 0) {
     warnings.push(`${unassignedOrders.length} pedidos não puderam ser atribuídos`);
     validation.valid = false;
     validation.violations.push(`${unassignedOrders.length} pedido(s) sem caminhão — todos devem ser alocados`);
   }
 
-  const totalCapacityUsed = compositions.reduce((sum, c) => sum + c.totalWeight, 0);
-  const totalCapacity = compositions.reduce((sum, c) => sum + Number(c.truck.capacity_kg), 0);
-  const averageOccupancy = totalCapacity > 0 ? (totalCapacityUsed / totalCapacity) * 100 : 0;
-
-  const validation = validateComposition(compositions);
   if (!validation.valid) {
     warnings.push('⚠️ Composição contém violações de regras operacionais');
   }
