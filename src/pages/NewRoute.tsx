@@ -27,6 +27,7 @@ import { analyzeFleetRequirements, validateFinalResult } from '@/lib/routeIntell
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { geocodeAddress } from '@/lib/nominatimGeocoding';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function NewRoute() {
   const navigate = useNavigate();

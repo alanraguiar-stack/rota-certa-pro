@@ -118,6 +118,28 @@ export function recommendTrucks(
   return [...availableTrucks];
 }
 
+/**
+ * Intelligent city extraction: search for known city names within the address string.
+ * Used as fallback when parseAddress fails to extract the city field.
+ */
+function extractCityFromAddress(address: string): string | null {
+  const normalized = address
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const cityNames = Object.keys(CITY_COORDINATES).sort((a, b) => b.length - a.length);
+  
+  for (const cityName of cityNames) {
+    if (normalized.includes(cityName)) {
+      return cityName;
+    }
+  }
+  return null;
+}
+
 // ================================================================
 // MAIN ENTRY POINT
 // ================================================================
