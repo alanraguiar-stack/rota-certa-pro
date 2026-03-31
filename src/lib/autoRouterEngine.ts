@@ -384,8 +384,8 @@ export function autoComposeRoute(
     for (const fillCity of rule.allowedFillCities) {
       if (assignedOrders.length >= maxDel) break;
 
-      const fillOrders = cityOrderMap.get(fillCity) || [];
-      const sortedFill = [...fillOrders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+      // Pedidos já pré-sequenciados — manter ordem
+      const sortedFill = [...(cityOrderMap.get(fillCity) || [])];
 
       for (const order of sortedFill) {
         const key = orderKey(order);
