@@ -307,8 +307,8 @@ export function autoComposeRoute(
     }
 
     // 4b: Anchor city orders (MANDATORY), excluding excluded neighborhoods
-    const anchorOrders = cityOrderMap.get(rule.anchorCity) || [];
-    const sortedAnchor = [...anchorOrders].sort((a, b) => a.distanceFromCD - b.distanceFromCD);
+    // Pedidos já pré-sequenciados na Etapa 2 — manter ordem (overflow sai do final)
+    const sortedAnchor = [...(cityOrderMap.get(rule.anchorCity) || [])];
 
     for (const order of sortedAnchor) {
       const key = orderKey(order);
