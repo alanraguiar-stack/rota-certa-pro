@@ -213,10 +213,17 @@ export function autoComposeRoute(
     return { ...order, geocoded, distanceFromCD, angle };
   });
 
-  // Step 2: Group orders by city
+  // Step 2: Group orders by city (with intelligent city lookup for unknowns)
   const cityOrderMap = new Map<string, GeocodedOrder[]>();
   for (const order of geocodedOrders) {
-    const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
+    let city = normalizeCityName(order.city || order.geocoded.city || '');
+    // Intelligent fallback: if city is empty/unknown, try to find it in the address
+    if (!city || city === 'desconhecida' || city === '') {
+      city = extractCityFromAddress(order.address) || 'desconhecida';
+      // Propagate back so downstream logic has it
+      order.city = city;
+      if (order.geocoded) order.geocoded.city = city;
+    }
     const existing = cityOrderMap.get(city) || [];
     existing.push(order);
     cityOrderMap.set(city, existing);
