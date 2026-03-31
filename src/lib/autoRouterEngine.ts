@@ -853,6 +853,10 @@ export function autoComposeRoute(
     ...validOrders.filter(o => !allAssigned.has(orderKey(o))),
   ];
 
+  const totalCapacityUsed = compositions.reduce((sum, c) => sum + c.totalWeight, 0);
+  const totalCapacity = compositions.reduce((sum, c) => sum + Number(c.truck.capacity_kg), 0);
+  const averageOccupancy = totalCapacity > 0 ? (totalCapacityUsed / totalCapacity) * 100 : 0;
+
   const validation = validateComposition(compositions);
 
   if (unassignedOrders.length > 0) {
