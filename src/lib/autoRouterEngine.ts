@@ -855,6 +855,8 @@ export function autoComposeRoute(
 
   if (unassignedOrders.length > 0) {
     warnings.push(`${unassignedOrders.length} pedidos não puderam ser atribuídos`);
+    validation.valid = false;
+    validation.violations.push(`${unassignedOrders.length} pedido(s) sem caminhão — todos devem ser alocados`);
   }
 
   const totalCapacityUsed = compositions.reduce((sum, c) => sum + c.totalWeight, 0);
