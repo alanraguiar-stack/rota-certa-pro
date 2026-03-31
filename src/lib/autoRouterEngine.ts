@@ -12,7 +12,7 @@
  */
 
 import { Truck, ParsedOrder, RoutingStrategy } from '@/types';
-import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName } from './geocoding';
+import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, CITY_COORDINATES } from './geocoding';
 import { ParsedItemDetail } from './itemDetailParser';
 import { RoutingHint, ExtractedPatterns } from './historyPatternEngine';
 import { 
