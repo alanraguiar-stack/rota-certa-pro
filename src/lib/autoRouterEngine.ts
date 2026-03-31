@@ -757,17 +757,15 @@ export function autoComposeRoute(
     }
   }
 
-  // Step 5d.7: Last resort — force into any truck even if overweight
+  // Step 5d.7: Last resort — force into any truck even if overweight (NEVER leave orders unassigned)
   const lastResort = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
   if (lastResort.length > 0) {
-    reasoning.push(`[Último Recurso] ${lastResort.length} pedidos restantes — forçando alocação`);
+    reasoning.push(`[Último Recurso] ${lastResort.length} pedidos restantes — forçando alocação (ignora peso)`);
     for (const orphan of lastResort) {
       const orphanCity = normalizeCityName(orphan.city || orphan.geocoded.city || '');
-      // Find truck with most remaining weight capacity
+      // Find truck: prefer same city, then most remaining capacity; include ALL trucks (even empty)
       const sorted = [...compositions]
-        .filter(c => c.orders.length > 0)
         .sort((a, b) => {
-          // Prefer same city
           const aHasCity = a.cities.includes(orphanCity) ? 1000 : 0;
           const bHasCity = b.cities.includes(orphanCity) ? 1000 : 0;
           const aRemaining = Number(a.truck.capacity_kg) - a.totalWeight;
@@ -784,6 +782,7 @@ export function autoComposeRoute(
           target.cities.push(orphanCity);
         }
         assignedOrderKeys.add(orderKey(orphan));
+        warnings.push(`⚠️ ${orphan.client_name} (${orphanCity}) forçado para ${target.truck.plate} (pode exceder peso)`);
         reasoning.push(`[Último Recurso] ${orphan.client_name} (${orphanCity}) → ${target.truck.plate}`);
       }
     }
