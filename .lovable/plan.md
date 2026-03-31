@@ -1,76 +1,60 @@
 
 
-# Plano Consolidado: Reestruturação em 3 Etapas + Transição Fluida entre Cidades
+# Plano: Pente Fino na Identificação e Distribuição de Pedidos
 
-## Resumo
+## Problemas Identificados
 
-Dois ajustes combinados no motor de roteirização (`autoRouterEngine.ts`):
+Analisei todo o fluxo desde o parsing até a alocação final e encontrei **6 pontos de fricção** que podem causar pedidos perdidos ou não distribuídos:
 
-1. **Reestruturação em 3 etapas claras** — separar organização, sequenciamento e alocação
-2. **Transição fluida entre cidades** — a próxima cidade é escolhida pela proximidade do último ponto, não por distância média ao CD
+### 1. NewRoute.tsx não passa `plateOverrides` nem `customTerritoryRules`
+A chamada na linha 200 do `NewRoute.tsx` não envia os overrides de placa nem as regras customizadas do banco. Apenas o `useRoutes.ts` (distributeLoad) faz isso. Resultado: na preview inicial do wizard, o motor usa regras padrão do `anchorRules.ts` — se essas não cobrem todas as cidades dos pedidos, sobram órfãos.
 
-## O que muda na prática
+### 2. Cidade "desconhecida" — pedidos sem campo `city` preenchido
+Na linha 219 do engine: `normalizeCityName(order.city || order.geocoded.city || 'desconhecida')`. Se o endereço não foi parseado corretamente pelo `parseAddress`, a cidade fica como `'desconhecida'`. Nenhum território tem essa cidade como âncora ou fill — o pedido só será salvo nos fallbacks (5d.5/5d.6/5d.7) e pode ficar fora se todos os caminhões estiverem cheios.
 
-```text
-FLUXO ATUAL (entrelaçado):
-  Agrupa por cidade → Aloca nos caminhões → Sequencia depois
+### 3. Overflow da cidade âncora marca como `assignedOrderKeys` mas vai para `overflowOrders`
+Na linha 331: quando um pedido excede o peso/entregas do caminhão âncora, ele é adicionado ao `overflowOrders` **E** marcado no `assignedOrderKeys`. Isso impede que outro território (fill city) pegue esse pedido. O overflow só vai para o caminhão de apoio (Step 5b). Se não houver apoio ou o apoio estiver cheio, o pedido some.
 
-FLUXO NOVO (linear):
-  ETAPA 1: Agrupa por cidade (caixas)
-  ETAPA 2: Sequencia cada caixa internamente (bairro → rua → proximidade)
-  ETAPA 3: Aloca nos caminhões respeitando peso/capacidade
-           Se não cabe → remove do FINAL da lista (mais distantes)
-           → redireciona para apoio ou outro caminhão
-  VALIDAÇÃO: Bloqueia se pedido ficou sem caminhão ou peso excedido
-```
+### 4. Pedidos de cidades que não são âncora nem fill de nenhum território
+Se uma cidade aparece nos pedidos mas não existe em nenhuma regra de território (nem âncora, nem fill, nem no apoio), esses pedidos só são pegos no Step 5c (non-territory trucks). Se não houver caminhões extra, vão para fallback. Isso é frágil.
 
-```text
-TRANSIÇÃO ENTRE CIDADES (atual vs novo):
+### 5. `maxOccupancyPercent` de 95% reduz capacidade efetiva
+Linha 282: `capacity = Number(truck.capacity_kg) * (cfg.maxOccupancyPercent / 100)`. Isso descarta 5% da capacidade, podendo causar overflow desnecessário. Nos fallbacks forçados (5d.6) esse mesmo teto é aplicado, impedindo alocação mesmo quando o peso real ainda caberia.
 
-ATUAL:  Cidades ordenadas por distância média ao CD
-        → Salto geográfico possível entre última entrega de A e primeira de B
+### 6. `distributeLoad` usa `latitude`/`longitude` do DB mas não propaga para o `city`
+Na linha 406-418 do `useRoutes.ts`, ao construir `parsedOrders`, o campo `city` vem de `(o as any).city` — funciona se o campo existe no DB. Mas se o pedido foi importado sem cidade, fica `undefined`, e o motor vai usar `parseAddress` para extrair a cidade do endereço, que pode falhar em formatos não-padrão.
 
-NOVO:   Após sequenciar cidade A, pegar coordenadas da ÚLTIMA entrega
-        → Escolher próxima cidade = a que tem entrega mais próxima desse ponto
-        → Sequenciar cidade B começando pelo ponto mais próximo da saída de A
-```
-
-## Mudanças técnicas
+## Solução
 
 ### Arquivo: `src/lib/autoRouterEngine.ts`
 
-**1. Função `autoComposeRoute` — reestruturar em 3 etapas:**
+1. **Overflow não deve marcar `assignedOrderKeys`** — remover linha 331 (`assignedOrderKeys.add(key)` dentro do overflow). Isso permite que o pedido seja captado por outro território que tenha aquela cidade como fill.
 
-- **Etapa 1** (já existe, linhas 217-228): Agrupar por cidade — mantém como está
-- **Etapa 2** (NOVO — antes da alocação): Para cada cidade, sequenciar internamente usando `nearestNeighborWithinCity` + `streetGroupSweep`. Resultado: `Map<cidade, pedidos_ordenados[]>`
-- **Etapa 3** (refatorar linhas 256-581): Alocar pedidos já sequenciados nos caminhões. Quando exceder peso/capacidade, remover do **final** da lista (são os mais distantes do CD). Excedentes vão para apoio
-- **Validação final**: Se restarem pedidos não alocados → `validation.valid = false` com mensagem bloqueante
+2. **Último recurso sem limite de peso** — no Step 5d.7 (linha 750), garantir que TODOS os pedidos restantes sejam forçados para algum caminhão, mesmo ultrapassando o peso. Adicionar warning mas NUNCA deixar de fora.
 
-**2. Função `optimizeDeliverySequence` (linhas 1054-1230) — transição fluida:**
+3. **Cidade "desconhecida" — fallback inteligente** — quando `city` é vazia ou "desconhecida", tentar extrair do endereço usando regex mais robusto (buscar por nomes de cidades conhecidas no `CITY_COORDINATES`). Se não achar, atribuir ao caminhão de apoio diretamente.
 
-Substituir o sort estático de cidades (linhas 1108-1113) por seleção dinâmica:
+4. **Remover `maxOccupancyPercent` dos fallbacks forçados** — nos Steps 5d.6 e 5d.7, usar 100% da capacidade do caminhão em vez de 95%.
 
-```text
-1. Cidade âncora = primeira (sem mudança)
-2. Sequenciar cidade âncora do CD
-3. Pegar coordenadas da ÚLTIMA entrega
-4. Entre cidades restantes: escolher a que tem pedido mais PRÓXIMO desse ponto
-5. Sequenciar essa cidade começando desse ponto (nearestNeighborWithinCity já aceita fromLat/fromLng)
-6. Repetir até acabar as cidades
-```
+### Arquivo: `src/pages/NewRoute.tsx`
 
-O código nas linhas 1174-1179 já faz o passo 5 (usar `fromLat/fromLng` da última entrega). O que falta é o passo 4 — escolher a próxima cidade dinamicamente em vez de usar sort por `avgDist`.
+5. **Passar `plateOverrides` e `customTerritoryRules`** na chamada do `autoComposeRoute` (linha 200), buscando do banco da mesma forma que o `distributeLoad` faz. Isso garante consistência entre a preview e a distribuição final.
 
-### O que NÃO muda
-- Interfaces (`AutoRouterResult`, `TruckComposition`) — idênticas
-- `nearestNeighborWithinCity`, `streetGroupSweep` — intactos
-- `mergeItemsIntoOrders`, `recommendTrucks`, `getRoutingSummary` — intactos
-- `PlateOverride`, regras de território — mantidos
-- Nenhum outro arquivo é afetado
+### Arquivo: `src/hooks/useRoutes.ts`
 
-## Arquivo afetado
+6. **Fallback de `city`** — ao construir `parsedOrders` (linha 406), se `city` está vazio, extrair do endereço usando `parseAddress` e popular o campo antes de enviar ao motor.
+
+## O que NÃO muda
+- Interfaces de resultado (AutoRouterResult, TruckComposition)
+- Lógica de território e sequenciamento
+- Validação bloqueante (mantida)
+- UI dos componentes
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/autoRouterEngine.ts` | Reordenar fluxo (sequenciar ANTES de alocar) + nearest-neighbor inter-cidades em `optimizeDeliverySequence` |
+| `src/lib/autoRouterEngine.ts` | Fix overflow marking, fallback sem limite de peso, cidade desconhecida → lookup inteligente, remover teto 95% dos fallbacks |
+| `src/pages/NewRoute.tsx` | Passar plateOverrides + customTerritoryRules na chamada do autoComposeRoute |
+| `src/hooks/useRoutes.ts` | Fallback de city vazio usando parseAddress |
 
