@@ -409,8 +409,7 @@ export function useRouteDetails(routeId: string | undefined) {
         // Fallback: if city is missing, extract from address using parseAddress
         if (!city) {
           try {
-            const { parseAddress: pa } = require('@/lib/geocoding');
-            const parsed = pa(o.address);
+            const parsed = parseAddress(o.address);
             city = parsed.city || undefined;
           } catch {
             // silent fallback
