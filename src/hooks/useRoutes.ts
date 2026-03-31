@@ -7,6 +7,7 @@ import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distributio
 import { autoComposeRoute, AutoRouterResult, PlateOverride } from '@/lib/autoRouterEngine';
 import { optimizeDeliveryOrder } from '@/lib/routing';
 import { TERRITORY_RULES, TerritoryRule } from '@/lib/anchorRules';
+import { parseAddress } from '@/lib/geocoding';
 
 // Helper to convert Supabase order to local Order type
 function toOrder(o: unknown): Order | undefined {
