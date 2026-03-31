@@ -27,6 +27,7 @@ import { analyzeFleetRequirements, validateFinalResult } from '@/lib/routeIntell
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { geocodeAddress } from '@/lib/nominatimGeocoding';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function NewRoute() {
   const navigate = useNavigate();
@@ -197,11 +198,55 @@ export default function NewRoute() {
     if (activeTrucks.length > 0 && !fleetConfirmed) {
       const hints = getHintsForOrders(filteredOrders);
       
+      // Build plate overrides (same as distributeLoad for consistency)
+      const plateOverrides = [{
+        plate: 'FIO0R12',
+        allowedCities: ['barueri', 'jandira', 'itapevi'],
+        allowedNeighborhoods: ['parque viana'],
+        maxDeliveries: 11,
+        maxWeightKg: 450,
+      }];
+
+      // Fetch custom territory rules from DB if available
+      let customTerritoryRules: any[] | undefined;
+      try {
+        const { data: dbTerritories } = await supabase
+          .from('truck_territories')
+          .select('*')
+          .order('priority', { ascending: true });
+
+        if (dbTerritories && dbTerritories.length > 0) {
+          const { TERRITORY_RULES } = await import('@/lib/anchorRules');
+          const truckPlateMap = new Map(activeTrucks.map(t => [t.id, t.plate]));
+          customTerritoryRules = dbTerritories.map((t: any, idx: number) => {
+            const matchingDefault = TERRITORY_RULES.find(
+              (r: any) => r.anchorCity === t.anchor_city && !r.isSupport
+            ) || (t.is_support ? TERRITORY_RULES.find((r: any) => r.isSupport) : null);
+            return {
+              id: `db_${idx}`,
+              label: t.is_support ? 'Apoio / Excedentes' : `Âncora ${t.anchor_city || 'N/A'}`,
+              anchorCity: t.anchor_city,
+              maxDeliveries: t.max_deliveries,
+              allowedFillCities: t.fill_cities || [],
+              neighborhoodFills: matchingDefault?.neighborhoodFills || [],
+              neighborhoodExceptions: matchingDefault?.neighborhoodExceptions || [],
+              excludedNeighborhoods: matchingDefault?.excludedNeighborhoods || [],
+              priorityNeighborhoods: matchingDefault?.priorityNeighborhoods || [],
+              isSupport: t.is_support,
+              priority: t.priority,
+              fixedPlate: truckPlateMap.get(t.truck_id),
+            };
+          });
+        }
+      } catch (e) {
+        console.warn('[NewRoute] Could not load custom territories, using defaults');
+      }
+
       const result = autoComposeRoute(filteredOrders, activeTrucks, {
         strategy: 'padrao',
         safetyMarginPercent: 10,
         maxOccupancyPercent: 95,
-      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities ? allowedCities : undefined);
+      }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities ? allowedCities : undefined, plateOverrides, customTerritoryRules);
       setAutoResult(result);
       
       if (hints.length > 0) {

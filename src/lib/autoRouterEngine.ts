@@ -12,7 +12,7 @@
  */
 
 import { Truck, ParsedOrder, RoutingStrategy } from '@/types';
-import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName } from './geocoding';
+import { parseAddress, calculateDistance, getDistributionCenterCoords, GeocodedAddress, normalizeCityName, CITY_COORDINATES } from './geocoding';
 import { ParsedItemDetail } from './itemDetailParser';
 import { RoutingHint, ExtractedPatterns } from './historyPatternEngine';
 import { 
@@ -118,6 +118,28 @@ export function recommendTrucks(
   return [...availableTrucks];
 }
 
+/**
+ * Intelligent city extraction: search for known city names within the address string.
+ * Used as fallback when parseAddress fails to extract the city field.
+ */
+function extractCityFromAddress(address: string): string | null {
+  const normalized = address
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const cityNames = Object.keys(CITY_COORDINATES).sort((a, b) => b.length - a.length);
+  
+  for (const cityName of cityNames) {
+    if (normalized.includes(cityName)) {
+      return cityName;
+    }
+  }
+  return null;
+}
+
 // ================================================================
 // MAIN ENTRY POINT
 // ================================================================
@@ -213,10 +235,17 @@ export function autoComposeRoute(
     return { ...order, geocoded, distanceFromCD, angle };
   });
 
-  // Step 2: Group orders by city
+  // Step 2: Group orders by city (with intelligent city lookup for unknowns)
   const cityOrderMap = new Map<string, GeocodedOrder[]>();
   for (const order of geocodedOrders) {
-    const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
+    let city = normalizeCityName(order.city || order.geocoded.city || '');
+    // Intelligent fallback: if city is empty/unknown, try to find it in the address
+    if (!city || city === 'desconhecida' || city === '') {
+      city = extractCityFromAddress(order.address) || 'desconhecida';
+      // Propagate back so downstream logic has it
+      order.city = city;
+      if (order.geocoded) order.geocoded.city = city;
+    }
     const existing = cityOrderMap.get(city) || [];
     existing.push(order);
     cityOrderMap.set(city, existing);
@@ -328,8 +357,8 @@ export function autoComposeRoute(
         currentWeight += order.weight_kg;
       } else {
         overflowOrders.push(order);
-        assignedOrderKeys.add(key);
-        reasoning.push(`Excedente de ${rule.anchorCity}: ${order.client_name} → Caminhão de apoio`);
+        // FIX: Do NOT mark as assigned — allow other territories (fill cities) to pick it up
+        reasoning.push(`Excedente de ${rule.anchorCity}: ${order.client_name} → tentará outro território ou apoio`);
       }
     }
 
@@ -462,12 +491,15 @@ export function autoComposeRoute(
       }
     }
 
-    // 5b: Overflow from anchor trucks
+    // 5b: Overflow from anchor trucks (only those not yet assigned by fill cities)
     for (const order of overflowOrders) {
+      const key = orderKey(order);
+      if (assignedOrderKeys.has(key)) continue; // already picked by a fill city territory
       if (assignedOrders.length >= maxDel) break;
       if (currentWeight + order.weight_kg > capacity) continue;
 
       assignedOrders.push(order);
+      assignedOrderKeys.add(key);
       currentWeight += order.weight_kg;
     }
 
@@ -642,7 +674,7 @@ export function autoComposeRoute(
       let bestScore = -Infinity;
 
       for (const comp of compositions) {
-        const capacity = Number(comp.truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+        const capacity = Number(comp.truck.capacity_kg); // Fallback: use 100% capacity
         const maxDel = comp.truck.max_deliveries ? Number(comp.truck.max_deliveries) : 25;
         const remainingWeight = capacity - comp.totalWeight;
         const remainingSlots = maxDel - comp.orders.length;
@@ -703,7 +735,7 @@ export function autoComposeRoute(
       let bestScore = -Infinity;
 
       for (const comp of compositions) {
-        const capacity = Number(comp.truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+        const capacity = Number(comp.truck.capacity_kg); // Forced fallback: use 100% capacity
         const remainingWeight = capacity - comp.totalWeight;
         if (remainingWeight < orphan.weight_kg) continue; // only respect weight
 
@@ -747,17 +779,15 @@ export function autoComposeRoute(
     }
   }
 
-  // Step 5d.7: Last resort — force into any truck even if overweight
+  // Step 5d.7: Last resort — force into any truck even if overweight (NEVER leave orders unassigned)
   const lastResort = geocodedOrders.filter(o => !assignedOrderKeys.has(orderKey(o)));
   if (lastResort.length > 0) {
-    reasoning.push(`[Último Recurso] ${lastResort.length} pedidos restantes — forçando alocação`);
+    reasoning.push(`[Último Recurso] ${lastResort.length} pedidos restantes — forçando alocação (ignora peso)`);
     for (const orphan of lastResort) {
       const orphanCity = normalizeCityName(orphan.city || orphan.geocoded.city || '');
-      // Find truck with most remaining weight capacity
+      // Find truck: prefer same city, then most remaining capacity; include ALL trucks (even empty)
       const sorted = [...compositions]
-        .filter(c => c.orders.length > 0)
         .sort((a, b) => {
-          // Prefer same city
           const aHasCity = a.cities.includes(orphanCity) ? 1000 : 0;
           const bHasCity = b.cities.includes(orphanCity) ? 1000 : 0;
           const aRemaining = Number(a.truck.capacity_kg) - a.totalWeight;
@@ -774,6 +804,7 @@ export function autoComposeRoute(
           target.cities.push(orphanCity);
         }
         assignedOrderKeys.add(orderKey(orphan));
+        warnings.push(`⚠️ ${orphan.client_name} (${orphanCity}) forçado para ${target.truck.plate} (pode exceder peso)`);
         reasoning.push(`[Último Recurso] ${orphan.client_name} (${orphanCity}) → ${target.truck.plate}`);
       }
     }

@@ -7,6 +7,7 @@ import { distributeOrders, reorderDeliveriesByStrategy } from '@/lib/distributio
 import { autoComposeRoute, AutoRouterResult, PlateOverride } from '@/lib/autoRouterEngine';
 import { optimizeDeliveryOrder } from '@/lib/routing';
 import { TERRITORY_RULES, TerritoryRule } from '@/lib/anchorRules';
+import { parseAddress } from '@/lib/geocoding';
 
 // Helper to convert Supabase order to local Order type
 function toOrder(o: unknown): Order | undefined {
@@ -403,20 +404,32 @@ export function useRouteDetails(routeId: string | undefined) {
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
       // Always recalculate using real DB orders (with valid UUIDs)
-      const parsedOrders: ParsedOrder[] = route.orders.map(o => ({
-        pedido_id: o.id,
-        client_name: o.client_name,
-        address: o.address,
-        weight_kg: Number(o.weight_kg),
-        product_description: o.product_description,
-        city: (o as any).city || undefined,
-        items: (o.items || []).map(item => ({
-          product_name: item.product_name,
-          weight_kg: Number(item.weight_kg),
-          quantity: item.quantity,
-        })),
-        isValid: true,
-      }));
+      const parsedOrders: ParsedOrder[] = route.orders.map(o => {
+        let city = (o as any).city || undefined;
+        // Fallback: if city is missing, extract from address using parseAddress
+        if (!city) {
+          try {
+            const parsed = parseAddress(o.address);
+            city = parsed.city || undefined;
+          } catch {
+            // silent fallback
+          }
+        }
+        return {
+          pedido_id: o.id,
+          client_name: o.client_name,
+          address: o.address,
+          weight_kg: Number(o.weight_kg),
+          product_description: o.product_description,
+          city,
+          items: (o.items || []).map(item => ({
+            product_name: item.product_name,
+            weight_kg: Number(item.weight_kg),
+            quantity: item.quantity,
+          })),
+          isValid: true,
+        };
+      });
 
       // Validate ALL order IDs are real UUIDs before proceeding
       const invalidIds = parsedOrders.filter(o => !o.pedido_id || !UUID_RE.test(o.pedido_id));
