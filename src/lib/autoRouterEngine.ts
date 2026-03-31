@@ -1109,32 +1109,27 @@ function optimizeDeliverySequence(
     cityGroups.set(city, existing);
   }
 
-  // Step 3: Order cities — anchor city first, then fill cities
-  const cityDistances: { city: string; avgDist: number; orders: GeocodedOrder[] }[] = [];
-  for (const [city, cityOrders] of cityGroups) {
-    const avgDist = cityOrders.reduce((s, o) => s + o.distanceFromCD, 0) / cityOrders.length;
-    cityDistances.push({ city, avgDist, orders: cityOrders });
-  }
-
+  // Step 3: Sequenciar cidades com nearest-neighbor inter-cidades (transição fluida)
   const anchorCity = anchorRule?.anchorCity || territoryRule?.anchorCity || '';
-  cityDistances.sort((a, b) => {
-    if (a.city === anchorCity) return -1;
-    if (b.city === anchorCity) return 1;
-    if (strategy === 'finalizacao_proxima') return b.avgDist - a.avgDist;
-    return a.avgDist - b.avgDist;
-  });
-
-  // Step 4: Within each city block, sort by CEP > neighborhood > street, then sweep for street grouping
   const result: GeocodedOrder[] = [...priorityOrders];
 
-  for (const cityGroup of cityDistances) {
-    const cityOrders = cityGroup.orders;
+  // Build city entries
+  const cityEntries: { city: string; orders: GeocodedOrder[] }[] = [];
+  for (const [city, cityOrders] of cityGroups) {
+    cityEntries.push({ city, orders: cityOrders });
+  }
 
+  // Separate anchor city (always first) from the rest
+  const anchorEntry = cityEntries.find(e => e.city === anchorCity);
+  const remainingCityEntries = cityEntries.filter(e => e.city !== anchorCity);
+
+  // Helper: sequence a city block with insertion rules support
+  const sequenceCityBlock = (cityOrders: GeocodedOrder[], fromLat: number, fromLng: number): void => {
     // Handle special neighborhood insertion rules
     if (anchorRule) {
       const insertionRules = anchorRule.neighborhoodExceptions.filter(e => e.insertAfterNeighborhood);
       if (insertionRules.length > 0) {
-        nearestNeighborWithinCity(cityOrders, startLat, startLng);
+        nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
 
         for (const rule of insertionRules) {
           const targetNh = normalizeNeighborhood(rule.insertAfterNeighborhood!);
@@ -1169,30 +1164,46 @@ function optimizeDeliverySequence(
           }
         }
 
-        // Apply nearest-neighbor after insertion rules
-        const lastResult = result[result.length - 1];
-        const nnLat = lastResult ? lastResult.geocoded.estimatedLat : startLat;
-        const nnLng = lastResult ? lastResult.geocoded.estimatedLng : startLng;
-        nearestNeighborWithinCity(cityOrders, nnLat, nnLng);
-        result.push(...cityOrders);
-        continue;
+        nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
+        return;
       }
     }
 
-    // Use nearest-neighbor for geographic sequencing (with fallback to CEP sort)
-    if (anchorCity && cityGroup.city === anchorCity) {
-      // Anchor city: start from CD
-      nearestNeighborWithinCity(cityOrders, startLat, startLng);
-    } else {
-      // Fill cities: continue from last position
-      const lastOrder = result[result.length - 1];
-      const fromLat = lastOrder ? lastOrder.geocoded.estimatedLat : startLat;
-      const fromLng = lastOrder ? lastOrder.geocoded.estimatedLng : startLng;
-      nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
-    }
-    // Always apply street grouping sweep after nearest-neighbor
+    nearestNeighborWithinCity(cityOrders, fromLat, fromLng);
     streetGroupSweep(cityOrders);
-    result.push(...cityOrders);
+  };
+
+  // Sequence anchor city first (from CD)
+  if (anchorEntry && anchorEntry.orders.length > 0) {
+    sequenceCityBlock(anchorEntry.orders, startLat, startLng);
+    result.push(...anchorEntry.orders);
+  }
+
+  // Nearest-neighbor inter-cidades: escolher próxima cidade pela proximidade do último ponto
+  const pending = [...remainingCityEntries];
+  while (pending.length > 0) {
+    const lastOrder = result[result.length - 1];
+    const fromLat = lastOrder ? lastOrder.geocoded.estimatedLat : startLat;
+    const fromLng = lastOrder ? lastOrder.geocoded.estimatedLng : startLng;
+
+    // Encontrar a cidade com entrega mais próxima do último ponto
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < pending.length; i++) {
+      for (const order of pending[i].orders) {
+        const dist = calculateDistance(fromLat, fromLng,
+          order.geocoded.estimatedLat, order.geocoded.estimatedLng);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
+        }
+      }
+    }
+
+    const nextCity = pending.splice(bestIdx, 1)[0];
+    // Sequenciar a próxima cidade começando do último ponto de saída
+    sequenceCityBlock(nextCity.orders, fromLat, fromLng);
+    result.push(...nextCity.orders);
   }
 
   // Step 5: Cross-city insertAfterNeighborhood (e.g. Jaguaré after Rochdale across city groups)
