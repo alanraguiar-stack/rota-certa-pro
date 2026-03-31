@@ -227,6 +227,16 @@ export function autoComposeRoute(
     reasoning.push(`${city}: ${cityOrders.length} entregas (${(weight / 1000).toFixed(1)}t)`);
   }
 
+  // ── ETAPA 2: Pré-sequenciar cada caixa de cidade (bairro → rua → proximidade) ──
+  // Isso garante que, durante a alocação, overflow remove do FINAL (mais distantes do CD)
+  for (const [, cityOrders] of cityOrderMap) {
+    if (cityOrders.length > 1) {
+      nearestNeighborWithinCity(cityOrders, cd.lat, cd.lng);
+      streetGroupSweep(cityOrders);
+    }
+  }
+  reasoning.push('Etapa 2: Cidades pré-sequenciadas (bairro → rua → proximidade)');
+
   // Step 3: Auto-assign trucks to territories
   clearTruckTerritories();
   const citiesInOrders = new Set(cityOrderMap.keys());
