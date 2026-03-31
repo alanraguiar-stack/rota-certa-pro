@@ -713,7 +713,7 @@ export function autoComposeRoute(
       let bestScore = -Infinity;
 
       for (const comp of compositions) {
-        const capacity = Number(comp.truck.capacity_kg) * (cfg.maxOccupancyPercent / 100);
+        const capacity = Number(comp.truck.capacity_kg); // Forced fallback: use 100% capacity
         const remainingWeight = capacity - comp.totalWeight;
         if (remainingWeight < orphan.weight_kg) continue; // only respect weight
 
