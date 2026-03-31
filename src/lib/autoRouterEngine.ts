@@ -335,8 +335,8 @@ export function autoComposeRoute(
         currentWeight += order.weight_kg;
       } else {
         overflowOrders.push(order);
-        assignedOrderKeys.add(key);
-        reasoning.push(`Excedente de ${rule.anchorCity}: ${order.client_name} → Caminhão de apoio`);
+        // FIX: Do NOT mark as assigned — allow other territories (fill cities) to pick it up
+        reasoning.push(`Excedente de ${rule.anchorCity}: ${order.client_name} → tentará outro território ou apoio`);
       }
     }
 
