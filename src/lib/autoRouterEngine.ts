@@ -469,12 +469,15 @@ export function autoComposeRoute(
       }
     }
 
-    // 5b: Overflow from anchor trucks
+    // 5b: Overflow from anchor trucks (only those not yet assigned by fill cities)
     for (const order of overflowOrders) {
+      const key = orderKey(order);
+      if (assignedOrderKeys.has(key)) continue; // already picked by a fill city territory
       if (assignedOrders.length >= maxDel) break;
       if (currentWeight + order.weight_kg > capacity) continue;
 
       assignedOrders.push(order);
+      assignedOrderKeys.add(key);
       currentWeight += order.weight_kg;
     }
 
