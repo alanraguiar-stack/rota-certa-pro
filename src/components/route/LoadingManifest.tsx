@@ -176,7 +176,7 @@ function generateLoadingManifestPDF(
   const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
   
   autoTable(doc, {
-    startY: 85,
+    startY: tableStartY + 5,
     head: [['#', 'Produto', 'Qtde', 'Unidade', 'Peso Total']],
     body: consolidatedProducts.map((p, idx) => [
       String(idx + 1),
