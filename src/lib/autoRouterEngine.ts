@@ -1362,16 +1362,6 @@ function sortWithinCity(a: GeocodedOrder, b: GeocodedOrder): number {
 function nearestNeighborWithinCity(orders: GeocodedOrder[], startLat: number, startLng: number): void {
   if (orders.length <= 1) return;
 
-  // Check if orders have real coordinates (not just hash estimates)
-  const hasRealCoords = orders.some(o => o.latitude && o.longitude);
-  
-  if (!hasRealCoords) {
-    // Fallback: use CEP-based sorting when no real coordinates available
-    orders.sort((a, b) => sortWithinCity(a, b));
-    streetGroupSweep(orders);
-    return;
-  }
-
   const result: GeocodedOrder[] = [];
   const remaining = [...orders];
   let currentLat = startLat;
