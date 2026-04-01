@@ -33,8 +33,21 @@ interface ConsolidatedProduct {
 /**
  * Consolidate products from orders with unit type awareness
  */
+/**
+ * Check if orders lack detailed item data
+ */
+function ordersLackDetails(orders: Order[]): boolean {
+  return orders.every(order => 
+    (!order.items || order.items.length === 0) && 
+    (!order.product_description || order.product_description === 'Sem itens detalhados')
+  );
+}
+
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
   const productMap = new Map<string, { weight: number; quantity: number; count: number; unitType: string }>();
+  
+  // If no orders have detailed items, list each order individually by client
+  const noDetails = ordersLackDetails(orders);
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
@@ -48,6 +61,15 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
           count: existing.count + 1,
           unitType,
         });
+      });
+    } else if (noDetails) {
+      // Fallback: list each order individually by client name
+      const label = `Pedido - ${order.client_name}`;
+      productMap.set(label, {
+        weight: Number(order.weight_kg),
+        quantity: 1,
+        count: 1,
+        unitType: 'kg',
       });
     } else {
       const label = order.product_description || `Pedido ${order.client_name}`;
