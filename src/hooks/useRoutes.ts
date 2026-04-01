@@ -664,7 +664,7 @@ export function useRouteDetails(routeId: string | undefined) {
 
         if (truckOrders.length === 0) continue;
 
-        const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+        const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy);
 
         for (let i = 0; i < optimizedRoute.orderedDeliveries.length; i++) {
           const delivery = optimizedRoute.orderedDeliveries[i];
@@ -754,7 +754,7 @@ export function useRouteDetails(routeId: string | undefined) {
           .filter((o): o is Order => o !== undefined);
 
         // Optimize route based on actual addresses
-        const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+        const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy);
 
         // Update order sequences based on optimized route
         dist.orders = optimizedRoute.orderedDeliveries.map((delivery, index) => ({
@@ -786,7 +786,7 @@ export function useRouteDetails(routeId: string | undefined) {
           .map(o => ordersMap.get(o.orderId))
           .filter((o): o is Order => o !== undefined);
         
-        const routeMetrics = optimizeDeliveryOrder(truckOrders, strategy);
+        const routeMetrics = await optimizeDeliveryOrder(truckOrders, strategy);
 
         // Update route_truck totals with distance and time estimates
         await supabase
@@ -861,7 +861,7 @@ export function useRouteDetails(routeId: string | undefined) {
             .map(r => toOrder(route.orders.find(o => o.id === r.orderId)))
             .filter((o): o is Order => o !== undefined);
           
-          const routeMetrics = optimizeDeliveryOrder(truckOrders, 'padrao');
+          const routeMetrics = await optimizeDeliveryOrder(truckOrders, 'padrao');
           
           await supabase
             .from('route_trucks')

@@ -10,6 +10,7 @@ import {
   areCitiesNeighbors,
   GeocodedAddress 
 } from './geocoding';
+import { optimizeWithORS } from './orsOptimizer';
 
 export interface OptimizedRoute {
   orderedDeliveries: OrderWithRouteInfo[];
@@ -42,10 +43,10 @@ interface GeocodedOrderItem {
  * This replicates how the human analyst thinks: geographic continuity,
  * allowing border crossings between neighboring cities when it makes sense.
  */
-export function optimizeDeliveryOrder(
+export async function optimizeDeliveryOrder(
   orders: Order[],
   strategy: RoutingStrategy
-): OptimizedRoute {
+): Promise<OptimizedRoute> {
   if (orders.length === 0) {
     return {
       orderedDeliveries: [],
@@ -93,7 +94,23 @@ export function optimizeDeliveryOrder(
     }
   }
 
-  // Pure nearest-neighbor with proximity bonuses
+  // Try ORS optimization first (real driving distances)
+  const orsOrder = await optimizeWithORS(orders);
+  
+  if (orsOrder && orsOrder.length === orders.length) {
+    // Reorder geocodedOrders based on ORS result
+    const orderMap = new Map(geocodedOrders.map(g => [g.order.id, g]));
+    const orsSequence = orsOrder
+      .map(id => orderMap.get(id))
+      .filter((g): g is GeocodedOrderItem => g !== undefined);
+    
+    if (orsSequence.length === geocodedOrders.length) {
+      console.log('[routing] Using ORS-optimized sequence');
+      return buildRouteWithMetrics(orsSequence);
+    }
+  }
+
+  // Fallback: nearest-neighbor with proximity bonuses
   const finalSequence = nearestNeighborWithProximityBonuses(
     geocodedOrders, startLat, startLng
   );
@@ -228,11 +245,11 @@ function buildRouteWithMetrics(
 /**
  * Group and optimize orders for multiple trucks
  */
-export function optimizeMultiTruckRoutes(
+export async function optimizeMultiTruckRoutes(
   distributions: TruckDistribution[],
   allOrders: Order[],
   strategy: RoutingStrategy
-): Map<string, OptimizedRoute> {
+): Promise<Map<string, OptimizedRoute>> {
   const ordersMap = new Map(allOrders.map(o => [o.id, o]));
   const routes = new Map<string, OptimizedRoute>();
 
@@ -241,7 +258,7 @@ export function optimizeMultiTruckRoutes(
       .map(o => ordersMap.get(o.orderId))
       .filter((o): o is Order => o !== undefined);
 
-    const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+    const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy);
     routes.set(dist.routeTruckId, optimizedRoute);
   }
 
