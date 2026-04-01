@@ -43,10 +43,10 @@ interface GeocodedOrderItem {
  * This replicates how the human analyst thinks: geographic continuity,
  * allowing border crossings between neighboring cities when it makes sense.
  */
-export function optimizeDeliveryOrder(
+export async function optimizeDeliveryOrder(
   orders: Order[],
   strategy: RoutingStrategy
-): OptimizedRoute {
+): Promise<OptimizedRoute> {
   if (orders.length === 0) {
     return {
       orderedDeliveries: [],
