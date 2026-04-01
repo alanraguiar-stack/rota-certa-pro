@@ -380,17 +380,6 @@ export default function NewRoute() {
 
             {currentStep === 'validation' && (
               <div className="space-y-6">
-                {/* Geocoding progress */}
-                {geocodingProgress.status !== 'idle' && (
-                  <GeocodingProgress
-                    current={geocodingProgress.current}
-                    total={geocodingProgress.total}
-                    currentAddress={geocodingProgress.currentAddress}
-                    status={geocodingProgress.status}
-                    successCount={geocodingProgress.successCount}
-                    failedCount={geocodingProgress.failedCount}
-                  />
-                )}
                 {/* Backlog info card */}
                 <PendingOrdersCard
                   recoveredOrders={recoveredOrders}
