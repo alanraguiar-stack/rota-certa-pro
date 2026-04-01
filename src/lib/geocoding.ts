@@ -197,9 +197,11 @@ export function getCityDistanceFromCD(cityName: string): number {
  * Parse and normalize a Brazilian address into structured components
  */
 export function parseAddress(address: string): GeocodedAddress {
-  const normalized = address.trim().toLowerCase();
+  // Remover instruções entre parênteses (ex: "(fundos)", "(portão azul)")
+  const cleanAddress = address.replace(/\s*\([^)]*\)/g, '').trim();
+  const normalized = cleanAddress.toLowerCase();
   
-  const parts = address.split(',').map(p => p.trim());
+  const parts = cleanAddress.split(',').map(p => p.trim());
   
   let street = '';
   let number = '';

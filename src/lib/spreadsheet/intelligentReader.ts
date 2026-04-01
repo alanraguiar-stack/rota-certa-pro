@@ -288,9 +288,15 @@ export function extractOrders(
       addressParts.cep = cepRaw.replace(/\D/g, '');
     }
     
+    // Limpar instruções entre parênteses de cada parte do endereço
+    const stripParens = (s: string) => s.replace(/\s*\([^)]*\)/g, '').trim();
+    if (addressParts.street) addressParts.street = stripParens(addressParts.street);
+    if (addressParts.neighborhood) addressParts.neighborhood = stripParens(addressParts.neighborhood);
+    if (addressParts.city) addressParts.city = stripParens(addressParts.city);
+
     // Montar endereço completo
     if (mapping.addressCombined !== undefined) {
-      address = String(cells[mapping.addressCombined] ?? '').trim();
+      address = String(cells[mapping.addressCombined] ?? '').replace(/\s*\([^)]*\)/g, '').trim();
     } else {
       const parts: string[] = [];
       if (addressParts.street) {
