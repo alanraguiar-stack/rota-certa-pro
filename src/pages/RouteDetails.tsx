@@ -500,7 +500,7 @@ export default function RouteDetails() {
           const isPartial = totalAssigned > 0 && totalAssigned < totalOrders;
           const isZero = !hasAssignments && hasTrucks;
           const isInconsistent = (isZero || isPartial) && 
-            (route.status === 'loading' || route.status === 'distributed' || route.status === 'loading_confirmed' || route.status === 'trucks_assigned');
+            (route.status === 'loading' || route.status === 'distributed' || route.status === 'loading_confirmed');
           
           if (!isInconsistent) return null;
 
