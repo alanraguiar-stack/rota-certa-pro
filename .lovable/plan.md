@@ -1,18 +1,41 @@
 
 
-# Plano: Remover Recomendações de Frota — Manter Apenas Seleção Manual
+# Plano: Corrigir Alerta Falso de "Distribuição Inconsistente"
 
-## Mudança
+## Problema
 
-No componente `FleetRecommendation.tsx`, remover toda a seção de "Recomendações Inteligentes" (cards com sugestões automáticas de combinação de caminhões) e manter apenas a seleção manual com checkboxes.
+A condição na linha 502-503 do `RouteDetails.tsx` inclui `trucks_assigned` na lista de status que disparam o alerta:
 
-## Arquivo: `src/components/route/FleetRecommendation.tsx`
+```typescript
+const isInconsistent = (isZero || isPartial) && 
+  (route.status === 'loading' || route.status === 'distributed' || 
+   route.status === 'loading_confirmed' || route.status === 'trucks_assigned');
+```
 
-- Remover as funções de cálculo: `calculateFleetRecommendations`, `findEfficientCombination`, `findBalancedCombination`, `findDeliveryOptimizedCombination` (linhas 27-156)
-- Remover o state `recommendations` e o `useMemo` (linhas 178-180)
-- Remover o bloco JSX de recomendações (linhas 199-243) — os cards com "Recomendado", "Opção 2", etc.
-- Remover `handleApplyRecommendation` (linhas 196-198)
-- Remover imports não utilizados: `Sparkles`, `Progress`, `Badge`, `FleetRecommendation as FleetRecommendationType`
-- Manter: seleção manual com checkboxes, resumo de capacidade, botão de confirmar
-- A lista de caminhões começa expandida por padrão (`showAllTrucks` default `true`)
+O status `trucks_assigned` é o estado **normal** logo após selecionar caminhões e **antes** de rodar a distribuição. Nesse momento, é esperado que não haja assignments. O alerta só deveria aparecer quando o status já avançou para `loading` ou além, mas os assignments estão faltando.
+
+Dados da rota atual confirmam:
+- Status: `trucks_assigned` (correto — distribuição ainda não foi executada)
+- 64 pedidos, 0 assignments (esperado neste estágio)
+- Capacidade total: 10.050kg vs peso total: 5.702kg (sobra de capacidade)
+
+## Solução
+
+### `src/pages/RouteDetails.tsx`
+
+Remover `'trucks_assigned'` da condição do alerta. O alerta só aparece quando o status é `loading`, `distributed` ou `loading_confirmed` mas os assignments estão zerados ou incompletos — indicando uma inconsistência real.
+
+```typescript
+const isInconsistent = (isZero || isPartial) && 
+  (route.status === 'loading' || route.status === 'distributed' || 
+   route.status === 'loading_confirmed');
+```
+
+Uma linha alterada, zero risco de efeito colateral.
+
+## Arquivo afetado
+
+| Arquivo | Mudança |
+|---|---|
+| `src/pages/RouteDetails.tsx` | Remover `trucks_assigned` da condição do alerta de inconsistência |
 
