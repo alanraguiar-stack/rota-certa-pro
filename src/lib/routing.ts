@@ -258,7 +258,7 @@ export function optimizeMultiTruckRoutes(
       .map(o => ordersMap.get(o.orderId))
       .filter((o): o is Order => o !== undefined);
 
-    const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+    const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy);
     routes.set(dist.routeTruckId, optimizedRoute);
   }
 
