@@ -159,15 +159,15 @@ function nearestNeighborWithProximityBonuses(
       if (currentStreet && candidate.geocoded.street &&
           currentStreet === candidate.geocoded.street &&
           currentCity === candidate.city) {
-        dist *= 0.15; // 85% discount - same street
+        dist *= 0.10; // 90% discount - same street
       } else if (currentNeighborhood && candidate.geocoded.neighborhood &&
           currentNeighborhood === candidate.geocoded.neighborhood.toLowerCase() &&
           currentCity === candidate.city) {
-        dist *= 0.30; // 70% discount - same neighborhood
+        dist *= 0.20; // 80% discount - same neighborhood
       } else if (currentCity && currentCity === candidate.city) {
-        dist *= 0.70; // 30% discount - same city
+        dist *= 0.35; // 65% discount - same city
       } else if (currentCity && areCitiesNeighbors(currentCity, candidate.city)) {
-        dist *= 0.85; // 15% discount - neighboring city
+        dist *= 0.80; // 20% discount - neighboring city
       }
       // else: no discount (different region)
 
