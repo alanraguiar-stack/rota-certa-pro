@@ -1,31 +1,36 @@
 
 
-# Plano: Reforçar Transição Suave Entre Cidades
+# Plano: Corrigir Romaneio de Carga Vazio (Fallback sem Itens)
 
-## Problema
+## Causa Raiz
 
-O fallback nearest-neighbor em `routing.ts` aplica apenas 30% de desconto para mesma cidade (`×0.70`), o que é insuficiente — se uma entrega de outra cidade estiver geograficamente perto, o algoritmo salta para lá antes de terminar a cidade atual, quebrando a continuidade.
+Esta rota foi criada **sem o arquivo de detalhamento (ADV)**. Todos os pedidos têm `product_description = "Sem itens detalhados"` e zero registros em `order_items`. O código atual agrupa tudo numa única linha com esse texto genérico, que parece vazio/inútil.
 
-Quando o ORS está ativo, ele lida bem com isso (distâncias reais de direção). Mas no fallback, o problema persiste.
+## Correção
 
-## Mudança
+### `src/components/route/LoadingManifest.tsx`
 
-### `src/lib/routing.ts` — `nearestNeighborWithProximityBonuses`
+1. **Melhorar o fallback do `consolidateProducts`**: quando nenhum pedido tem `items`, listar cada pedido individualmente pelo nome do cliente + peso, em vez de agrupar tudo sob "Sem itens detalhados"
+2. **Adicionar aviso visual**: mostrar um alerta amarelo no topo explicando que o detalhamento de produtos não foi importado e que o romaneio está usando dados resumidos
+3. **PDF também reflete o fallback**: a função `generateLoadingManifestPDF` deve gerar a tabela com os pedidos individuais quando não há itens detalhados
 
-Reforçar os bônus para garantir que o algoritmo **esgote** todas as entregas da cidade atual antes de trocar:
+### Lógica do fallback
 
-| Relação | Atual | Novo |
-|---|---|---|
-| Mesma rua | ×0.15 | ×0.10 |
-| Mesmo bairro | ×0.30 | ×0.20 |
-| **Mesma cidade** | **×0.70** | **×0.35** |
-| Cidade vizinha | ×0.85 | ×0.80 |
+```text
+SE nenhum pedido tem items E todos têm "Sem itens detalhados":
+  → Listar cada pedido como: "Pedido - [Nome do Cliente]" | Peso | Qtd: 1
+SENÃO (fallback parcial):
+  → Manter lógica atual (usa product_description ou items)
+```
 
-O desconto de 65% para mesma cidade torna praticamente impossível o algoritmo pular para outra cidade enquanto houver entregas pendentes na cidade atual. Apenas quando a distância real for mais de 3× maior é que ele consideraria trocar — o que quase nunca acontece dentro de um município.
+### Resultado esperado
+
+- Rotas **com** ADV: comportamento inalterado (produtos consolidados)
+- Rotas **sem** ADV: romaneio lista cada pedido por cliente/peso + aviso de que o detalhamento não foi importado
 
 ## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/routing.ts` | Ajustar 4 multiplicadores no `nearestNeighborWithProximityBonuses` |
+| `src/components/route/LoadingManifest.tsx` | Fallback inteligente + aviso visual + PDF atualizado |
 
