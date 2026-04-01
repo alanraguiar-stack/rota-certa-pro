@@ -156,9 +156,21 @@ function generateLoadingManifestPDF(
   doc.text(String(orders.length), 180, 52);
   
   // Consolidated Products Table
+  // Warning if no detailed items
+  const noDetails = ordersLackDetails(orders);
+  let tableStartY = 80;
+  if (noDetails) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(150, 100, 0);
+    doc.text('* Detalhamento de produtos nao importado - listando pedidos individuais por cliente/peso', 20, 75);
+    doc.setTextColor(0, 0, 0);
+    tableStartY = 82;
+  }
+  
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  doc.text('PRODUTOS PARA SEPARACAO', 20, 80);
+  doc.text(noDetails ? 'PEDIDOS PARA SEPARACAO' : 'PRODUTOS PARA SEPARACAO', 20, tableStartY);
   
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
   const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
