@@ -1,41 +1,51 @@
 
 
-# Plano: Corrigir Alerta Falso de "Distribuição Inconsistente"
+# Plano: Remover Instruções entre Parênteses dos Endereços
 
 ## Problema
 
-A condição na linha 502-503 do `RouteDetails.tsx` inclui `trucks_assigned` na lista de status que disparam o alerta:
+Endereços frequentemente contêm instruções de entrega entre parênteses, como:
+- `Rua das Flores, 123 (fundos), Jardim América...`
+- `Av. Brasil, 456 (portão azul), Centro...`
 
-```typescript
-const isInconsistent = (isZero || isPartial) && 
-  (route.status === 'loading' || route.status === 'distributed' || 
-   route.status === 'loading_confirmed' || route.status === 'trucks_assigned');
-```
-
-O status `trucks_assigned` é o estado **normal** logo após selecionar caminhões e **antes** de rodar a distribuição. Nesse momento, é esperado que não haja assignments. O alerta só deveria aparecer quando o status já avançou para `loading` ou além, mas os assignments estão faltando.
-
-Dados da rota atual confirmam:
-- Status: `trucks_assigned` (correto — distribuição ainda não foi executada)
-- 64 pedidos, 0 assignments (esperado neste estágio)
-- Capacidade total: 10.050kg vs peso total: 5.702kg (sobra de capacidade)
+Esse conteúdo **atrapalha sim** o processamento:
+- O `parseAddress` em `geocoding.ts` usa regex para extrair rua, bairro e cidade. Parênteses poluem esses campos e quebram o matching
+- O `normalizeCityName` não encontra a cidade se houver `(instrução)` grudada no texto
+- O hash usado para coordenadas estimadas gera valores diferentes para o mesmo endereço com instruções diferentes
 
 ## Solução
 
-### `src/pages/RouteDetails.tsx`
+Adicionar uma limpeza de parênteses em **dois pontos**:
 
-Remover `'trucks_assigned'` da condição do alerta. O alerta só aparece quando o status é `loading`, `distributed` ou `loading_confirmed` mas os assignments estão zerados ou incompletos — indicando uma inconsistência real.
+### 1. `src/lib/geocoding.ts` — função `parseAddress`
+No início da função, antes de qualquer processamento, remover conteúdo entre parênteses:
 
 ```typescript
-const isInconsistent = (isZero || isPartial) && 
-  (route.status === 'loading' || route.status === 'distributed' || 
-   route.status === 'loading_confirmed');
+export function parseAddress(address: string): GeocodedAddress {
+  // Remover instruções entre parênteses (ex: "(fundos)", "(portão azul)")
+  const cleanAddress = address.replace(/\s*\([^)]*\)/g, '').trim();
+  const normalized = cleanAddress.trim().toLowerCase();
+  // ... resto usa cleanAddress em vez de address
 ```
 
-Uma linha alterada, zero risco de efeito colateral.
+O campo `original` continua guardando o endereço completo (com parênteses) para exibição.
 
-## Arquivo afetado
+### 2. `src/lib/spreadsheet/intelligentReader.ts` — construção do endereço
+Na montagem do endereço (linha ~292-314), limpar cada parte individualmente antes de juntar, removendo parênteses das partes estruturadas:
+
+```typescript
+// Limpar instruções entre parênteses de cada parte
+if (addressParts.street) {
+  addressParts.street = addressParts.street.replace(/\s*\([^)]*\)/g, '').trim();
+}
+```
+
+Isso garante que a instrução não vaze para o endereço montado. A instrução original permanece acessível no campo `product_description` ou observações se necessário.
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/RouteDetails.tsx` | Remover `trucks_assigned` da condição do alerta de inconsistência |
+| `src/lib/geocoding.ts` | Strip parênteses no início de `parseAddress` |
+| `src/lib/spreadsheet/intelligentReader.ts` | Limpar parênteses das partes do endereço na construção |
 
