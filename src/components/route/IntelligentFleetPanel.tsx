@@ -5,7 +5,7 @@
  * mostrando ao usuário o "pensamento" por trás da decisão.
  */
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   Truck as TruckIcon, 
   Sparkles, 
@@ -96,20 +96,6 @@ export function IntelligentFleetPanel({
     [totalWeight, trucks, orders]
   );
 
-  // Auto-aplicar recomendação e forçar inclusão de caminhões âncora
-  const hasAutoApplied = useRef(false);
-
-  useEffect(() => {
-    if (disabled || hasAutoApplied.current) return;
-
-    if (
-      fleetAnalysis.recommendedTrucks.length > 0 && 
-      selectedTruckIds.length === 0
-    ) {
-      hasAutoApplied.current = true;
-      onSelectionChange(fleetAnalysis.recommendedTrucks.map(t => t.id));
-    }
-  }, [fleetAnalysis.recommendedTrucks, selectedTruckIds.length, disabled, onSelectionChange]);
 
   // Cálculos da seleção atual
   const selectedTrucks = trucks.filter(t => selectedTruckIds.includes(t.id));
@@ -335,7 +321,6 @@ export function IntelligentFleetPanel({
         )}>
           {trucks.map((truck) => {
             const isSelected = selectedTruckIds.includes(truck.id);
-            const isRecommended = fleetAnalysis.recommendedTrucks.some(t => t.id === truck.id);
             
             return (
               <div
@@ -344,20 +329,10 @@ export function IntelligentFleetPanel({
                   'relative flex cursor-pointer items-center gap-3 rounded-lg border-2 p-4 transition-all',
                   isSelected 
                     ? 'border-primary bg-primary/5 shadow-sm' 
-                    : 'border-muted hover:border-primary/50 hover:bg-muted/50',
-                  isRecommended && !isSelected && 'ring-2 ring-primary/30 ring-offset-2'
+                    : 'border-muted hover:border-primary/50 hover:bg-muted/50'
                 )}
                 onClick={() => handleTruckToggle(truck.id)}
               >
-                {isRecommended && (
-                  <Badge 
-                    className="absolute -top-2 -right-2 text-xs"
-                    variant="default"
-                  >
-                    <Sparkles className="h-3 w-3 mr-1" />
-                    Recomendado
-                  </Badge>
-                )}
                 <Checkbox checked={isSelected} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-semibold">{truck.plate}</p>
