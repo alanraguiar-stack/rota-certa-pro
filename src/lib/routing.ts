@@ -123,10 +123,10 @@ export async function optimizeDeliveryOrder(
  * This allows natural city-boundary crossings when neighbors are closer.
  * 
  * Bonus structure (multiplied on distance):
- * - Same street: ×0.15 (85% discount)
- * - Same neighborhood: ×0.30 (70% discount)
- * - Same city: ×0.70 (30% discount)
- * - Neighbor city: ×0.85 (15% discount)
+ * - Same street: ×0.10 (90% discount)
+ * - Same neighborhood: ×0.20 (80% discount)
+ * - Same city: ×0.35 (65% discount)
+ * - Neighbor city: ×0.80 (20% discount)
  * - Different region: ×1.0 (no discount)
  */
 function nearestNeighborWithProximityBonuses(
