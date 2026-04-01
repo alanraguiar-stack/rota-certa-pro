@@ -786,7 +786,7 @@ export function useRouteDetails(routeId: string | undefined) {
           .map(o => ordersMap.get(o.orderId))
           .filter((o): o is Order => o !== undefined);
         
-        const routeMetrics = optimizeDeliveryOrder(truckOrders, strategy);
+        const routeMetrics = await optimizeDeliveryOrder(truckOrders, strategy);
 
         // Update route_truck totals with distance and time estimates
         await supabase
