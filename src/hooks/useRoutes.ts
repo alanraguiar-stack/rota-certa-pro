@@ -664,7 +664,7 @@ export function useRouteDetails(routeId: string | undefined) {
 
         if (truckOrders.length === 0) continue;
 
-        const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+        const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy);
 
         for (let i = 0; i < optimizedRoute.orderedDeliveries.length; i++) {
           const delivery = optimizedRoute.orderedDeliveries[i];
