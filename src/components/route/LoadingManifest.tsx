@@ -418,11 +418,21 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
               </div>
             </div>
             
+            {/* Warning for missing details */}
+            {selectedTruck && ordersLackDetails(selectedTruck.orders) && (
+              <Alert variant="default" className="mx-4 mt-4 border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
+                <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+                  Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Consolidated Products */}
             <div className="border-b p-4">
               <h3 className="flex items-center gap-2 font-semibold mb-3">
                 <Scale className="h-4 w-4" />
-                Produtos Consolidados
+                {selectedTruck && ordersLackDetails(selectedTruck.orders) ? 'Pedidos para Separação' : 'Produtos Consolidados'}
               </h3>
               <div className="space-y-2">
                 {consolidatedProducts.map((product, idx) => (
