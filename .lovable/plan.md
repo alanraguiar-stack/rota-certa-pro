@@ -1,51 +1,39 @@
 
 
-# Plano: Remover Instruções entre Parênteses dos Endereços
+# Plano: Corrigir Sequenciamento Intra-Cidade
 
-## Problema
+## O que muda
 
-Endereços frequentemente contêm instruções de entrega entre parênteses, como:
-- `Rua das Flores, 123 (fundos), Jardim América...`
-- `Av. Brasil, 456 (portão azul), Centro...`
+A função `nearestNeighborWithinCity` em `src/lib/autoRouterEngine.ts` tem um guard que verifica coordenadas reais (`o.latitude && o.longitude`). Como a geocodificação Nominatim foi removida, essa condição nunca é verdadeira — o sistema sempre cai no fallback de ordenação alfabética por CEP/rua.
 
-Esse conteúdo **atrapalha sim** o processamento:
-- O `parseAddress` em `geocoding.ts` usa regex para extrair rua, bairro e cidade. Parênteses poluem esses campos e quebram o matching
-- O `normalizeCityName` não encontra a cidade se houver `(instrução)` grudada no texto
-- O hash usado para coordenadas estimadas gera valores diferentes para o mesmo endereço com instruções diferentes
+O algoritmo de nearest-neighbor logo abaixo do guard já usa `estimatedLat/estimatedLng` (que existem para todos os pedidos). Basta remover o guard.
 
-## Solução
+## Impacto
 
-Adicionar uma limpeza de parênteses em **dois pontos**:
+- **Intra-cidade**: sequência passa a seguir proximidade geográfica real em vez de ordem alfabética
+- **Inter-cidade (indireto)**: o último ponto de cada cidade fica mais coerente geograficamente, melhorando o "exit point" para a próxima cidade
 
-### 1. `src/lib/geocoding.ts` — função `parseAddress`
-No início da função, antes de qualquer processamento, remover conteúdo entre parênteses:
+## Mudança
 
-```typescript
-export function parseAddress(address: string): GeocodedAddress {
-  // Remover instruções entre parênteses (ex: "(fundos)", "(portão azul)")
-  const cleanAddress = address.replace(/\s*\([^)]*\)/g, '').trim();
-  const normalized = cleanAddress.trim().toLowerCase();
-  // ... resto usa cleanAddress em vez de address
-```
+### `src/lib/autoRouterEngine.ts` — função `nearestNeighborWithinCity`
 
-O campo `original` continua guardando o endereço completo (com parênteses) para exibição.
-
-### 2. `src/lib/spreadsheet/intelligentReader.ts` — construção do endereço
-Na montagem do endereço (linha ~292-314), limpar cada parte individualmente antes de juntar, removendo parênteses das partes estruturadas:
+Remover as linhas 1365-1373 (o bloco `hasRealCoords` + fallback):
 
 ```typescript
-// Limpar instruções entre parênteses de cada parte
-if (addressParts.street) {
-  addressParts.street = addressParts.street.replace(/\s*\([^)]*\)/g, '').trim();
+// REMOVER:
+const hasRealCoords = orders.some(o => o.latitude && o.longitude);
+if (!hasRealCoords) {
+  orders.sort((a, b) => sortWithinCity(a, b));
+  streetGroupSweep(orders);
+  return;
 }
 ```
 
-Isso garante que a instrução não vaze para o endereço montado. A instrução original permanece acessível no campo `product_description` ou observações se necessário.
+O algoritmo nearest-neighbor que já existe nas linhas 1375-1421 assume o controle para todos os casos, usando as coordenadas estimadas.
 
-## Arquivos afetados
+## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/geocoding.ts` | Strip parênteses no início de `parseAddress` |
-| `src/lib/spreadsheet/intelligentReader.ts` | Limpar parênteses das partes do endereço na construção |
+| `src/lib/autoRouterEngine.ts` | Remover fallback alfabético (6 linhas), nearest-neighbor passa a ser usado sempre |
 
