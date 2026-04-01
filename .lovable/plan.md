@@ -1,39 +1,89 @@
 
 
-# Plano: Corrigir Sequenciamento Intra-Cidade
+# Plano: Integrar OpenRouteService Optimization Endpoint
 
-## O que muda
+## Visão Geral
 
-A função `nearestNeighborWithinCity` em `src/lib/autoRouterEngine.ts` tem um guard que verifica coordenadas reais (`o.latitude && o.longitude`). Como a geocodificação Nominatim foi removida, essa condição nunca é verdadeira — o sistema sempre cai no fallback de ordenação alfabética por CEP/rua.
+Usar o endpoint de **otimização** do OpenRouteService (ORS) para reordenar as entregas de cada caminhão com base em distâncias reais de direção — substituindo o nearest-neighbor atual que usa linha reta. **Não faz geocodificação** — usa as coordenadas estimadas que já existem.
 
-O algoritmo de nearest-neighbor logo abaixo do guard já usa `estimatedLat/estimatedLng` (que existem para todos os pedidos). Basta remover o guard.
+## Como funciona
 
-## Impacto
+1. Após a distribuição dos pedidos nos caminhões, o sistema envia **1 request por caminhão** ao ORS
+2. O ORS resolve o TSP (melhor sequência) usando a malha viária real
+3. O sistema reordena as entregas conforme a resposta
+4. Fallback: se o ORS falhar (rate limit, timeout), mantém a sequência do nearest-neighbor atual
 
-- **Intra-cidade**: sequência passa a seguir proximidade geográfica real em vez de ordem alfabética
-- **Inter-cidade (indireto)**: o último ponto de cada cidade fica mais coerente geograficamente, melhorando o "exit point" para a próxima cidade
+## Arquitetura
 
-## Mudança
-
-### `src/lib/autoRouterEngine.ts` — função `nearestNeighborWithinCity`
-
-Remover as linhas 1365-1373 (o bloco `hasRealCoords` + fallback):
-
-```typescript
-// REMOVER:
-const hasRealCoords = orders.some(o => o.latitude && o.longitude);
-if (!hasRealCoords) {
-  orders.sort((a, b) => sortWithinCity(a, b));
-  streetGroupSweep(orders);
-  return;
-}
+```text
+Frontend (useRoutes.ts)
+    │
+    ▼
+Edge Function: optimize-route
+    │  Recebe: coordenadas dos pontos + CD
+    │  Envia: 1 chamada ao ORS /v2/optimization
+    │  Retorna: sequência otimizada
+    │
+    ▼
+ORS API (https://api.openrouteservice.org/optimization)
 ```
 
-O algoritmo nearest-neighbor que já existe nas linhas 1375-1421 assume o controle para todos os casos, usando as coordenadas estimadas.
+## Mudanças
 
-## Arquivo afetado
+### 1. Configurar API Key do ORS
+- O usuário precisa criar uma conta gratuita em openrouteservice.org e gerar uma API key
+- A key será armazenada como secret via `add_secret`
+
+### 2. Nova Edge Function: `supabase/functions/optimize-route/index.ts`
+- Recebe: array de `{ id, lat, lng }` (jobs) + coordenadas do CD (start/end do vehicle)
+- Monta o payload ORS:
+  ```typescript
+  {
+    jobs: deliveries.map((d, i) => ({
+      id: i,
+      location: [d.lng, d.lat],  // ORS usa [lng, lat]
+      service: 300  // 5min por parada
+    })),
+    vehicles: [{
+      id: 0,
+      profile: "driving-car",
+      start: [cdLng, cdLat],
+      end: [cdLng, cdLat]
+    }]
+  }
+  ```
+- Retorna a sequência otimizada (array de IDs na ordem ideal)
+- Trata erros 429/500 retornando `null` para que o frontend use fallback
+
+### 3. Nova lib: `src/lib/orsOptimizer.ts`
+- Função `optimizeWithORS(deliveries, cdCoords)` que:
+  - Chama a edge function via `supabase.functions.invoke`
+  - Recebe a sequência otimizada
+  - Retorna `null` se falhar (fallback para nearest-neighbor)
+
+### 4. Atualizar `src/lib/routing.ts` — função `optimizeDeliveryOrder`
+- Após o nearest-neighbor atual, tenta chamar o ORS para reordenar
+- Se o ORS retornar resultado, reordena; senão mantém o resultado atual
+- Como a chamada é async, a função precisa virar `async`
+
+### 5. Atualizar `src/hooks/useRoutes.ts`
+- Ajustar as chamadas a `optimizeDeliveryOrder` para `await` (já está em contexto async)
+
+### 6. Atualizar `src/components/route/ManifestViewer.tsx`
+- Ajustar `useMemo` → `useEffect` + state para lidar com a natureza async
+
+## Limites do Free Tier
+- 500 requests/dia de optimization
+- Até 150 jobs por request
+- Suficiente para o uso (poucos caminhões por rota, ~20-30 entregas cada)
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/autoRouterEngine.ts` | Remover fallback alfabético (6 linhas), nearest-neighbor passa a ser usado sempre |
+| `supabase/functions/optimize-route/index.ts` | Nova edge function — proxy para ORS |
+| `src/lib/orsOptimizer.ts` | Novo — client para chamar a edge function |
+| `src/lib/routing.ts` | `optimizeDeliveryOrder` vira async, tenta ORS com fallback |
+| `src/hooks/useRoutes.ts` | Adicionar `await` nas chamadas |
+| `src/components/route/ManifestViewer.tsx` | Ajustar para async |
 
