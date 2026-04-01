@@ -861,7 +861,7 @@ export function useRouteDetails(routeId: string | undefined) {
             .map(r => toOrder(route.orders.find(o => o.id === r.orderId)))
             .filter((o): o is Order => o !== undefined);
           
-          const routeMetrics = optimizeDeliveryOrder(truckOrders, 'padrao');
+          const routeMetrics = await optimizeDeliveryOrder(truckOrders, 'padrao');
           
           await supabase
             .from('route_trucks')

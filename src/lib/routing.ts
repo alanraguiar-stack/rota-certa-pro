@@ -245,11 +245,11 @@ function buildRouteWithMetrics(
 /**
  * Group and optimize orders for multiple trucks
  */
-export function optimizeMultiTruckRoutes(
+export async function optimizeMultiTruckRoutes(
   distributions: TruckDistribution[],
   allOrders: Order[],
   strategy: RoutingStrategy
-): Map<string, OptimizedRoute> {
+): Promise<Map<string, OptimizedRoute>> {
   const ordersMap = new Map(allOrders.map(o => [o.id, o]));
   const routes = new Map<string, OptimizedRoute>();
 
