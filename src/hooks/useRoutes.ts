@@ -754,7 +754,7 @@ export function useRouteDetails(routeId: string | undefined) {
           .filter((o): o is Order => o !== undefined);
 
         // Optimize route based on actual addresses
-        const optimizedRoute = optimizeDeliveryOrder(truckOrders, strategy);
+        const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy);
 
         // Update order sequences based on optimized route
         dist.orders = optimizedRoute.orderedDeliveries.map((delivery, index) => ({
