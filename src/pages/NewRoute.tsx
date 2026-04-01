@@ -14,7 +14,7 @@ import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
-import { GeocodingProgress } from '@/components/route/GeocodingProgress';
+
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
