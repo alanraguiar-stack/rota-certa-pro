@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { FileDown, Printer, Eye, Truck, MapPin, Clock, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,13 +26,25 @@ interface ManifestViewerProps {
 
 export function ManifestViewer({ routeName, date, trucks, strategy }: ManifestViewerProps) {
   const [selectedTruckIndex, setSelectedTruckIndex] = useState(0);
-  const [optimizedRoutes, setOptimizedRoutes] = useState<Map<string, OptimizedRoute>>(() => {
-    const routes = new Map<string, OptimizedRoute>();
-    trucks.forEach(t => {
-      routes.set(t.truck.id, optimizeDeliveryOrder(t.orders, strategy));
-    });
-    return routes;
-  });
+  const [optimizedRoutes, setOptimizedRoutes] = useState<Map<string, OptimizedRoute>>(new Map());
+  const [isOptimizing, setIsOptimizing] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function optimize() {
+      setIsOptimizing(true);
+      const routes = new Map<string, OptimizedRoute>();
+      for (const t of trucks) {
+        const route = await optimizeDeliveryOrder(t.orders, strategy);
+        if (cancelled) return;
+        routes.set(t.truck.id, route);
+      }
+      setOptimizedRoutes(routes);
+      setIsOptimizing(false);
+    }
+    optimize();
+    return () => { cancelled = true; };
+  }, [trucks, strategy]);
 
   const selectedTruck = trucks[selectedTruckIndex];
   const selectedRoute = optimizedRoutes.get(selectedTruck?.truck.id);
