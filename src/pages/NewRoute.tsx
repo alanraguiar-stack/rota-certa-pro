@@ -199,10 +199,6 @@ export default function NewRoute() {
         });
       }
       
-      const usedTruckIds = result.compositions
-        .filter(c => c.orders.length > 0)
-        .map(c => c.truck.id);
-      setSelectedTruckIds(usedTruckIds);
     }
     
     completeStep('orders');
