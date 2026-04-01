@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { FileDown, Printer, Truck, Package, ClipboardCheck, Scale } from 'lucide-react';
+import { FileDown, Printer, Truck, Package, ClipboardCheck, Scale, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
 import { useProductUnits } from '@/hooks/useProductUnits';
@@ -32,8 +33,21 @@ interface ConsolidatedProduct {
 /**
  * Consolidate products from orders with unit type awareness
  */
+/**
+ * Check if orders lack detailed item data
+ */
+function ordersLackDetails(orders: Order[]): boolean {
+  return orders.every(order => 
+    (!order.items || order.items.length === 0) && 
+    (!order.product_description || order.product_description === 'Sem itens detalhados')
+  );
+}
+
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
   const productMap = new Map<string, { weight: number; quantity: number; count: number; unitType: string }>();
+  
+  // If no orders have detailed items, list each order individually by client
+  const noDetails = ordersLackDetails(orders);
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
@@ -47,6 +61,15 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
           count: existing.count + 1,
           unitType,
         });
+      });
+    } else if (noDetails) {
+      // Fallback: list each order individually by client name
+      const label = `Pedido - ${order.client_name}`;
+      productMap.set(label, {
+        weight: Number(order.weight_kg),
+        quantity: 1,
+        count: 1,
+        unitType: 'kg',
       });
     } else {
       const label = order.product_description || `Pedido ${order.client_name}`;
@@ -133,15 +156,27 @@ function generateLoadingManifestPDF(
   doc.text(String(orders.length), 180, 52);
   
   // Consolidated Products Table
+  // Warning if no detailed items
+  const noDetails = ordersLackDetails(orders);
+  let tableStartY = 80;
+  if (noDetails) {
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(150, 100, 0);
+    doc.text('* Detalhamento de produtos nao importado - listando pedidos individuais por cliente/peso', 20, 75);
+    doc.setTextColor(0, 0, 0);
+    tableStartY = 82;
+  }
+  
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  doc.text('PRODUTOS PARA SEPARACAO', 20, 80);
+  doc.text(noDetails ? 'PEDIDOS PARA SEPARACAO' : 'PRODUTOS PARA SEPARACAO', 20, tableStartY);
   
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
   const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
   
   autoTable(doc, {
-    startY: 85,
+    startY: tableStartY + 5,
     head: [['#', 'Produto', 'Qtde', 'Unidade', 'Peso Total']],
     body: consolidatedProducts.map((p, idx) => [
       String(idx + 1),
@@ -383,11 +418,21 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
               </div>
             </div>
             
+            {/* Warning for missing details */}
+            {selectedTruck && ordersLackDetails(selectedTruck.orders) && (
+              <Alert variant="default" className="mx-4 mt-4 border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
+                <AlertTriangle className="h-4 w-4 text-yellow-600" />
+                <AlertDescription className="text-yellow-800 dark:text-yellow-200">
+                  Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.
+                </AlertDescription>
+              </Alert>
+            )}
+
             {/* Consolidated Products */}
             <div className="border-b p-4">
               <h3 className="flex items-center gap-2 font-semibold mb-3">
                 <Scale className="h-4 w-4" />
-                Produtos Consolidados
+                {selectedTruck && ordersLackDetails(selectedTruck.orders) ? 'Pedidos para Separação' : 'Produtos Consolidados'}
               </h3>
               <div className="space-y-2">
                 {consolidatedProducts.map((product, idx) => (
