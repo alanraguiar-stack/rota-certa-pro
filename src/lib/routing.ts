@@ -10,6 +10,7 @@ import {
   areCitiesNeighbors,
   GeocodedAddress 
 } from './geocoding';
+import { optimizeWithORS } from './orsOptimizer';
 
 export interface OptimizedRoute {
   orderedDeliveries: OrderWithRouteInfo[];
