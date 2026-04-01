@@ -94,7 +94,23 @@ export async function optimizeDeliveryOrder(
     }
   }
 
-  // Pure nearest-neighbor with proximity bonuses
+  // Try ORS optimization first (real driving distances)
+  const orsOrder = await optimizeWithORS(orders);
+  
+  if (orsOrder && orsOrder.length === orders.length) {
+    // Reorder geocodedOrders based on ORS result
+    const orderMap = new Map(geocodedOrders.map(g => [g.order.id, g]));
+    const orsSequence = orsOrder
+      .map(id => orderMap.get(id))
+      .filter((g): g is GeocodedOrderItem => g !== undefined);
+    
+    if (orsSequence.length === geocodedOrders.length) {
+      console.log('[routing] Using ORS-optimized sequence');
+      return buildRouteWithMetrics(orsSequence);
+    }
+  }
+
+  // Fallback: nearest-neighbor with proximity bonuses
   const finalSequence = nearestNeighborWithProximityBonuses(
     geocodedOrders, startLat, startLng
   );
