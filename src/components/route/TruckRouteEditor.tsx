@@ -341,6 +341,7 @@ function TruckTab({
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (newIndex < 0 || newIndex >= localOrders.length) return;
     
+    isReordering.current = true;
     const previousOrders = [...localOrders];
     optimisticReorder(orderId, newIndex);
     
@@ -353,6 +354,8 @@ function TruckTab({
         description: 'Não foi possível reordenar a entrega',
         variant: 'destructive',
       });
+    } finally {
+      isReordering.current = false;
     }
   }, [localOrders, onReorder, truckData.routeTruckId, optimisticReorder, toast]);
 
