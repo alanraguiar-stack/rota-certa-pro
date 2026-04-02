@@ -141,21 +141,24 @@ function OrderCard({
       onDragEnd={onDragEnd}
     >
       <div className="flex items-center gap-3 p-3">
-        {/* Drag Handle — only this element is draggable */}
-        <div className="flex items-center gap-1">
-          {!isLocked && (
-            <div
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = 'move';
-                onDragStart?.();
-              }}
-              className="cursor-grab active:cursor-grabbing p-0.5"
-            >
-              <GripVertical className="h-4 w-4 text-muted-foreground" />
-            </div>
+        {/* Drag Handle — left section is draggable */}
+        <div 
+          className={cn(
+            "flex items-center gap-1 py-2 pr-2 -ml-1 pl-1 rounded-l-lg",
+            !isLocked && "cursor-grab active:cursor-grabbing hover:bg-muted/80 transition-colors"
           )}
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm">
+          draggable={!isLocked}
+          onDragStart={(e) => {
+            if (isLocked) return;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', order.id);
+            onDragStart?.();
+          }}
+        >
+          {!isLocked && (
+            <GripVertical className="h-5 w-5 text-muted-foreground shrink-0" />
+          )}
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm shrink-0">
             {sequence}
           </span>
         </div>
