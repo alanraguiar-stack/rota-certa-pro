@@ -428,7 +428,7 @@ export function parseRows(
     orders,
     errors,
     warnings,
-    totalRows: orders.length,
+    totalRows: dataRows.length,
     validRows,
     invalidRows,
   };

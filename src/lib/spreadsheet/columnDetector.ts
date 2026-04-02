@@ -99,9 +99,9 @@ export function isLikelyMonetaryColumn(values: (string | number)[]): boolean {
       continue;
     }
     
-    // Valores numéricos muito altos (> 500) são provavelmente monetários
+    // Valores numéricos muito altos (> 1000) são provavelmente monetários
     const num = parseNumericValue(str);
-    if (num > 500 && num < 100000) {
+    if (num > 1000 && num < 100000) {
       // Verificar se tem padrão de decimal típico de dinheiro
       if (/\d+[,\.]\d{2}$/.test(str)) {
         monetaryCount++;
