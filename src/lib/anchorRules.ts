@@ -200,6 +200,11 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     lateNeighborhoods: [
       { neighborhood: 'vila yara', city: 'osasco' },
     ],
+    // KM 18 e Quitaúna são a "entrada" de Osasco — sequenciados primeiro
+    earlyNeighborhoods: [
+      { neighborhood: 'km 18', city: 'osasco' },
+      { neighborhood: 'quitauna', city: 'osasco' },
+    ],
     isSupport: false,
     priority: 3,
     fixedPlate: 'TRC1Z00',
