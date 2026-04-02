@@ -7,8 +7,11 @@ const corsHeaders = {
 }
 
 function generateAccessCode(): string {
-  const num = Math.floor(1000 + Math.random() * 9000);
-  return `RC-${num}`;
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const values = new Uint8Array(8)
+  crypto.getRandomValues(values)
+  const code = Array.from(values).map(v => chars[v % chars.length]).join('')
+  return `RC-${code}`
 }
 
 Deno.serve(async (req) => {
@@ -24,7 +27,7 @@ Deno.serve(async (req) => {
     // Verify caller is admin
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders })
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -33,7 +36,7 @@ Deno.serve(async (req) => {
     })
     const { data: claims, error: claimsErr } = await callerClient.auth.getUser()
     if (claimsErr || !claims.user) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: corsHeaders })
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     // Check admin role
@@ -44,7 +47,7 @@ Deno.serve(async (req) => {
       .single()
 
     if (roleData?.role !== 'admin') {
-      return new Response(JSON.stringify({ error: 'Admin only' }), { status: 403, headers: corsHeaders })
+      return new Response(JSON.stringify({ error: 'Admin only' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     const { driverName, driverPassword } = await req.json()
@@ -57,7 +60,7 @@ Deno.serve(async (req) => {
     // Hash the password before storing
     const hashedPassword = await bcrypt.hash(plainPassword)
 
-    // Create user with email confirmed (Auth has its own internal hash)
+    // Create user with email confirmed
     const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
       email,
       password: plainPassword,
@@ -66,7 +69,7 @@ Deno.serve(async (req) => {
     })
 
     if (createErr) {
-      return new Response(JSON.stringify({ error: createErr.message }), { status: 400, headers: corsHeaders })
+      return new Response(JSON.stringify({ error: createErr.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
     const userId = newUser.user.id
@@ -77,7 +80,7 @@ Deno.serve(async (req) => {
       full_name: fullName,
     })
 
-    // Assign motorista role (delete default role first)
+    // Assign motorista role
     await supabase.from('user_roles').delete().eq('user_id', userId)
     await supabase.from('user_roles').insert({
       user_id: userId,
@@ -91,15 +94,15 @@ Deno.serve(async (req) => {
       driver_password: hashedPassword,
     })
 
-    // Return plain password so admin can share it with the driver
     return new Response(
       JSON.stringify({ accessCode, password: plainPassword, fullName, userId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (err) {
+    console.error('create-test-driver error:', err)
     return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: corsHeaders }
+      JSON.stringify({ error: 'Erro interno do servidor' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   }
 })

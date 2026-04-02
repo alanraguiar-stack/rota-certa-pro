@@ -34,13 +34,13 @@ export function useUserRole(): UserRoleState {
 
       if (error) {
         console.error('Error fetching user role:', error);
-        setRole('operacional'); // Default fallback
+        setRole(null);
       } else {
-        setRole((data?.role as AppRole) || 'operacional');
+        setRole((data?.role as AppRole) || null);
       }
     } catch (err) {
       console.error('Error fetching role:', err);
-      setRole('operacional');
+      setRole(null);
     } finally {
       setLoading(false);
     }
