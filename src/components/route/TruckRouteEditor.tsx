@@ -380,6 +380,8 @@ function TruckTab({
       isReordering.current = false;
     }
   }, [draggedOrderId, localOrders, truckData, onReorder, optimisticReorder, toast]);
+  
+  const handleLockToggle = useCallback(async () => {
     try {
       if (truckData.isLocked) {
         await onUnlockTruck(truckData.routeTruckId);
