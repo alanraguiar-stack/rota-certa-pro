@@ -333,10 +333,11 @@ function TruckTab({
     const sourceIndex = truckData.orders.findIndex(o => o.id === draggedOrderId);
     if (sourceIndex === -1 || sourceIndex === targetIndex) return;
     
-    const newSequence = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex;
+    // 1-indexed sequence: target position in the list
+    const newSequence = targetIndex + 1;
     
     try {
-      await onReorder(truckData.routeTruckId, draggedOrderId, newSequence + 1);
+      await onReorder(truckData.routeTruckId, draggedOrderId, newSequence);
     } catch (error) {
       toast({
         title: 'Erro ao reordenar',
