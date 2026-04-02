@@ -288,6 +288,14 @@ function TruckTab({
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   
+  // Optimistic local state
+  const [localOrders, setLocalOrders] = useState<Order[]>(truckData.orders);
+  
+  // Sync with server data when it changes
+  useEffect(() => {
+    setLocalOrders(truckData.orders);
+  }, [truckData.orders]);
+  
   // Scroll to highlighted order
   useEffect(() => {
     if (highlightedOrderId && highlightRef.current) {
@@ -311,40 +319,58 @@ function TruckTab({
     }
   }, [truckData.routeTruckId, onOrderMove, toast]);
   
+  // Optimistic reorder helper
+  const optimisticReorder = useCallback((orderId: string, newIndex: number) => {
+    setLocalOrders(prev => {
+      const arr = [...prev];
+      const oldIndex = arr.findIndex(o => o.id === orderId);
+      if (oldIndex === -1 || oldIndex === newIndex) return prev;
+      const [item] = arr.splice(oldIndex, 1);
+      arr.splice(newIndex, 0, item);
+      return arr;
+    });
+  }, []);
+  
   const handleReorder = useCallback(async (orderId: string, direction: 'up' | 'down') => {
-    const currentIndex = truckData.orders.findIndex(o => o.id === orderId);
+    const currentIndex = localOrders.findIndex(o => o.id === orderId);
     if (currentIndex === -1) return;
     
-    const newSequence = direction === 'up' ? currentIndex : currentIndex + 2;
+    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= localOrders.length) return;
+    
+    const previousOrders = [...localOrders];
+    optimisticReorder(orderId, newIndex);
     
     try {
-      await onReorder(truckData.routeTruckId, orderId, newSequence);
+      await onReorder(truckData.routeTruckId, orderId, newIndex + 1);
     } catch (error) {
+      setLocalOrders(previousOrders);
       toast({
         title: 'Erro ao reordenar',
         description: 'Não foi possível reordenar a entrega',
         variant: 'destructive',
       });
     }
-  }, [truckData, onReorder, toast]);
+  }, [localOrders, onReorder, truckData.routeTruckId, optimisticReorder, toast]);
 
   const handleDragDrop = useCallback(async (targetIndex: number) => {
     if (draggedOrderId === null) return;
-    const sourceIndex = truckData.orders.findIndex(o => o.id === draggedOrderId);
+    const sourceIndex = localOrders.findIndex(o => o.id === draggedOrderId);
     if (sourceIndex === -1 || sourceIndex === targetIndex) return;
     
-    // 1-indexed sequence: target position in the list
-    const newSequence = targetIndex + 1;
+    const previousOrders = [...localOrders];
+    optimisticReorder(draggedOrderId, targetIndex);
     
     try {
-      await onReorder(truckData.routeTruckId, draggedOrderId, newSequence);
+      await onReorder(truckData.routeTruckId, draggedOrderId, targetIndex + 1);
     } catch (error) {
+      setLocalOrders(previousOrders);
       toast({
         title: 'Erro ao reordenar',
         variant: 'destructive',
       });
     }
-  }, [draggedOrderId, truckData, onReorder, toast]);
+  }, [draggedOrderId, localOrders, truckData, onReorder, optimisticReorder, toast]);
   
   const handleLockToggle = useCallback(async () => {
     try {
@@ -410,7 +436,7 @@ function TruckTab({
         <div className="flex items-center gap-4">
           <div className="flex gap-4 text-center">
             <div>
-              <p className="text-xl font-bold">{truckData.orders.length}</p>
+              <p className="text-xl font-bold">{localOrders.length}</p>
               <p className="text-xs text-muted-foreground">Entregas</p>
             </div>
             <div>
@@ -479,14 +505,14 @@ function TruckTab({
           Sequência de Entregas {!truckData.isLocked && '(arraste para reordenar)'}
         </h4>
         
-        {truckData.orders.length === 0 ? (
+        {localOrders.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Package className="mx-auto h-8 w-8 opacity-50 mb-2" />
             <p>Nenhuma entrega atribuída</p>
           </div>
         ) : (
           <div className="space-y-2 max-h-[500px] overflow-y-auto">
-            {truckData.orders.map((order, idx) => (
+            {localOrders.map((order, idx) => (
               <OrderCard
                 key={order.id}
                 order={order}
@@ -497,7 +523,7 @@ function TruckTab({
                 onMoveUp={() => handleReorder(order.id, 'up')}
                 onMoveDown={() => handleReorder(order.id, 'down')}
                 isFirst={idx === 0}
-                isLast={idx === truckData.orders.length - 1}
+                isLast={idx === localOrders.length - 1}
                 onDragStart={() => setDraggedOrderId(order.id)}
                 onDragOver={(e) => {
                   e.preventDefault();
