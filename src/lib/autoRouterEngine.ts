@@ -1138,9 +1138,39 @@ function optimizeDeliverySequence(
     nearestNeighborWithinCity(priorityOrders, startLat, startLng);
   }
 
-  // Step 2: Group regular orders by city
+  // Step 1.5: Separate earlyNeighborhoods from anchor city (sequenced right after priority)
+  const earlyOrders: GeocodedOrder[] = [];
+  const nonEarlyOrders: GeocodedOrder[] = [];
+
+  if (territoryRule?.earlyNeighborhoods && territoryRule.earlyNeighborhoods.length > 0) {
+    for (const order of regularOrders) {
+      const orderCity = normalizeCityName(order.city || order.geocoded.city || '');
+      const orderNh = normalizeNeighborhood(order.geocoded.neighborhood || '');
+      const isEarly = territoryRule.earlyNeighborhoods.some(en =>
+        normalizeCityName(en.city) === orderCity &&
+        normalizeNeighborhood(en.neighborhood) === orderNh
+      );
+      if (isEarly) {
+        earlyOrders.push(order);
+      } else {
+        nonEarlyOrders.push(order);
+      }
+    }
+  } else {
+    nonEarlyOrders.push(...regularOrders);
+  }
+
+  // Sequence early orders from last priority point (or CD)
+  if (earlyOrders.length > 1) {
+    const lastPriority = priorityOrders[priorityOrders.length - 1];
+    const fromLat = lastPriority ? lastPriority.geocoded.estimatedLat : startLat;
+    const fromLng = lastPriority ? lastPriority.geocoded.estimatedLng : startLng;
+    nearestNeighborWithinCity(earlyOrders, fromLat, fromLng);
+  }
+
+  // Step 2: Group remaining regular orders by city
   const cityGroups = new Map<string, GeocodedOrder[]>();
-  for (const order of regularOrders) {
+  for (const order of nonEarlyOrders) {
     const city = normalizeCityName(order.city || order.geocoded.city || 'desconhecida');
     const existing = cityGroups.get(city) || [];
     existing.push(order);
@@ -1149,7 +1179,7 @@ function optimizeDeliverySequence(
 
   // Step 3: Sequenciar cidades com nearest-neighbor inter-cidades (transição fluida)
   const anchorCity = anchorRule?.anchorCity || territoryRule?.anchorCity || '';
-  const result: GeocodedOrder[] = [...priorityOrders];
+  const result: GeocodedOrder[] = [...priorityOrders, ...earlyOrders];
 
   // Build city entries
   const cityEntries: { city: string; orders: GeocodedOrder[] }[] = [];
@@ -1211,9 +1241,13 @@ function optimizeDeliverySequence(
     streetGroupSweep(cityOrders);
   };
 
-  // Sequence anchor city first (from CD)
+  // Sequence anchor city first (from last early/priority point or CD)
+  const lastBefore = result[result.length - 1];
+  const anchorFromLat = lastBefore ? lastBefore.geocoded.estimatedLat : startLat;
+  const anchorFromLng = lastBefore ? lastBefore.geocoded.estimatedLng : startLng;
+
   if (anchorEntry && anchorEntry.orders.length > 0) {
-    sequenceCityBlock(anchorEntry.orders, startLat, startLng);
+    sequenceCityBlock(anchorEntry.orders, anchorFromLat, anchorFromLng);
     result.push(...anchorEntry.orders);
   }
 
