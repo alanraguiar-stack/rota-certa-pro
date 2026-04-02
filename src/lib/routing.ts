@@ -11,6 +11,7 @@ import {
   GeocodedAddress 
 } from './geocoding';
 import { optimizeWithORS } from './orsOptimizer';
+import { areNeighborhoodsAdjacent, normalizeNeighborhood } from './anchorRules';
 
 export interface OptimizedRoute {
   orderedDeliveries: OrderWithRouteInfo[];
@@ -164,6 +165,9 @@ function nearestNeighborWithProximityBonuses(
           currentNeighborhood === candidate.geocoded.neighborhood.toLowerCase() &&
           currentCity === candidate.city) {
         dist *= 0.20; // 80% discount - same neighborhood
+      } else if (currentNeighborhood && candidate.geocoded.neighborhood &&
+          areNeighborhoodsAdjacent(currentNeighborhood, normalizeNeighborhood(candidate.geocoded.neighborhood))) {
+        dist *= 0.60; // 40% discount - adjacent neighborhoods (even across cities)
       } else if (currentCity && currentCity === candidate.city) {
         dist *= 0.35; // 65% discount - same city
       } else if (currentCity && areCitiesNeighbors(currentCity, candidate.city)) {

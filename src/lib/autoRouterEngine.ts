@@ -18,7 +18,8 @@ import { RoutingHint, ExtractedPatterns } from './historyPatternEngine';
 import { 
   TerritoryRule, TERRITORY_RULES, 
   findAnchorRule, AnchorRule, normalizeNeighborhood,
-  assignTrucksToTerritories, clearTruckTerritories, setTruckTerritory 
+  assignTrucksToTerritories, clearTruckTerritories, setTruckTerritory,
+  areNeighborhoodsAdjacent
 } from './anchorRules';
 
 export interface AutoRouterConfig {
@@ -1243,6 +1244,29 @@ function optimizeDeliverySequence(
     result.push(...nextCity.orders);
   }
 
+  // Step 4.5: Move lateNeighborhoods to the end of the sequence
+  if (territoryRule?.lateNeighborhoods && territoryRule.lateNeighborhoods.length > 0) {
+    const lateOrders: GeocodedOrder[] = [];
+    const nonLateOrders: GeocodedOrder[] = [];
+    for (const order of result) {
+      const orderCity = normalizeCityName(order.city || order.geocoded.city || '');
+      const orderNh = normalizeNeighborhood(order.geocoded.neighborhood || '');
+      const isLate = territoryRule.lateNeighborhoods.some(ln =>
+        normalizeCityName(ln.city) === orderCity &&
+        normalizeNeighborhood(ln.neighborhood) === orderNh
+      );
+      if (isLate) {
+        lateOrders.push(order);
+      } else {
+        nonLateOrders.push(order);
+      }
+    }
+    if (lateOrders.length > 0) {
+      result.length = 0;
+      result.push(...nonLateOrders, ...lateOrders);
+    }
+  }
+
   // Step 5: Cross-city insertAfterNeighborhood (e.g. Jaguaré after Rochdale across city groups)
   const rule = territoryRule || (anchorRule ? TERRITORY_RULES.find(r => r.anchorCity === anchorRule.anchorCity) : null);
   if (rule) {
@@ -1390,11 +1414,17 @@ function nearestNeighborWithinCity(orders: GeocodedOrder[], startLat: number, st
           && (o.geocoded.street || '').length > 0;
         const sameNeighborhood = normalizeNeighborhood(o.geocoded.neighborhood || '') === 
           normalizeNeighborhood(lastOrder.geocoded.neighborhood || '');
+        const adjacentNeighborhood = !sameNeighborhood && areNeighborhoodsAdjacent(
+          normalizeNeighborhood(o.geocoded.neighborhood || ''),
+          normalizeNeighborhood(lastOrder.geocoded.neighborhood || '')
+        );
 
         if (sameStreet) {
           distance *= 0.15;
         } else if (sameNeighborhood) {
           distance *= 0.30;
+        } else if (adjacentNeighborhood) {
+          distance *= 0.60; // 40% discount for adjacent neighborhoods
         }
       }
 
