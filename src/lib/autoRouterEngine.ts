@@ -1391,11 +1391,17 @@ function nearestNeighborWithinCity(orders: GeocodedOrder[], startLat: number, st
           && (o.geocoded.street || '').length > 0;
         const sameNeighborhood = normalizeNeighborhood(o.geocoded.neighborhood || '') === 
           normalizeNeighborhood(lastOrder.geocoded.neighborhood || '');
+        const adjacentNeighborhood = !sameNeighborhood && areNeighborhoodsAdjacent(
+          normalizeNeighborhood(o.geocoded.neighborhood || ''),
+          normalizeNeighborhood(lastOrder.geocoded.neighborhood || '')
+        );
 
         if (sameStreet) {
           distance *= 0.15;
         } else if (sameNeighborhood) {
           distance *= 0.30;
+        } else if (adjacentNeighborhood) {
+          distance *= 0.60; // 40% discount for adjacent neighborhoods
         }
       }
 
