@@ -290,10 +290,13 @@ function TruckTab({
   
   // Optimistic local state
   const [localOrders, setLocalOrders] = useState<Order[]>(truckData.orders);
+  const isReordering = useRef(false);
   
-  // Sync with server data when it changes
+  // Sync with server data when it changes (only if no reorder in flight)
   useEffect(() => {
-    setLocalOrders(truckData.orders);
+    if (!isReordering.current) {
+      setLocalOrders(truckData.orders);
+    }
   }, [truckData.orders]);
   
   // Scroll to highlighted order
@@ -338,6 +341,7 @@ function TruckTab({
     const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (newIndex < 0 || newIndex >= localOrders.length) return;
     
+    isReordering.current = true;
     const previousOrders = [...localOrders];
     optimisticReorder(orderId, newIndex);
     
@@ -350,6 +354,8 @@ function TruckTab({
         description: 'Não foi possível reordenar a entrega',
         variant: 'destructive',
       });
+    } finally {
+      isReordering.current = false;
     }
   }, [localOrders, onReorder, truckData.routeTruckId, optimisticReorder, toast]);
 
@@ -358,6 +364,7 @@ function TruckTab({
     const sourceIndex = localOrders.findIndex(o => o.id === draggedOrderId);
     if (sourceIndex === -1 || sourceIndex === targetIndex) return;
     
+    isReordering.current = true;
     const previousOrders = [...localOrders];
     optimisticReorder(draggedOrderId, targetIndex);
     
@@ -369,6 +376,8 @@ function TruckTab({
         title: 'Erro ao reordenar',
         variant: 'destructive',
       });
+    } finally {
+      isReordering.current = false;
     }
   }, [draggedOrderId, localOrders, truckData, onReorder, optimisticReorder, toast]);
   
