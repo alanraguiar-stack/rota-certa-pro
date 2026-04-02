@@ -18,7 +18,8 @@ import { RoutingHint, ExtractedPatterns } from './historyPatternEngine';
 import { 
   TerritoryRule, TERRITORY_RULES, 
   findAnchorRule, AnchorRule, normalizeNeighborhood,
-  assignTrucksToTerritories, clearTruckTerritories, setTruckTerritory 
+  assignTrucksToTerritories, clearTruckTerritories, setTruckTerritory,
+  areNeighborhoodsAdjacent
 } from './anchorRules';
 
 export interface AutoRouterConfig {

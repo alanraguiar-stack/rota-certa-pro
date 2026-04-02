@@ -11,6 +11,7 @@ import {
   GeocodedAddress 
 } from './geocoding';
 import { optimizeWithORS } from './orsOptimizer';
+import { areNeighborhoodsAdjacent, normalizeNeighborhood } from './anchorRules';
 
 export interface OptimizedRoute {
   orderedDeliveries: OrderWithRouteInfo[];
