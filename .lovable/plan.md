@@ -1,42 +1,55 @@
 
 
-# Plano: Corrigir Drag-and-Drop no Editor de Rotas
+# Plano: Reordenamento em Tempo Real (Optimistic Updates)
 
-## Problemas Identificados
+## Causa Raiz
 
-### 1. Área de arraste muito pequena
-O `draggable` está apenas no ícone de grip (16×16px + 0.5 padding). É muito difícil clicar e segurar com precisão. O HTML5 Drag API em ícones tão pequenos falha frequentemente em navegadores.
+Cada ação de reordenar (drag-and-drop ou setas) executa esta sequência **bloqueante**:
 
-### 2. Bug de sequência no drag-and-drop (off-by-one)
-Ao arrastar um item **para baixo**, o cálculo envia `newSequence + 1` que resulta em valor fora do range. Exemplo: arrastar do index 0 para o index 3 em 4 itens → envia `newSequence = 5`, mas o máximo deveria ser 4.
+1. `await reorderSingleDelivery.mutateAsync()` — N chamadas ao banco em paralelo
+2. `await refetch()` — re-busca a rota inteira do banco
+3. Só então o React re-renderiza com a nova ordem
 
-### 3. Falta de feedback visual durante o arraste
-Não há `setDragImage` nem indicador claro de "onde vai soltar". O `isDragTarget` existe mas sem visual forte.
+Resultado: delay de 500ms–2s por operação, tornando o arraste travado.
 
-## Correções
+## Solução: Optimistic Updates
 
-### `src/components/route/TruckRouteEditor.tsx`
+Atualizar a lista localmente **antes** de chamar o banco. Se o banco falhar, reverter.
 
-**A. Expandir área de arraste**: Tornar toda a lateral esquerda do card (grip + número) como zona draggable, aumentando a área de toque de ~20px para ~60px.
+## Mudanças
 
-**B. Corrigir cálculo de sequência no `handleDragDrop`**:
+### 1. `src/components/route/TruckRouteEditor.tsx` — Estado local otimista
+
+- Adicionar `localOrders` state no `TruckTab` que espelha `truckData.orders`
+- No drag-and-drop e nas setas, reordenar `localOrders` **imediatamente** (splice/insert)
+- Renderizar a partir de `localOrders` em vez de `truckData.orders`
+- Chamar `onReorder` em background (sem `await` bloqueante na UI)
+- Se `onReorder` falhar, reverter `localOrders` para o estado anterior e mostrar toast de erro
+- Sincronizar `localOrders` com `truckData.orders` via `useEffect` quando os dados do servidor mudarem (para capturar mudanças externas)
+
+### 2. `src/pages/RouteDetails.tsx` — Remover `await refetch()` bloqueante
+
+- No `handleReorderInTruck`: remover o `await refetch()` após o mutate
+- A invalidação de queries já acontece no `onSuccess` do mutation (`queryClient.invalidateQueries`)
+- O `refetch` redundante causa double-fetch e mais latência
+
+### 3. `src/hooks/useRoutes.ts` — Nenhuma mudança necessária
+
+O mutation já faz `queryClient.invalidateQueries` no `onSuccess`, o que é suficiente para eventual consistency.
+
+## Fluxo após correção
+
+```text
+Usuário arrasta item    → UI atualiza INSTANTANEAMENTE (localOrders)
+                        → DB update roda em background
+                        → Se falhar: reverte localOrders + toast de erro
+                        → Se OK: invalidateQueries atualiza dados do servidor
 ```
-// ANTES (bugado):
-const newSequence = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex;
-onReorder(truckData.routeTruckId, draggedOrderId, newSequence + 1);
 
-// DEPOIS (correto — sequências 1-indexed):
-const newSequence = targetIndex + 1;
-onReorder(truckData.routeTruckId, draggedOrderId, newSequence);
-```
-
-**C. Melhorar feedback visual**: Adicionar borda indicadora (drop zone) entre os cards durante o arraste, para mostrar exatamente onde o item será inserido.
-
-**D. Adicionar `e.dataTransfer.setData`**: Necessário para alguns navegadores reconhecerem o drag. Sem isso, o drag pode ser silenciosamente ignorado.
-
-## Arquivo afetado
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/route/TruckRouteEditor.tsx` | Expandir drag handle, corrigir sequência, melhorar feedback, adicionar setData |
+| `src/components/route/TruckRouteEditor.tsx` | Estado local otimista para reordenamento instantâneo |
+| `src/pages/RouteDetails.tsx` | Remover `await refetch()` redundante no reorder |
 
