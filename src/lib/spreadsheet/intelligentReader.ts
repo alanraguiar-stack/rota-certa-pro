@@ -118,7 +118,7 @@ export function classifyRows(
         const hasHeaderWords = cells.some(cell => {
           if (cell === null || typeof cell === 'number') return false;
           const norm = superNormalize(cell);
-          return ['cliente', 'peso', 'endereco', 'venda', 'pedido', 'produto'].some(kw => norm.includes(kw));
+          return ['cliente', 'peso', 'endereco', 'venda', 'pedido', 'produto', 'kg', 'razao', 'bairro', 'cidade', 'cep', 'rua', 'nome', 'descricao'].some(kw => norm.includes(kw));
         });
         
         if (hasHeaderWords) {

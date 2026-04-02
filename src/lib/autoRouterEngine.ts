@@ -109,12 +109,17 @@ export function mergeItemsIntoOrders(
 /**
  * Calculate which trucks to use based on total weight
  */
+/**
+ * @deprecated This function is a stub and returns the full fleet without filtering.
+ * Use manual truck selection in the UI instead.
+ */
 export function recommendTrucks(
   availableTrucks: Truck[],
   totalWeight: number,
   totalOrders: number,
   config: Partial<AutoRouterConfig> = {}
 ): Truck[] {
+  console.warn('recommendTrucks is deprecated and returns the full fleet unfiltered.');
   return [...availableTrucks];
 }
 
