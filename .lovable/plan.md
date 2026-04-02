@@ -1,60 +1,65 @@
 
+# Plano: Melhorar Sequenciamento da Rota de Osasco
 
-# Plano: Eliminar Flickering no Reordenamento
+## Problemas Identificados
 
-## Causa Raiz
+1. **KM 18 e Quitaúna não são priorizados** — O Osasco começa por Jardim Mutinga/Imperial (Barueri), depois vai para a cidade âncora sem considerar que KM 18 e Quitaúna ficam na "entrada" de Osasco e fazem sentido como primeiros bairros da cidade âncora.
 
-O flicker acontece por um problema de timing entre o `isReordering` ref e o `invalidateQueries`:
+2. **Quitaúna ausente do mapa de adjacência** — O bairro Quitaúna não existe em `NEIGHBORHOOD_NEIGHBORS`, então o sequenciamento não sabe que ele é vizinho de KM 18, Rochdale, etc.
 
-1. Usuário reordena → `isReordering = true` → UI atualiza instantaneamente ✅
-2. `await onReorder()` resolve → `finally` seta `isReordering = false`
-3. **Mas** o `invalidateQueries` dispara no `onSuccess` do mutation **depois** do `finally`
-4. O refetch traz dados do servidor (que podem ter a ordem antiga ainda em cache) → `useEffect` detecta mudança → reseta `localOrders` → **flicker**
+3. **Falta de adjacências completas em Osasco** — Vários bairros de Osasco têm adjacências incompletas ou ausentes (Cidade das Flores, Helena Maria, Munhoz Junior, etc.), causando saltos entre bairros distantes.
 
-Ou seja: `isReordering` fica `false` **antes** do refetch terminar, permitindo que o `useEffect` de sync sobrescreva o estado otimista.
+## Correções
 
-## Correção
+### 1. `src/lib/anchorRules.ts` — Expandir adjacência de bairros de Osasco
 
-### `src/components/route/TruckRouteEditor.tsx`
+Adicionar Quitaúna e completar adjacências:
 
-Substituir a lógica de `isReordering` ref + `useEffect` por uma abordagem mais robusta:
-
-1. **Remover o `isReordering` ref** — ele não é confiável por causa do timing async
-2. **No `useEffect` de sync**: comparar os IDs + ordem dos `localOrders` vs `truckData.orders`. Só sincronizar se a **composição** mudou (item adicionado/removido), não se apenas a ordem mudou (que é exatamente o que o optimistic update faz)
-3. **Adicionar debounce de sync**: usar um `setTimeout` curto (300ms) para dar tempo ao servidor de responder antes de considerar sync
-
-```typescript
-useEffect(() => {
-  // Extrair IDs na ordem atual
-  const localIds = localOrders.map(o => o.id);
-  const serverIds = truckData.orders.map(o => o.id);
-  
-  // Se a composição mudou (item adicionado/removido), sync imediato
-  const localSet = new Set(localIds);
-  const serverSet = new Set(serverIds);
-  const compositionChanged = localIds.length !== serverIds.length || 
-    serverIds.some(id => !localSet.has(id));
-  
-  if (compositionChanged) {
-    setLocalOrders(truckData.orders);
-    return;
-  }
-  
-  // Se a ordem é diferente, pode ser o servidor confirmando nosso reorder
-  // Só atualizar após um delay para evitar sobrescrever optimistic updates
-  const timer = setTimeout(() => {
-    setLocalOrders(truckData.orders);
-  }, 500);
-  
-  return () => clearTimeout(timer);
-}, [truckData.orders]);
+```
+'quitauna': ['km 18', 'rochdale', 'cidade das flores', 'munhoz junior'],
+'cidade das flores': ['quitauna', 'km 18', 'jardim das flores'],
+'munhoz junior': ['quitauna', 'helena maria', 'centro'],
+'helena maria': ['munhoz junior', 'bela vista', 'rochdale'],
+'bela vista': ['helena maria', 'rochdale'],
 ```
 
-4. **Nos handlers**: remover a flag `isReordering` e simplificar — não precisa mais de `previousOrders` para rollback no `finally`, pois o `useEffect` com debounce cuidará da convergência. Manter rollback apenas no `catch`.
+Atualizar adjacências existentes para incluir Quitaúna:
+- `km 18`: adicionar `'quitauna'`
+- `rochdale`: adicionar `'quitauna'`
 
-## Arquivo afetado
+### 2. `src/lib/anchorRules.ts` — Configurar bairros iniciais na rota de Osasco
+
+Adicionar `earlyNeighborhoods` (novo campo) ao território de Osasco para indicar que KM 18 e Quitaúna devem ser os primeiros bairros de Osasco a serem sequenciados:
+
+```typescript
+// No território osasco:
+earlyNeighborhoods: [
+  { neighborhood: 'km 18', city: 'osasco' },
+  { neighborhood: 'quitauna', city: 'osasco' },
+],
+```
+
+### 3. `src/lib/anchorRules.ts` — Adicionar campo `earlyNeighborhoods` à interface
+
+Novo campo opcional `earlyNeighborhoods` em `TerritoryRule` — bairros da cidade âncora que devem ser sequenciados primeiro (antes dos demais bairros da âncora).
+
+### 4. `src/lib/autoRouterEngine.ts` — Implementar lógica de `earlyNeighborhoods`
+
+No `optimizeDeliverySequence`, após separar `priorityNeighborhoods` (Barueri), separar também `earlyNeighborhoods` (KM 18, Quitaúna) dos demais bairros da âncora. A sequência final fica:
+
+```text
+1. Priority neighborhoods (Jardim Mutinga, Imperial — Barueri)
+2. Early neighborhoods (KM 18, Quitaúna — Osasco)
+3. Demais bairros de Osasco (nearest-neighbor com adjacência)
+4. Fill cities (Carapicuíba, bairros SP)
+5. Late neighborhoods (Vila Yara)
+```
+
+Isso garante que o caminhão entre em Osasco pelo KM 18/Quitaúna e siga fluindo pela adjacência dos bairros.
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/route/TruckRouteEditor.tsx` | Trocar `isReordering` ref por comparação de composição + debounce no sync |
-
+| `src/lib/anchorRules.ts` | Adicionar `earlyNeighborhoods` à interface + ao território Osasco + expandir `NEIGHBORHOOD_NEIGHBORS` com Quitaúna e bairros faltantes |
+| `src/lib/autoRouterEngine.ts` | Separar e sequenciar `earlyNeighborhoods` entre priority e regulares |
