@@ -364,6 +364,7 @@ function TruckTab({
     const sourceIndex = localOrders.findIndex(o => o.id === draggedOrderId);
     if (sourceIndex === -1 || sourceIndex === targetIndex) return;
     
+    isReordering.current = true;
     const previousOrders = [...localOrders];
     optimisticReorder(draggedOrderId, targetIndex);
     
@@ -375,10 +376,10 @@ function TruckTab({
         title: 'Erro ao reordenar',
         variant: 'destructive',
       });
+    } finally {
+      isReordering.current = false;
     }
   }, [draggedOrderId, localOrders, truckData, onReorder, optimisticReorder, toast]);
-  
-  const handleLockToggle = useCallback(async () => {
     try {
       if (truckData.isLocked) {
         await onUnlockTruck(truckData.routeTruckId);
