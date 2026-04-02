@@ -290,13 +290,29 @@ function TruckTab({
   
   // Optimistic local state
   const [localOrders, setLocalOrders] = useState<Order[]>(truckData.orders);
-  const isReordering = useRef(false);
   
-  // Sync with server data when it changes (only if no reorder in flight)
+  // Sync with server data — only immediately if composition changed (items added/removed)
+  // If only order changed, debounce to avoid overwriting optimistic updates
   useEffect(() => {
-    if (!isReordering.current) {
+    const localIds = localOrders.map(o => o.id);
+    const serverIds = truckData.orders.map(o => o.id);
+    
+    // Composition changed (item added/removed) → sync immediately
+    const localSet = new Set(localIds);
+    const compositionChanged = localIds.length !== serverIds.length || 
+      serverIds.some(id => !localSet.has(id));
+    
+    if (compositionChanged) {
       setLocalOrders(truckData.orders);
+      return;
     }
+    
+    // Only order changed — debounce to let optimistic updates settle
+    const timer = setTimeout(() => {
+      setLocalOrders(truckData.orders);
+    }, 500);
+    
+    return () => clearTimeout(timer);
   }, [truckData.orders]);
   
   // Scroll to highlighted order
