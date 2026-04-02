@@ -126,7 +126,7 @@ function OrderCard({
       className={cn(
         "rounded-lg border bg-card transition-all select-text",
         isLocked ? "opacity-75" : "hover:shadow-md",
-        isDragTarget && "border-primary border-2 shadow-lg",
+        isDragTarget && "border-primary border-2 shadow-lg bg-primary/5 -translate-y-0.5 scale-[1.01]",
         isHighlighted && "ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-900/20",
       )}
       onDragOver={(e) => {
