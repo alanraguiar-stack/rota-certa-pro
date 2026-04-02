@@ -51,6 +51,8 @@ export interface TerritoryRule {
   priorityNeighborhoods: { neighborhood: string; city: string }[];
   /** Bairros que devem ir para o FINAL da sequência da rota */
   lateNeighborhoods?: { neighborhood: string; city: string }[];
+  /** Bairros da cidade âncora que devem ser sequenciados PRIMEIRO (entrada da cidade) */
+  earlyNeighborhoods?: { neighborhood: string; city: string }[];
   /** É caminhão de apoio? */
   isSupport: boolean;
   /** Prioridade para atribuição (menor = atribuído primeiro) */
