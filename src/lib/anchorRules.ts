@@ -3,6 +3,13 @@
  * 
  * O sistema atribui automaticamente caminhões disponíveis a cada território.
  * Não há mais vínculo fixo placa→cidade.
+ * 
+ * Agrupamentos operacionais:
+ * 1. Barueri + Jandira + Itapevi
+ * 2. Cotia + Vargem Grande + Embu/Embu das Artes + Taboão da Serra
+ * 3. Osasco (+ bairros SP: Parque Imperial, Jaguaré, Rio Pequeno, Santa Maria)
+ * 4. Santana de Parnaíba + Pirapora + Cajamar
+ * 5. Caieiras (+ Perus de SP)
  */
 
 export interface NeighborhoodException {
@@ -42,6 +49,8 @@ export interface TerritoryRule {
   excludedNeighborhoods: { neighborhood: string; city: string }[];
   /** Bairros de OUTRA cidade que entram PRIMEIRO na sequência (antes da cidade âncora) */
   priorityNeighborhoods: { neighborhood: string; city: string }[];
+  /** Bairros que devem ir para o FINAL da sequência da rota */
+  lateNeighborhoods?: { neighborhood: string; city: string }[];
   /** É caminhão de apoio? */
   isSupport: boolean;
   /** Prioridade para atribuição (menor = atribuído primeiro) */
@@ -51,15 +60,77 @@ export interface TerritoryRule {
 }
 
 /**
+ * Mapa de adjacência entre bairros — usado pelo sequenciamento para dar
+ * bônus de proximidade na transição entre bairros vizinhos.
+ * 
+ * Chave: nome do bairro normalizado (sem acento, lowercase).
+ * Valor: lista de bairros vizinhos.
+ */
+export const NEIGHBORHOOD_NEIGHBORS: Record<string, string[]> = {
+  // Osasco
+  'vila yara': ['jaguare', 'rio pequeno', 'presidente altino', 'centro'],
+  'rochdale': ['jaguare', 'km 18', 'bela vista'],
+  'presidente altino': ['vila yara', 'centro', 'bussocaba'],
+  'bussocaba': ['presidente altino', 'centro', 'km 18'],
+  'centro': ['presidente altino', 'vila yara', 'bussocaba', 'vila osasco'],
+  'km 18': ['rochdale', 'bussocaba', 'jardim das flores'],
+  'jardim das flores': ['km 18', 'rochdale'],
+  'vila osasco': ['centro', 'remedio'],
+  'remedio': ['vila osasco', 'conceicao'],
+  'conceicao': ['remedio', 'santa maria'],
+  'santa maria': ['conceicao', 'metalurgicos', 'metalurgico'],
+  'metalurgicos': ['santa maria', 'conceicao'],
+  'metalurgico': ['santa maria', 'conceicao'],
+  // Transição Osasco → SP
+  'jaguare': ['vila yara', 'rio pequeno', 'rochdale'],
+  'rio pequeno': ['jaguare', 'vila yara'],
+  'parque imperial': ['jaguare', 'rio pequeno'],
+  // Barueri
+  'jardim mutinga': ['jd silveira', 'parque viana', 'vila do conde'],
+  'alphaville': ['tambore', 'centro comercial'],
+  'tambore': ['alphaville', 'centro comercial'],
+  'vila do conde': ['jardim mutinga', 'parque viana'],
+  'parque viana': ['jardim mutinga', 'vila do conde', 'jd silveira'],
+  'jd silveira': ['jardim mutinga', 'parque viana'],
+  // Cotia
+  'centro de cotia': ['jardim nomura', 'parque san remo'],
+  'jardim nomura': ['centro de cotia'],
+  'parque san remo': ['centro de cotia'],
+  // Carapicuíba
+  'vila da oportunidade': ['jardim yaya', 'pousada dos bandeirantes'],
+  'jardim yaya': ['vila da oportunidade', 'pousada dos bandeirantes'],
+  'pousada dos bandeirantes': ['jardim yaya', 'vila da oportunidade'],
+};
+
+/**
+ * Verifica se dois bairros são vizinhos conforme o mapa de adjacência.
+ */
+export function areNeighborhoodsAdjacent(nhA: string, nhB: string): boolean {
+  const a = normalizeNeighborhood(nhA);
+  const b = normalizeNeighborhood(nhB);
+  if (a === b) return true;
+  const neighbors = NEIGHBORHOOD_NEIGHBORS[a];
+  return neighbors ? neighbors.includes(b) : false;
+}
+
+/**
  * Regras de território — o motor seleciona automaticamente o caminhão.
+ * 
+ * Agrupamento 1: Barueri (âncora) + Jandira + Itapevi
+ * Agrupamento 2: Cotia (âncora) + Vargem Grande + Embu + Embu das Artes + Taboão
+ * Agrupamento 3: Osasco (âncora) + bairros SP (Parque Imperial, Jaguaré, Rio Pequeno)
+ * Agrupamento 4: Santana de Parnaíba (âncora) + Pirapora + Cajamar
+ * Agrupamento 5: Caieiras (âncora) + Perus (SP)
+ * Apoio: São Paulo (restante) + excedentes
  */
 export const TERRITORY_RULES: TerritoryRule[] = [
+  // ── Agrupamento 1: Barueri + Jandira + Itapevi ──
   {
     id: 'barueri',
     label: 'Âncora Barueri',
     anchorCity: 'barueri',
     maxDeliveries: 25,
-    allowedFillCities: ['cotia', 'vargem grande paulista'],
+    allowedFillCities: ['jandira', 'itapevi'],
     neighborhoodFills: [],
     neighborhoodExceptions: [],
     excludedNeighborhoods: [
@@ -70,49 +141,64 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     isSupport: false,
     priority: 1,
   },
+  // ── Agrupamento 2: Cotia + Vargem Grande + Embu + Taboão ──
+  {
+    id: 'cotia',
+    label: 'Âncora Cotia',
+    anchorCity: 'cotia',
+    maxDeliveries: 25,
+    allowedFillCities: ['vargem grande paulista', 'embu', 'embu das artes', 'taboao da serra'],
+    neighborhoodFills: [
+      // Bairros específicos de Carapicuíba que entram neste agrupamento
+      { neighborhood: 'vila da oportunidade', city: 'carapicuiba' },
+      { neighborhood: 'jardim yaya', city: 'carapicuiba' },
+      { neighborhood: 'pousada dos bandeirantes', city: 'carapicuiba' },
+    ],
+    neighborhoodExceptions: [],
+    excludedNeighborhoods: [],
+    // Centro de Cotia deve ser sequenciado primeiro na rota
+    priorityNeighborhoods: [
+      { neighborhood: 'centro', city: 'cotia' },
+      { neighborhood: 'centro de cotia', city: 'cotia' },
+    ],
+    isSupport: false,
+    priority: 2,
+  },
+  // ── Agrupamento 3: Osasco ──
   {
     id: 'osasco',
     label: 'Âncora Osasco',
     anchorCity: 'osasco',
     maxDeliveries: 25,
-    allowedFillCities: [],
-    neighborhoodFills: [],
-    neighborhoodExceptions: [
-      { neighborhood: 'jaguare', city: 'sao paulo', maxDeliveries: 2, insertAfterNeighborhood: 'rochdale' },
-      { neighborhood: 'parque imperial', city: 'sao paulo', maxDeliveries: 2 },
+    allowedFillCities: ['carapicuiba'],
+    neighborhoodFills: [
+      // Bairros de SP que entram no caminhão de Osasco
+      { neighborhood: 'parque imperial', city: 'sao paulo' },
+      { neighborhood: 'jaguare', city: 'sao paulo' },
+      { neighborhood: 'rio pequeno', city: 'sao paulo' },
     ],
+    neighborhoodExceptions: [],
     excludedNeighborhoods: [],
     // Jardim Mutinga e Imperial (Barueri) entram PRIMEIRO, antes das entregas de Osasco
     priorityNeighborhoods: [
       { neighborhood: 'jardim mutinga', city: 'barueri' },
       { neighborhood: 'imperial', city: 'barueri' },
     ],
-    isSupport: false,
-    priority: 2,
-    fixedPlate: 'TRC1Z00',
-  },
-  {
-    id: 'carapicuiba',
-    label: 'Âncora Carapicuíba',
-    anchorCity: 'carapicuiba',
-    maxDeliveries: 25,
-    allowedFillCities: [],
-    neighborhoodFills: [],
-    neighborhoodExceptions: [
-      { neighborhood: 'metalurgicos', city: 'osasco', maxDeliveries: 2, insertAfterNeighborhood: 'jardim novo horizonte' },
-      { neighborhood: 'vila do conde', city: 'barueri', maxDeliveries: 2 },
+    // Vila Yara vai pro final da rota de Osasco
+    lateNeighborhoods: [
+      { neighborhood: 'vila yara', city: 'osasco' },
     ],
-    excludedNeighborhoods: [],
-    priorityNeighborhoods: [],
     isSupport: false,
     priority: 3,
+    fixedPlate: 'TRC1Z00',
   },
+  // ── Agrupamento 4: Santana de Parnaíba + Pirapora + Cajamar ──
   {
-    id: 'jandira',
-    label: 'Âncora Jandira',
-    anchorCity: 'jandira',
+    id: 'santana',
+    label: 'Âncora Santana de Parnaíba',
+    anchorCity: 'santana de parnaiba',
     maxDeliveries: 25,
-    allowedFillCities: ['itapevi'],
+    allowedFillCities: ['pirapora do bom jesus', 'cajamar'],
     neighborhoodFills: [],
     neighborhoodExceptions: [],
     excludedNeighborhoods: [],
@@ -120,21 +206,15 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     isSupport: false,
     priority: 4,
   },
+  // ── Agrupamento 5: Caieiras + Perus (SP) ──
   {
-    id: 'embu',
-    label: 'Âncora Embu',
-    anchorCity: 'embu',
+    id: 'caieiras',
+    label: 'Âncora Caieiras',
+    anchorCity: 'caieiras',
     maxDeliveries: 25,
-    allowedFillCities: ['embu das artes'],
+    allowedFillCities: [],
     neighborhoodFills: [
-      // Bairros específicos de Osasco
-      { neighborhood: 'conceicao', city: 'osasco' },
-      { neighborhood: 'metalurgico', city: 'osasco' },
-      { neighborhood: 'santa maria', city: 'osasco' },
-      // Bairros específicos de Carapicuíba
-      { neighborhood: 'vila da oportunidade', city: 'carapicuiba' },
-      { neighborhood: 'jardim yaya', city: 'carapicuiba' },
-      { neighborhood: 'pousada dos bandeirantes', city: 'carapicuiba' },
+      { neighborhood: 'perus', city: 'sao paulo' },
     ],
     neighborhoodExceptions: [],
     excludedNeighborhoods: [],
@@ -142,14 +222,14 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     isSupport: false,
     priority: 5,
   },
+  // ── Apoio / Excedentes ──
   {
     id: 'apoio',
     label: 'Apoio / Excedentes',
     anchorCity: '',
     maxDeliveries: 25,
     allowedFillCities: [
-      'pirapora do bom jesus', 'santana de parnaiba',
-      'taboao da serra', 'sao paulo',
+      'sao paulo',
     ],
     neighborhoodFills: [],
     neighborhoodExceptions: [],
