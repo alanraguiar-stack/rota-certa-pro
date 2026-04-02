@@ -290,10 +290,13 @@ function TruckTab({
   
   // Optimistic local state
   const [localOrders, setLocalOrders] = useState<Order[]>(truckData.orders);
+  const isReordering = useRef(false);
   
-  // Sync with server data when it changes
+  // Sync with server data when it changes (only if no reorder in flight)
   useEffect(() => {
-    setLocalOrders(truckData.orders);
+    if (!isReordering.current) {
+      setLocalOrders(truckData.orders);
+    }
   }, [truckData.orders]);
   
   // Scroll to highlighted order
