@@ -261,6 +261,27 @@ export type Database = {
         }
         Relationships: []
       }
+      login_attempts: {
+        Row: {
+          attempt_type: string
+          created_at: string
+          id: string
+          ip_address: string
+        }
+        Insert: {
+          attempt_type?: string
+          created_at?: string
+          id?: string
+          ip_address: string
+        }
+        Update: {
+          attempt_type?: string
+          created_at?: string
+          id?: string
+          ip_address?: string
+        }
+        Relationships: []
+      }
       order_assignments: {
         Row: {
           created_at: string
@@ -806,6 +827,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cleanup_old_login_attempts: { Args: never; Returns: undefined }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
