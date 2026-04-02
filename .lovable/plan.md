@@ -1,99 +1,70 @@
 
 
-# Plano: Implementar Correções de Segurança (3 Fases)
+# Plano: Correções de Bugs + Configuração de Coverage
 
-## Fase 1 — Correções Críticas
+## Fase 0 — Configuração de Testes
 
-### 1. Rate Limiting no `driver-login` e `driver-lookup`
+### T0a/T0b/T0c: Instalar coverage e configurar
 
-Criar tabela `login_attempts` via migração:
+1. Instalar `@vitest/coverage-v8` como devDependency
+2. Adicionar script `"test:coverage": "vitest run --coverage"` ao `package.json`
+3. Adicionar bloco `coverage` no `vitest.config.ts` com `provider: 'v8'` e `include: ['src/lib/**']`
 
-```sql
-CREATE TABLE public.login_attempts (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ip_address text NOT NULL,
-  attempt_type text NOT NULL DEFAULT 'login',
-  created_at timestamptz NOT NULL DEFAULT now()
-);
+## Fase 1 — Correções de Bugs
 
-CREATE INDEX idx_login_attempts_ip_time ON login_attempts(ip_address, created_at);
+### BUG-01: `encoding.ts` — `isValidPortugueseText` sempre true
 
--- Auto-cleanup de registros com mais de 1 hora
-ALTER TABLE login_attempts ENABLE ROW LEVEL SECURITY;
+A regex `/^[\s\S]*$/u` aceita literalmente qualquer string. Opção: **remover** a função `isValidPortugueseText` e `testPortugueseCharacters` — são dead code, não são importadas em nenhum outro arquivo.
 
--- Permitir que Edge Functions (service_role) insiram/leiam
-CREATE POLICY "Service role full access" ON login_attempts FOR ALL USING (true) WITH CHECK (true);
-```
+### BUG-02: `anchorRules.ts` — Map global mutável
 
-Nas Edge Functions `driver-login` e `driver-lookup`:
-- Antes de processar, contar tentativas do IP nos últimos 5 minutos
-- Se >= 5 tentativas, retornar `429 Too Many Requests`
-- Após cada tentativa (sucesso ou falha), inserir registro
-- IP obtido via `req.headers.get('x-forwarded-for')` ou `x-real-ip`
+O `truckTerritoryMap` já tem `clearTruckTerritories()` chamado no início de `assignTrucksToTerritories`. O risco é em testes onde múltiplas chamadas acumulam state. Correção: adicionar `clearTruckTerritories()` como export para uso em `beforeEach` dos testes (já exportado). **Sem mudança de código** — apenas garantir uso correto nos testes.
 
-### 2. Access Codes mais fortes (`create-test-driver`)
+### BUG-03: `autoRouterEngine.ts` — `recommendTrucks` é stub
 
-Substituir `generateAccessCode()`:
+Linha 118: `return [...availableTrucks]` — retorna frota inteira sem filtrar. Verificar se é usado na UI. Se sim, implementar lógica básica (filtrar por peso/capacidade). Se não, marcar como `@deprecated`.
+
+**Decisão**: a função não é chamada na UI (removida na implementação anterior de seleção manual). **Remover** ou adicionar `@deprecated` + `console.warn`.
+
+### BUG-04: `geocoding.ts` — `parseAddress` crash com null/undefined
+
+Linha 201: `address.replace(...)` falha se `address` é `null`/`undefined`. Adicionar guard:
 
 ```typescript
-function generateAccessCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem I/O/0/1
-  const values = new Uint8Array(8);
-  crypto.getRandomValues(values);
-  const code = Array.from(values).map(v => chars[v % chars.length]).join('');
-  return `RC-${code}`;
+export function parseAddress(address: string): GeocodedAddress {
+  if (!address) {
+    return {
+      original: '', normalized: '', street: '', number: '',
+      neighborhood: '', city: '', state: '', zipCode: '',
+      estimatedLat: -23.5115, estimatedLng: -46.8754,
+    };
+  }
+  // ... resto do código
 }
 ```
 
-Formato: `RC-A7K2M9X4` (~1.1 trilhão de combinações vs 9000 antes).
+### BUG-05: `intelligentReader.ts` — Header detection keywords incompletas
 
-### 3. Sanitizar mensagens de erro (4 Edge Functions)
+Linha 121: a lista de keywords para detectar headers é `['cliente', 'peso', 'endereco', 'venda', 'pedido', 'produto']`. Faltam variantes como `'kg'`, `'razao'`, `'bairro'`, `'cidade'`, `'cep'`, `'rua'`. Ampliar a lista para cobrir mais formatos de planilha.
 
-Em todos os catches de `driver-login`, `driver-lookup`, `create-test-driver`, `optimize-route`:
-- Trocar `err.message` por `"Erro interno do servidor"`
-- Manter `console.error(err)` para debug server-side
+### BUG-06: `columnDetector.ts` — Falso positivo monetário
 
-### 4. Fallback seguro de role (`useUserRole.ts`)
+Linha 104: valores > 500 com 2 casas decimais são marcados como monetários, mas pesos de 500+ kg com 2 decimais também existem. Ajustar threshold para > 1000 ou adicionar checagem cruzada: se a coluna já foi detectada como `weight_*` pelo header, não marcar como monetária.
 
-Trocar `setRole('operacional')` por `setRole(null)` nos catches (linhas 37 e 43).
+### BUG-07: `orderParser.ts` — `totalRows` conta pedidos, não linhas lidas
 
-### 5. Bloquear acesso com role null (`AppLayout.tsx`)
-
-Importar `useUserRole` e, quando `role === null && !roleLoading`, mostrar tela de "Acesso não autorizado" em vez de renderizar o conteúdo.
-
-## Fase 2 — Melhorias
-
-### 6. `driver-lookup` retorna nome parcial
-
-Mascarar nome completo: `"João Silva"` → `"J. Silva"`. Retornar apenas inicial + sobrenome.
-
-### 7. `robots.txt` atualizado
-
-Adicionar:
-```
-Disallow: /motorista/
-Disallow: /configuracoes
-Disallow: /driver/
-```
-
-## Fase 3 — Hardening
-
-### 8. Logger condicional (não incluído nesta implementação)
-
-Criar wrapper `debugLog()` — baixa prioridade, documentar para próximo ciclo.
-
----
+Linha 431: `totalRows: orders.length` deveria ser `totalRows: dataRows.length`. O `orders` exclui linhas vazias puladas, então `totalRows` subreporta o total real.
 
 ## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| Migração SQL | Criar tabela `login_attempts` |
-| `supabase/functions/driver-login/index.ts` | Rate limiting + sanitizar erro |
-| `supabase/functions/driver-lookup/index.ts` | Rate limiting + nome parcial + sanitizar erro |
-| `supabase/functions/create-test-driver/index.ts` | Access code forte + sanitizar erro |
-| `supabase/functions/optimize-route/index.ts` | Sanitizar erro |
-| `src/hooks/useUserRole.ts` | Fallback `null` em vez de `operacional` |
-| `src/components/layout/AppLayout.tsx` | Bloquear acesso quando role é null |
-| `public/robots.txt` | Disallow rotas sensíveis |
+| `package.json` | Adicionar `@vitest/coverage-v8` + script `test:coverage` |
+| `vitest.config.ts` | Bloco `coverage` com provider v8 |
+| `src/lib/encoding.ts` | Remover `isValidPortugueseText` e `testPortugueseCharacters` |
+| `src/lib/autoRouterEngine.ts` | Marcar `recommendTrucks` como deprecated com warning |
+| `src/lib/geocoding.ts` | Guard para null/undefined em `parseAddress` |
+| `src/lib/spreadsheet/intelligentReader.ts` | Ampliar keywords de detecção de header |
+| `src/lib/spreadsheet/columnDetector.ts` | Ajustar threshold monetário de 500→1000 |
+| `src/lib/orderParser.ts` | Corrigir `totalRows: dataRows.length` |
 
