@@ -51,6 +51,8 @@ export interface TerritoryRule {
   priorityNeighborhoods: { neighborhood: string; city: string }[];
   /** Bairros que devem ir para o FINAL da sequência da rota */
   lateNeighborhoods?: { neighborhood: string; city: string }[];
+  /** Bairros da cidade âncora que devem ser sequenciados PRIMEIRO (entrada da cidade) */
+  earlyNeighborhoods?: { neighborhood: string; city: string }[];
   /** É caminhão de apoio? */
   isSupport: boolean;
   /** Prioridade para atribuição (menor = atribuído primeiro) */
@@ -67,20 +69,27 @@ export interface TerritoryRule {
  * Valor: lista de bairros vizinhos.
  */
 export const NEIGHBORHOOD_NEIGHBORS: Record<string, string[]> = {
-  // Osasco
-  'vila yara': ['jaguare', 'rio pequeno', 'presidente altino', 'centro'],
-  'rochdale': ['jaguare', 'km 18', 'bela vista'],
+  // Osasco — entrada (KM 18 / Quitaúna)
+  'km 18': ['rochdale', 'bussocaba', 'jardim das flores', 'quitauna'],
+  'quitauna': ['km 18', 'rochdale', 'cidade das flores', 'munhoz junior'],
+  'cidade das flores': ['quitauna', 'km 18', 'jardim das flores'],
+  'jardim das flores': ['km 18', 'rochdale', 'cidade das flores'],
+  'rochdale': ['jaguare', 'km 18', 'bela vista', 'quitauna', 'helena maria'],
+  // Osasco — centro / oeste
   'presidente altino': ['vila yara', 'centro', 'bussocaba'],
   'bussocaba': ['presidente altino', 'centro', 'km 18'],
-  'centro': ['presidente altino', 'vila yara', 'bussocaba', 'vila osasco'],
-  'km 18': ['rochdale', 'bussocaba', 'jardim das flores'],
-  'jardim das flores': ['km 18', 'rochdale'],
+  'centro': ['presidente altino', 'vila yara', 'bussocaba', 'vila osasco', 'munhoz junior'],
+  'munhoz junior': ['quitauna', 'helena maria', 'centro'],
+  'helena maria': ['munhoz junior', 'bela vista', 'rochdale'],
+  'bela vista': ['helena maria', 'rochdale'],
   'vila osasco': ['centro', 'remedio'],
   'remedio': ['vila osasco', 'conceicao'],
   'conceicao': ['remedio', 'santa maria'],
   'santa maria': ['conceicao', 'metalurgicos', 'metalurgico'],
   'metalurgicos': ['santa maria', 'conceicao'],
   'metalurgico': ['santa maria', 'conceicao'],
+  // Osasco — saída (Vila Yara)
+  'vila yara': ['jaguare', 'rio pequeno', 'presidente altino', 'centro'],
   // Transição Osasco → SP
   'jaguare': ['vila yara', 'rio pequeno', 'rochdale'],
   'rio pequeno': ['jaguare', 'vila yara'],
@@ -100,6 +109,9 @@ export const NEIGHBORHOOD_NEIGHBORS: Record<string, string[]> = {
   'vila da oportunidade': ['jardim yaya', 'pousada dos bandeirantes'],
   'jardim yaya': ['vila da oportunidade', 'pousada dos bandeirantes'],
   'pousada dos bandeirantes': ['jardim yaya', 'vila da oportunidade'],
+  // Caieiras ↔ Perus
+  'perus': ['caieiras'],
+  'caieiras': ['perus'],
 };
 
 /**
@@ -187,6 +199,11 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     // Vila Yara vai pro final da rota de Osasco
     lateNeighborhoods: [
       { neighborhood: 'vila yara', city: 'osasco' },
+    ],
+    // KM 18 e Quitaúna são a "entrada" de Osasco — sequenciados primeiro
+    earlyNeighborhoods: [
+      { neighborhood: 'km 18', city: 'osasco' },
+      { neighborhood: 'quitauna', city: 'osasco' },
     ],
     isSupport: false,
     priority: 3,
