@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
     const ORS_API_KEY = Deno.env.get('ORS_API_KEY');
     if (!ORS_API_KEY) {
       console.error('ORS_API_KEY not configured');
-      return new Response(JSON.stringify({ error: 'ORS_API_KEY not configured', optimizedOrder: null }), {
+      return new Response(JSON.stringify({ error: 'Serviço de otimização indisponível', optimizedOrder: null }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -40,12 +40,11 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Build ORS optimization payload
     const orsPayload = {
       jobs: jobs.map((j, i) => ({
         id: i,
-        location: [j.lng, j.lat], // ORS uses [lng, lat]
-        service: 300, // 5 min per stop
+        location: [j.lng, j.lat],
+        service: 300,
       })),
       vehicles: [{
         id: 0,
@@ -69,7 +68,7 @@ Deno.serve(async (req) => {
     if (!orsResponse.ok) {
       const errorText = await orsResponse.text();
       console.error(`[optimize-route] ORS error ${orsResponse.status}: ${errorText}`);
-      return new Response(JSON.stringify({ optimizedOrder: null, error: `ORS ${orsResponse.status}` }), {
+      return new Response(JSON.stringify({ optimizedOrder: null, error: 'Erro no serviço de otimização' }), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -77,7 +76,6 @@ Deno.serve(async (req) => {
 
     const orsResult = await orsResponse.json();
 
-    // Extract optimized sequence from steps
     const route = orsResult.routes?.[0];
     if (!route || !route.steps) {
       console.error('[optimize-route] No route in ORS response');
@@ -87,7 +85,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Filter only "job" steps (exclude start/end) and map back to original IDs
     const jobSteps = route.steps.filter((s: any) => s.type === 'job');
     const optimizedOrder: string[] = jobSteps.map((s: any) => jobs[s.job].id);
 
@@ -104,7 +101,7 @@ Deno.serve(async (req) => {
 
   } catch (error) {
     console.error('[optimize-route] Error:', error);
-    return new Response(JSON.stringify({ optimizedOrder: null, error: String(error) }), {
+    return new Response(JSON.stringify({ optimizedOrder: null, error: 'Erro interno do servidor' }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
