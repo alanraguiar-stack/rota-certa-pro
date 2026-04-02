@@ -1,70 +1,90 @@
 
 
-# Plano: Correções de Bugs + Configuração de Coverage
+# Plano: Ajustes de Agrupamento Territorial e Transição entre Bairros
 
-## Fase 0 — Configuração de Testes
+## Resumo
 
-### T0a/T0b/T0c: Instalar coverage e configurar
+Corrigir as regras de território em `anchorRules.ts` e adicionar lógica de adjacência por bairro para transições mais inteligentes no sequenciamento.
 
-1. Instalar `@vitest/coverage-v8` como devDependency
-2. Adicionar script `"test:coverage": "vitest run --coverage"` ao `package.json`
-3. Adicionar bloco `coverage` no `vitest.config.ts` com `provider: 'v8'` e `include: ['src/lib/**']`
+## Problemas identificados
 
-## Fase 1 — Correções de Bugs
+1. **Osasco não inclui Parque Imperial e Santa Maria** — Parque Imperial está como `neighborhoodException` (limite de 2), e Santa Maria está alocada no território de Embu como `neighborhoodFill`. Precisam migrar para Osasco.
+2. **Cotia Centro deveria ser prioritário** — Não há lógica para priorizar bairros dentro da mesma cidade âncora. O sequenciamento nearest-neighbor começa do CD sem considerar "Centro primeiro".
+3. **Agrupamentos errados** — Os territórios atuais não refletem os 5 agrupamentos operacionais definidos pelo usuário.
+4. **Santa Maria no caminhão de Cotia** — Está como `neighborhoodFill` de Embu, mas Embu faz parte do agrupamento de Cotia. O correto é que Santa Maria vá para Osasco.
+5. **Mutinga existe em Osasco e Barueri** — O código atual exclui `jardim mutinga` de Barueri e joga para Osasco via `priorityNeighborhoods`, mas não diferencia Mutinga de Osasco (que deveria ficar no próprio Osasco).
+6. **Sem adjacência de bairros** — O sequenciamento usa apenas proximidade geográfica por coordenadas estimadas, sem mapa de vizinhança entre bairros para guiar transições.
 
-### BUG-01: `encoding.ts` — `isValidPortugueseText` sempre true
+## Mudanças
 
-A regex `/^[\s\S]*$/u` aceita literalmente qualquer string. Opção: **remover** a função `isValidPortugueseText` e `testPortugueseCharacters` — são dead code, não são importadas em nenhum outro arquivo.
+### 1. `src/lib/anchorRules.ts` — Reestruturar territórios
 
-### BUG-02: `anchorRules.ts` — Map global mutável
+Reescrever `TERRITORY_RULES` para refletir os 5 agrupamentos:
 
-O `truckTerritoryMap` já tem `clearTruckTerritories()` chamado no início de `assignTrucksToTerritories`. O risco é em testes onde múltiplas chamadas acumulam state. Correção: adicionar `clearTruckTerritories()` como export para uso em `beforeEach` dos testes (já exportado). **Sem mudança de código** — apenas garantir uso correto nos testes.
+| ID | Âncora | Fill Cities | Obs |
+|---|---|---|---|
+| `barueri` | Barueri | Jandira, Itapevi | Agrupamento 1 |
+| `cotia` | Cotia | Vargem Grande, Embu, Embu das Artes, Taboão da Serra | Agrupamento 2 |
+| `osasco` | Osasco | — | Agrupamento 3. Bairros extras: Parque Imperial (SP), Jaguaré (SP), Rio Pequeno (SP), Santa Maria (Osasco). Vila Yara vai pro final via `insertAfterNeighborhood` |
+| `santana` | Santana de Parnaíba | Pirapora, Cajamar | Agrupamento 4 |
+| `caieiras` | Caieiras | — | Agrupamento 5. Bairro extra: Perus (SP) |
+| `apoio` | — | São Paulo (restante) | Apoio/excedentes |
 
-### BUG-03: `autoRouterEngine.ts` — `recommendTrucks` é stub
+Mudanças específicas:
+- **Remover** território `carapicuiba` (agora Carapicuíba fica como fill de outro ou entra via adjacência)
+- **Remover** território `jandira` (agora fill de `barueri`)
+- **Remover** território `embu` (agora fill de `cotia`)
+- **Osasco**: Adicionar `santa maria` e `rio pequeno` como `neighborhoodFills` de Osasco. Mover `parque imperial` de exception (limite 2) para `neighborhoodFill` (sem limite rígido). Adicionar Vila Yara como bairro de sequenciamento tardio.
+- **Mutinga**: Manter exclusão de `jardim mutinga` de Barueri → Osasco. Adicionar nota que `mutinga` em Osasco fica no próprio Osasco naturalmente.
+- **Cotia**: Adicionar `priorityNeighborhoods` para Centro de Cotia (bairros "centro", "centro de cotia") para que sejam sequenciados primeiro.
+- **Caieiras**: Novo território com `perus` (SP) como `neighborhoodFill`.
 
-Linha 118: `return [...availableTrucks]` — retorna frota inteira sem filtrar. Verificar se é usado na UI. Se sim, implementar lógica básica (filtrar por peso/capacidade). Se não, marcar como `@deprecated`.
+### 2. `src/lib/anchorRules.ts` — Adicionar mapa de bairros vizinhos
 
-**Decisão**: a função não é chamada na UI (removida na implementação anterior de seleção manual). **Remover** ou adicionar `@deprecated` + `console.warn`.
-
-### BUG-04: `geocoding.ts` — `parseAddress` crash com null/undefined
-
-Linha 201: `address.replace(...)` falha se `address` é `null`/`undefined`. Adicionar guard:
+Criar `NEIGHBORHOOD_NEIGHBORS` — um mapa de adjacência entre bairros dentro da mesma cidade ou entre cidades vizinhas. Usado pelo sequenciamento para dar bônus de proximidade na transição.
 
 ```typescript
-export function parseAddress(address: string): GeocodedAddress {
-  if (!address) {
-    return {
-      original: '', normalized: '', street: '', number: '',
-      neighborhood: '', city: '', state: '', zipCode: '',
-      estimatedLat: -23.5115, estimatedLng: -46.8754,
-    };
-  }
-  // ... resto do código
-}
+export const NEIGHBORHOOD_NEIGHBORS: Record<string, string[]> = {
+  // Osasco
+  'vila yara': ['jaguare', 'rio pequeno', 'presidente altino'],
+  'rochdale': ['jaguare', 'km 18'],
+  'presidente altino': ['vila yara', 'centro'],
+  // Barueri
+  'jardim mutinga': ['jd silveira', 'parque viana'],
+  'alphaville': ['tambore', 'centro'],
+  // ... expandir conforme necessário
+};
 ```
 
-### BUG-05: `intelligentReader.ts` — Header detection keywords incompletas
+### 3. `src/lib/autoRouterEngine.ts` — Sequenciamento com prioridade Centro e Vila Yara no final
 
-Linha 121: a lista de keywords para detectar headers é `['cliente', 'peso', 'endereco', 'venda', 'pedido', 'produto']`. Faltam variantes como `'kg'`, `'razao'`, `'bairro'`, `'cidade'`, `'cep'`, `'rua'`. Ampliar a lista para cobrir mais formatos de planilha.
+Na função `optimizeDeliverySequence`:
+- Quando o território tem `priorityNeighborhoods` internos (centro de Cotia), sequenciar esses bairros primeiro dentro do bloco da cidade âncora.
+- Quando o território indica bairros de "final de rota" (Vila Yara em Osasco), colocá-los no final do bloco.
 
-### BUG-06: `columnDetector.ts` — Falso positivo monetário
+Adicionar campo `lateNeighborhoods` ao `TerritoryRule`:
+```typescript
+lateNeighborhoods?: { neighborhood: string; city: string }[];
+```
 
-Linha 104: valores > 500 com 2 casas decimais são marcados como monetários, mas pesos de 500+ kg com 2 decimais também existem. Ajustar threshold para > 1000 ou adicionar checagem cruzada: se a coluna já foi detectada como `weight_*` pelo header, não marcar como monetária.
+### 4. `src/lib/autoRouterEngine.ts` + `src/lib/routing.ts` — Bônus de bairro vizinho no sequenciamento
 
-### BUG-07: `orderParser.ts` — `totalRows` conta pedidos, não linhas lidas
+Na função `nearestNeighborWithinCity` e `nearestNeighborWithProximityBonuses`:
+- Importar `NEIGHBORHOOD_NEIGHBORS`
+- Adicionar bônus de ~40% (`×0.60`) quando o bairro candidato é vizinho do bairro atual (consultando o mapa)
+- Isso fica entre o bônus de "mesmo bairro" (×0.30) e "mesma cidade" (×0.70)
 
-Linha 431: `totalRows: orders.length` deveria ser `totalRows: dataRows.length`. O `orders` exclui linhas vazias puladas, então `totalRows` subreporta o total real.
+### 5. `src/lib/geocoding.ts` — Atualizar `CITY_NEIGHBORS`
+
+- Adicionar Carapicuíba como vizinha de Cotia (se não estiver)
+- Verificar que Perus (bairro de SP) tem adjacência correta com Caieiras
 
 ## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `package.json` | Adicionar `@vitest/coverage-v8` + script `test:coverage` |
-| `vitest.config.ts` | Bloco `coverage` com provider v8 |
-| `src/lib/encoding.ts` | Remover `isValidPortugueseText` e `testPortugueseCharacters` |
-| `src/lib/autoRouterEngine.ts` | Marcar `recommendTrucks` como deprecated com warning |
-| `src/lib/geocoding.ts` | Guard para null/undefined em `parseAddress` |
-| `src/lib/spreadsheet/intelligentReader.ts` | Ampliar keywords de detecção de header |
-| `src/lib/spreadsheet/columnDetector.ts` | Ajustar threshold monetário de 500→1000 |
-| `src/lib/orderParser.ts` | Corrigir `totalRows: dataRows.length` |
+| `src/lib/anchorRules.ts` | Reestruturar territórios + adicionar `NEIGHBORHOOD_NEIGHBORS` + campo `lateNeighborhoods` |
+| `src/lib/autoRouterEngine.ts` | Lógica de bairros prioritários/tardios no sequenciamento + bônus de bairro vizinho |
+| `src/lib/routing.ts` | Bônus de bairro vizinho no nearest-neighbor |
+| `src/lib/geocoding.ts` | Atualizar adjacência de cidades se necessário |
 
