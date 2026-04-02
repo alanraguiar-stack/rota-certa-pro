@@ -1,90 +1,42 @@
 
 
-# Plano: Ajustes de Agrupamento Territorial e Transição entre Bairros
+# Plano: Corrigir Drag-and-Drop no Editor de Rotas
 
-## Resumo
+## Problemas Identificados
 
-Corrigir as regras de território em `anchorRules.ts` e adicionar lógica de adjacência por bairro para transições mais inteligentes no sequenciamento.
+### 1. Área de arraste muito pequena
+O `draggable` está apenas no ícone de grip (16×16px + 0.5 padding). É muito difícil clicar e segurar com precisão. O HTML5 Drag API em ícones tão pequenos falha frequentemente em navegadores.
 
-## Problemas identificados
+### 2. Bug de sequência no drag-and-drop (off-by-one)
+Ao arrastar um item **para baixo**, o cálculo envia `newSequence + 1` que resulta em valor fora do range. Exemplo: arrastar do index 0 para o index 3 em 4 itens → envia `newSequence = 5`, mas o máximo deveria ser 4.
 
-1. **Osasco não inclui Parque Imperial e Santa Maria** — Parque Imperial está como `neighborhoodException` (limite de 2), e Santa Maria está alocada no território de Embu como `neighborhoodFill`. Precisam migrar para Osasco.
-2. **Cotia Centro deveria ser prioritário** — Não há lógica para priorizar bairros dentro da mesma cidade âncora. O sequenciamento nearest-neighbor começa do CD sem considerar "Centro primeiro".
-3. **Agrupamentos errados** — Os territórios atuais não refletem os 5 agrupamentos operacionais definidos pelo usuário.
-4. **Santa Maria no caminhão de Cotia** — Está como `neighborhoodFill` de Embu, mas Embu faz parte do agrupamento de Cotia. O correto é que Santa Maria vá para Osasco.
-5. **Mutinga existe em Osasco e Barueri** — O código atual exclui `jardim mutinga` de Barueri e joga para Osasco via `priorityNeighborhoods`, mas não diferencia Mutinga de Osasco (que deveria ficar no próprio Osasco).
-6. **Sem adjacência de bairros** — O sequenciamento usa apenas proximidade geográfica por coordenadas estimadas, sem mapa de vizinhança entre bairros para guiar transições.
+### 3. Falta de feedback visual durante o arraste
+Não há `setDragImage` nem indicador claro de "onde vai soltar". O `isDragTarget` existe mas sem visual forte.
 
-## Mudanças
+## Correções
 
-### 1. `src/lib/anchorRules.ts` — Reestruturar territórios
+### `src/components/route/TruckRouteEditor.tsx`
 
-Reescrever `TERRITORY_RULES` para refletir os 5 agrupamentos:
+**A. Expandir área de arraste**: Tornar toda a lateral esquerda do card (grip + número) como zona draggable, aumentando a área de toque de ~20px para ~60px.
 
-| ID | Âncora | Fill Cities | Obs |
-|---|---|---|---|
-| `barueri` | Barueri | Jandira, Itapevi | Agrupamento 1 |
-| `cotia` | Cotia | Vargem Grande, Embu, Embu das Artes, Taboão da Serra | Agrupamento 2 |
-| `osasco` | Osasco | — | Agrupamento 3. Bairros extras: Parque Imperial (SP), Jaguaré (SP), Rio Pequeno (SP), Santa Maria (Osasco). Vila Yara vai pro final via `insertAfterNeighborhood` |
-| `santana` | Santana de Parnaíba | Pirapora, Cajamar | Agrupamento 4 |
-| `caieiras` | Caieiras | — | Agrupamento 5. Bairro extra: Perus (SP) |
-| `apoio` | — | São Paulo (restante) | Apoio/excedentes |
+**B. Corrigir cálculo de sequência no `handleDragDrop`**:
+```
+// ANTES (bugado):
+const newSequence = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex;
+onReorder(truckData.routeTruckId, draggedOrderId, newSequence + 1);
 
-Mudanças específicas:
-- **Remover** território `carapicuiba` (agora Carapicuíba fica como fill de outro ou entra via adjacência)
-- **Remover** território `jandira` (agora fill de `barueri`)
-- **Remover** território `embu` (agora fill de `cotia`)
-- **Osasco**: Adicionar `santa maria` e `rio pequeno` como `neighborhoodFills` de Osasco. Mover `parque imperial` de exception (limite 2) para `neighborhoodFill` (sem limite rígido). Adicionar Vila Yara como bairro de sequenciamento tardio.
-- **Mutinga**: Manter exclusão de `jardim mutinga` de Barueri → Osasco. Adicionar nota que `mutinga` em Osasco fica no próprio Osasco naturalmente.
-- **Cotia**: Adicionar `priorityNeighborhoods` para Centro de Cotia (bairros "centro", "centro de cotia") para que sejam sequenciados primeiro.
-- **Caieiras**: Novo território com `perus` (SP) como `neighborhoodFill`.
-
-### 2. `src/lib/anchorRules.ts` — Adicionar mapa de bairros vizinhos
-
-Criar `NEIGHBORHOOD_NEIGHBORS` — um mapa de adjacência entre bairros dentro da mesma cidade ou entre cidades vizinhas. Usado pelo sequenciamento para dar bônus de proximidade na transição.
-
-```typescript
-export const NEIGHBORHOOD_NEIGHBORS: Record<string, string[]> = {
-  // Osasco
-  'vila yara': ['jaguare', 'rio pequeno', 'presidente altino'],
-  'rochdale': ['jaguare', 'km 18'],
-  'presidente altino': ['vila yara', 'centro'],
-  // Barueri
-  'jardim mutinga': ['jd silveira', 'parque viana'],
-  'alphaville': ['tambore', 'centro'],
-  // ... expandir conforme necessário
-};
+// DEPOIS (correto — sequências 1-indexed):
+const newSequence = targetIndex + 1;
+onReorder(truckData.routeTruckId, draggedOrderId, newSequence);
 ```
 
-### 3. `src/lib/autoRouterEngine.ts` — Sequenciamento com prioridade Centro e Vila Yara no final
+**C. Melhorar feedback visual**: Adicionar borda indicadora (drop zone) entre os cards durante o arraste, para mostrar exatamente onde o item será inserido.
 
-Na função `optimizeDeliverySequence`:
-- Quando o território tem `priorityNeighborhoods` internos (centro de Cotia), sequenciar esses bairros primeiro dentro do bloco da cidade âncora.
-- Quando o território indica bairros de "final de rota" (Vila Yara em Osasco), colocá-los no final do bloco.
+**D. Adicionar `e.dataTransfer.setData`**: Necessário para alguns navegadores reconhecerem o drag. Sem isso, o drag pode ser silenciosamente ignorado.
 
-Adicionar campo `lateNeighborhoods` ao `TerritoryRule`:
-```typescript
-lateNeighborhoods?: { neighborhood: string; city: string }[];
-```
-
-### 4. `src/lib/autoRouterEngine.ts` + `src/lib/routing.ts` — Bônus de bairro vizinho no sequenciamento
-
-Na função `nearestNeighborWithinCity` e `nearestNeighborWithProximityBonuses`:
-- Importar `NEIGHBORHOOD_NEIGHBORS`
-- Adicionar bônus de ~40% (`×0.60`) quando o bairro candidato é vizinho do bairro atual (consultando o mapa)
-- Isso fica entre o bônus de "mesmo bairro" (×0.30) e "mesma cidade" (×0.70)
-
-### 5. `src/lib/geocoding.ts` — Atualizar `CITY_NEIGHBORS`
-
-- Adicionar Carapicuíba como vizinha de Cotia (se não estiver)
-- Verificar que Perus (bairro de SP) tem adjacência correta com Caieiras
-
-## Arquivos afetados
+## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/anchorRules.ts` | Reestruturar territórios + adicionar `NEIGHBORHOOD_NEIGHBORS` + campo `lateNeighborhoods` |
-| `src/lib/autoRouterEngine.ts` | Lógica de bairros prioritários/tardios no sequenciamento + bônus de bairro vizinho |
-| `src/lib/routing.ts` | Bônus de bairro vizinho no nearest-neighbor |
-| `src/lib/geocoding.ts` | Atualizar adjacência de cidades se necessário |
+| `src/components/route/TruckRouteEditor.tsx` | Expandir drag handle, corrigir sequência, melhorar feedback, adicionar setData |
 
