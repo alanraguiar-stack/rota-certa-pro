@@ -1,55 +1,49 @@
 
 
-# Plano: Reordenamento em Tempo Real (Optimistic Updates)
+# Plano: Corrigir Reordenamento — Insert em vez de Swap
 
 ## Causa Raiz
 
-Cada ação de reordenar (drag-and-drop ou setas) executa esta sequência **bloqueante**:
+O `useEffect` que sincroniza `localOrders` com `truckData.orders` está desfazendo a atualização otimista prematuramente.
 
-1. `await reorderSingleDelivery.mutateAsync()` — N chamadas ao banco em paralelo
-2. `await refetch()` — re-busca a rota inteira do banco
-3. Só então o React re-renderiza com a nova ordem
+Quando o mutation `reorderSingleDelivery` inicia, `isPending` muda → RouteDetails re-renderiza → cria novos arrays `orders` (mesmos dados, nova referência) → o `useEffect` detecta "mudança" e reseta `localOrders` para o estado antigo do servidor, desfazendo o insert otimista.
 
-Resultado: delay de 500ms–2s por operação, tornando o arraste travado.
+O resultado visual: o item volta para a posição original (parece "swap" ou "não funcionou").
 
-## Solução: Optimistic Updates
+## Correção
 
-Atualizar a lista localmente **antes** de chamar o banco. Se o banco falhar, reverter.
+### `src/components/route/TruckRouteEditor.tsx`
 
-## Mudanças
+1. **Adicionar ref `isReordering`** para rastrear se há um reorder em andamento
+2. **No `useEffect` de sync**: só atualizar `localOrders` se `isReordering.current === false`
+3. **No `handleReorder` e `handleDragDrop`**: setar `isReordering.current = true` antes do optimistic update, e `false` após o mutation completar (sucesso ou erro)
+4. **Comparação por IDs**: como backup, comparar a lista de order IDs antes de fazer o sync — se os IDs são os mesmos (mesma ordem), ignorar o sync
 
-### 1. `src/components/route/TruckRouteEditor.tsx` — Estado local otimista
+```typescript
+const isReordering = useRef(false);
 
-- Adicionar `localOrders` state no `TruckTab` que espelha `truckData.orders`
-- No drag-and-drop e nas setas, reordenar `localOrders` **imediatamente** (splice/insert)
-- Renderizar a partir de `localOrders` em vez de `truckData.orders`
-- Chamar `onReorder` em background (sem `await` bloqueante na UI)
-- Se `onReorder` falhar, reverter `localOrders` para o estado anterior e mostrar toast de erro
-- Sincronizar `localOrders` com `truckData.orders` via `useEffect` quando os dados do servidor mudarem (para capturar mudanças externas)
-
-### 2. `src/pages/RouteDetails.tsx` — Remover `await refetch()` bloqueante
-
-- No `handleReorderInTruck`: remover o `await refetch()` após o mutate
-- A invalidação de queries já acontece no `onSuccess` do mutation (`queryClient.invalidateQueries`)
-- O `refetch` redundante causa double-fetch e mais latência
-
-### 3. `src/hooks/useRoutes.ts` — Nenhuma mudança necessária
-
-O mutation já faz `queryClient.invalidateQueries` no `onSuccess`, o que é suficiente para eventual consistency.
-
-## Fluxo após correção
-
-```text
-Usuário arrasta item    → UI atualiza INSTANTANEAMENTE (localOrders)
-                        → DB update roda em background
-                        → Se falhar: reverte localOrders + toast de erro
-                        → Se OK: invalidateQueries atualiza dados do servidor
+useEffect(() => {
+  if (!isReordering.current) {
+    setLocalOrders(truckData.orders);
+  }
+}, [truckData.orders]);
 ```
 
-## Arquivos afetados
+No `handleDragDrop` e `handleReorder`:
+```typescript
+isReordering.current = true;
+optimisticReorder(orderId, newIndex);
+try {
+  await onReorder(...);
+} catch { ... }
+finally {
+  isReordering.current = false;
+}
+```
+
+## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/route/TruckRouteEditor.tsx` | Estado local otimista para reordenamento instantâneo |
-| `src/pages/RouteDetails.tsx` | Remover `await refetch()` redundante no reorder |
+| `src/components/route/TruckRouteEditor.tsx` | Ref `isReordering` para proteger optimistic updates de serem sobrescritos |
 
