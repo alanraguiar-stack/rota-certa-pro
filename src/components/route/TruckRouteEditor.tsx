@@ -126,7 +126,7 @@ function OrderCard({
       className={cn(
         "rounded-lg border bg-card transition-all select-text",
         isLocked ? "opacity-75" : "hover:shadow-md",
-        isDragTarget && "border-primary border-2 shadow-lg",
+        isDragTarget && "border-primary border-2 shadow-lg bg-primary/5 -translate-y-0.5 scale-[1.01]",
         isHighlighted && "ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-900/20",
       )}
       onDragOver={(e) => {
@@ -141,21 +141,24 @@ function OrderCard({
       onDragEnd={onDragEnd}
     >
       <div className="flex items-center gap-3 p-3">
-        {/* Drag Handle — only this element is draggable */}
-        <div className="flex items-center gap-1">
-          {!isLocked && (
-            <div
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.effectAllowed = 'move';
-                onDragStart?.();
-              }}
-              className="cursor-grab active:cursor-grabbing p-0.5"
-            >
-              <GripVertical className="h-4 w-4 text-muted-foreground" />
-            </div>
+        {/* Drag Handle — left section is draggable */}
+        <div 
+          className={cn(
+            "flex items-center gap-1 py-2 pr-2 -ml-1 pl-1 rounded-l-lg",
+            !isLocked && "cursor-grab active:cursor-grabbing hover:bg-muted/80 transition-colors"
           )}
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm">
+          draggable={!isLocked}
+          onDragStart={(e) => {
+            if (isLocked) return;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', order.id);
+            onDragStart?.();
+          }}
+        >
+          {!isLocked && (
+            <GripVertical className="h-5 w-5 text-muted-foreground shrink-0" />
+          )}
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm shrink-0">
             {sequence}
           </span>
         </div>
@@ -330,10 +333,11 @@ function TruckTab({
     const sourceIndex = truckData.orders.findIndex(o => o.id === draggedOrderId);
     if (sourceIndex === -1 || sourceIndex === targetIndex) return;
     
-    const newSequence = targetIndex > sourceIndex ? targetIndex + 1 : targetIndex;
+    // 1-indexed sequence: target position in the list
+    const newSequence = targetIndex + 1;
     
     try {
-      await onReorder(truckData.routeTruckId, draggedOrderId, newSequence + 1);
+      await onReorder(truckData.routeTruckId, draggedOrderId, newSequence);
     } catch (error) {
       toast({
         title: 'Erro ao reordenar',
