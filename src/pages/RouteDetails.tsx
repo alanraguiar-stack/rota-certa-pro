@@ -285,8 +285,7 @@ export default function RouteDetails() {
     newSequence: number
   ) => {
     await reorderSingleDelivery.mutateAsync({ routeTruckId: truckId, orderId, newSequence });
-    await refetch();
-  }, [reorderSingleDelivery, refetch]);
+  }, [reorderSingleDelivery]);
 
   const handleLockTruck = useCallback(async (truckId: string) => {
     setLockedTruckIds(prev => new Set([...prev, truckId]));
