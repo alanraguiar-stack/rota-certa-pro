@@ -1,36 +1,99 @@
 
 
-# Plano: Corrigir Romaneio de Carga Vazio (Fallback sem Itens)
+# Plano: Implementar Correções de Segurança (3 Fases)
 
-## Causa Raiz
+## Fase 1 — Correções Críticas
 
-Esta rota foi criada **sem o arquivo de detalhamento (ADV)**. Todos os pedidos têm `product_description = "Sem itens detalhados"` e zero registros em `order_items`. O código atual agrupa tudo numa única linha com esse texto genérico, que parece vazio/inútil.
+### 1. Rate Limiting no `driver-login` e `driver-lookup`
 
-## Correção
+Criar tabela `login_attempts` via migração:
 
-### `src/components/route/LoadingManifest.tsx`
+```sql
+CREATE TABLE public.login_attempts (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  ip_address text NOT NULL,
+  attempt_type text NOT NULL DEFAULT 'login',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
-1. **Melhorar o fallback do `consolidateProducts`**: quando nenhum pedido tem `items`, listar cada pedido individualmente pelo nome do cliente + peso, em vez de agrupar tudo sob "Sem itens detalhados"
-2. **Adicionar aviso visual**: mostrar um alerta amarelo no topo explicando que o detalhamento de produtos não foi importado e que o romaneio está usando dados resumidos
-3. **PDF também reflete o fallback**: a função `generateLoadingManifestPDF` deve gerar a tabela com os pedidos individuais quando não há itens detalhados
+CREATE INDEX idx_login_attempts_ip_time ON login_attempts(ip_address, created_at);
 
-### Lógica do fallback
+-- Auto-cleanup de registros com mais de 1 hora
+ALTER TABLE login_attempts ENABLE ROW LEVEL SECURITY;
 
-```text
-SE nenhum pedido tem items E todos têm "Sem itens detalhados":
-  → Listar cada pedido como: "Pedido - [Nome do Cliente]" | Peso | Qtd: 1
-SENÃO (fallback parcial):
-  → Manter lógica atual (usa product_description ou items)
+-- Permitir que Edge Functions (service_role) insiram/leiam
+CREATE POLICY "Service role full access" ON login_attempts FOR ALL USING (true) WITH CHECK (true);
 ```
 
-### Resultado esperado
+Nas Edge Functions `driver-login` e `driver-lookup`:
+- Antes de processar, contar tentativas do IP nos últimos 5 minutos
+- Se >= 5 tentativas, retornar `429 Too Many Requests`
+- Após cada tentativa (sucesso ou falha), inserir registro
+- IP obtido via `req.headers.get('x-forwarded-for')` ou `x-real-ip`
 
-- Rotas **com** ADV: comportamento inalterado (produtos consolidados)
-- Rotas **sem** ADV: romaneio lista cada pedido por cliente/peso + aviso de que o detalhamento não foi importado
+### 2. Access Codes mais fortes (`create-test-driver`)
 
-## Arquivo afetado
+Substituir `generateAccessCode()`:
+
+```typescript
+function generateAccessCode(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem I/O/0/1
+  const values = new Uint8Array(8);
+  crypto.getRandomValues(values);
+  const code = Array.from(values).map(v => chars[v % chars.length]).join('');
+  return `RC-${code}`;
+}
+```
+
+Formato: `RC-A7K2M9X4` (~1.1 trilhão de combinações vs 9000 antes).
+
+### 3. Sanitizar mensagens de erro (4 Edge Functions)
+
+Em todos os catches de `driver-login`, `driver-lookup`, `create-test-driver`, `optimize-route`:
+- Trocar `err.message` por `"Erro interno do servidor"`
+- Manter `console.error(err)` para debug server-side
+
+### 4. Fallback seguro de role (`useUserRole.ts`)
+
+Trocar `setRole('operacional')` por `setRole(null)` nos catches (linhas 37 e 43).
+
+### 5. Bloquear acesso com role null (`AppLayout.tsx`)
+
+Importar `useUserRole` e, quando `role === null && !roleLoading`, mostrar tela de "Acesso não autorizado" em vez de renderizar o conteúdo.
+
+## Fase 2 — Melhorias
+
+### 6. `driver-lookup` retorna nome parcial
+
+Mascarar nome completo: `"João Silva"` → `"J. Silva"`. Retornar apenas inicial + sobrenome.
+
+### 7. `robots.txt` atualizado
+
+Adicionar:
+```
+Disallow: /motorista/
+Disallow: /configuracoes
+Disallow: /driver/
+```
+
+## Fase 3 — Hardening
+
+### 8. Logger condicional (não incluído nesta implementação)
+
+Criar wrapper `debugLog()` — baixa prioridade, documentar para próximo ciclo.
+
+---
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/route/LoadingManifest.tsx` | Fallback inteligente + aviso visual + PDF atualizado |
+| Migração SQL | Criar tabela `login_attempts` |
+| `supabase/functions/driver-login/index.ts` | Rate limiting + sanitizar erro |
+| `supabase/functions/driver-lookup/index.ts` | Rate limiting + nome parcial + sanitizar erro |
+| `supabase/functions/create-test-driver/index.ts` | Access code forte + sanitizar erro |
+| `supabase/functions/optimize-route/index.ts` | Sanitizar erro |
+| `src/hooks/useUserRole.ts` | Fallback `null` em vez de `operacional` |
+| `src/components/layout/AppLayout.tsx` | Bloquear acesso quando role é null |
+| `public/robots.txt` | Disallow rotas sensíveis |
 
