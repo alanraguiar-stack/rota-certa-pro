@@ -69,47 +69,75 @@ export interface TerritoryRule {
  * Valor: lista de bairros vizinhos.
  */
 export const NEIGHBORHOOD_NEIGHBORS: Record<string, string[]> = {
-  // Osasco — entrada (KM 18 / Quitaúna)
-  'km 18': ['rochdale', 'bussocaba', 'jardim das flores', 'quitauna'],
-  'quitauna': ['km 18', 'rochdale', 'cidade das flores', 'munhoz junior'],
+  // ── Osasco — entrada (Leste, divisa SP) ──
+  'km 18': ['quitauna', 'bonfim', 'rochdale', 'jardim das flores', 'bussocaba'],
+  'quitauna': ['km 18', 'bonfim', 'rochdale', 'cidade das flores', 'munhoz junior', 'umuarama'],
+  'bonfim': ['km 18', 'quitauna', 'i.a.p.i.', 'rochdale'],
+  'iapi': ['bonfim', 'rochdale', 'umuarama'],
+  'i.a.p.i.': ['bonfim', 'rochdale', 'umuarama'],
   'cidade das flores': ['quitauna', 'km 18', 'jardim das flores'],
   'jardim das flores': ['km 18', 'rochdale', 'cidade das flores'],
-  'rochdale': ['jaguare', 'km 18', 'bela vista', 'quitauna', 'helena maria'],
-  // Osasco — centro / oeste
-  'presidente altino': ['vila yara', 'centro', 'bussocaba'],
+  'rochdale': ['km 18', 'quitauna', 'bonfim', 'i.a.p.i.', 'bela vista', 'helena maria', 'jaguare'],
+  // ── Osasco — centro ──
+  'umuarama': ['quitauna', 'i.a.p.i.', 'veloso', 'centro'],
+  'centro': ['umuarama', 'presidente altino', 'bussocaba', 'vila osasco', 'munhoz junior', 'vila yara'],
+  'presidente altino': ['centro', 'bussocaba', 'vila yara'],
   'bussocaba': ['presidente altino', 'centro', 'km 18'],
-  'centro': ['presidente altino', 'vila yara', 'bussocaba', 'vila osasco', 'munhoz junior'],
   'munhoz junior': ['quitauna', 'helena maria', 'centro'],
   'helena maria': ['munhoz junior', 'bela vista', 'rochdale'],
   'bela vista': ['helena maria', 'rochdale'],
+  // ── Osasco — sul (divisa Carapicuíba) ──
+  'veloso': ['umuarama', 'santa maria', 'baronesa', 'conceicao'],
+  'santa maria': ['veloso', 'alianca', 'conceicao', 'metalurgicos', 'metalurgico'],
+  'alianca': ['santa maria', 'baronesa', 'conceicao'],
+  'baronesa': ['alianca', 'veloso', 'santa maria'],
   'vila osasco': ['centro', 'remedio'],
   'remedio': ['vila osasco', 'conceicao'],
-  'conceicao': ['remedio', 'santa maria'],
-  'santa maria': ['conceicao', 'metalurgicos', 'metalurgico'],
+  'conceicao': ['remedio', 'santa maria', 'veloso', 'alianca'],
   'metalurgicos': ['santa maria', 'conceicao'],
   'metalurgico': ['santa maria', 'conceicao'],
-  // Osasco — saída (Vila Yara)
-  'vila yara': ['jaguare', 'rio pequeno', 'presidente altino', 'centro'],
-  // Transição Osasco → SP
-  'jaguare': ['vila yara', 'rio pequeno', 'rochdale'],
-  'rio pequeno': ['jaguare', 'vila yara'],
+  // ── Osasco — saída (Vila Yara → SP) ──
+  'vila yara': ['presidente altino', 'centro', 'jaguare', 'rio pequeno'],
+  'jaguare': ['vila yara', 'rio pequeno', 'rochdale', 'parque imperial'],
+  'rio pequeno': ['jaguare', 'vila yara', 'jardim d\'abril'],
   'parque imperial': ['jaguare', 'rio pequeno'],
-  // Barueri
-  'jardim mutinga': ['jd silveira', 'parque viana', 'vila do conde'],
+  // ── SP — zona oeste (Raposo Tavares) ──
+  'jardim adelfiore': ['jardim d\'abril', 'parque imperial'],
+  'jardim d\'abril': ['jardim adelfiore', 'conjunto promorar raposo tavares', 'rio pequeno'],
+  'conjunto promorar raposo tavares': ['jardim d\'abril', 'rio pequeno'],
+  // ── Barueri ──
+  'vila universal': ['vila engenho novo', 'jardim mutinga'],
+  'vila engenho novo': ['vila universal', 'parque viana', 'jardim mutinga'],
+  'jardim mutinga': ['vila engenho novo', 'vila universal', 'jd silveira', 'parque viana', 'vila do conde'],
   'alphaville': ['tambore', 'centro comercial'],
   'tambore': ['alphaville', 'centro comercial'],
   'vila do conde': ['jardim mutinga', 'parque viana'],
-  'parque viana': ['jardim mutinga', 'vila do conde', 'jd silveira'],
+  'parque viana': ['jardim mutinga', 'vila do conde', 'jd silveira', 'vila engenho novo'],
   'jd silveira': ['jardim mutinga', 'parque viana'],
-  // Cotia
+  // ── Carapicuíba — norte (divisa Barueri/Osasco) ──
+  'centro de carapicuiba': ['vila maria helena', 'jardim santa brigida'],
+  'vila maria helena': ['centro de carapicuiba', 'jardim santa brigida', 'jardim novo horizonte'],
+  'jardim santa brigida': ['vila maria helena', 'centro de carapicuiba', 'jardim novo horizonte'],
+  // ── Carapicuíba — centro-norte ──
+  'jardim novo horizonte': ['jardim santa brigida', 'vila maria helena', 'jardim helena'],
+  'jardim helena': ['jardim novo horizonte', 'jardim marilu'],
+  'jardim marilu': ['jardim helena', 'pousada dos bandeirantes'],
+  // ── Carapicuíba — centro-sul ──
+  'pousada dos bandeirantes': ['jardim marilu', 'jardim yaya', 'vila da oportunidade', 'parque sampaio viana'],
+  'parque sampaio viana': ['pousada dos bandeirantes', 'vila silviania'],
+  'vila da oportunidade': ['jardim yaya', 'pousada dos bandeirantes'],
+  'jardim yaya': ['vila da oportunidade', 'pousada dos bandeirantes'],
+  // ── Carapicuíba — sul (divisa Cotia/Jandira) ──
+  'vila silviania': ['parque sampaio viana', 'vila capriotti'],
+  'vila capriotti': ['vila silviania', 'recanto campy'],
+  'recanto campy': ['vila capriotti', 'parque roseira'],
+  'parque roseira': ['recanto campy', 'cidade ariston'],
+  'cidade ariston': ['parque roseira'],
+  // ── Cotia ──
   'centro de cotia': ['jardim nomura', 'parque san remo'],
   'jardim nomura': ['centro de cotia'],
   'parque san remo': ['centro de cotia'],
-  // Carapicuíba
-  'vila da oportunidade': ['jardim yaya', 'pousada dos bandeirantes'],
-  'jardim yaya': ['vila da oportunidade', 'pousada dos bandeirantes'],
-  'pousada dos bandeirantes': ['jardim yaya', 'vila da oportunidade'],
-  // Caieiras ↔ Perus
+  // ── Caieiras ↔ Perus ──
   'perus': ['caieiras'],
   'caieiras': ['perus'],
 };
