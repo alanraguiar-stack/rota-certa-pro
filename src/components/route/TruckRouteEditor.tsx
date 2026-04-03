@@ -171,7 +171,7 @@ function OrderCard({
               {formatWeight(Number(order.weight_kg))}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground truncate">
+          <p className="text-sm text-muted-foreground break-words">
             <MapPin className="inline h-3 w-3 mr-1" />
             {order.address}
           </p>
