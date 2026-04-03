@@ -1,4 +1,5 @@
 
+
 # Plano: Mapa Completo de Adjacência de Bairros
 
 ## Levantamento dos Bairros nos Pedidos
@@ -43,70 +44,26 @@ SUL (divisa Cotia/Jandira):
 Vila Universal (norte) → Vila Engenho Novo (centro) → Parque Viana (sul, divisa Jandira)
 ```
 
-### Jandira (3 pedidos)
-```text
-Jardim Novo Horizonte → Jardim Nossa Senhora de Fátima
-```
+### Jandira (3 pedidos), Itapevi (3), Embu (3), SP (4)
+Cada cidade com 1-3 bairros mapeados conforme CEP e posição real.
 
-### Itapevi (3 pedidos)
-```text
-Jardim Bela Vista → Vila Santa Flora → Jardim Gioia
-```
+## O que será feito
 
-### Embu (3 pedidos)
-```text
-Jardim Castilho → Jardim da Luz → Jardim Santo Antônio
-```
+Adicionar ~20 bairros ao `NEIGHBORHOOD_NEIGHBORS` em `anchorRules.ts`:
 
-### São Paulo (4 pedidos) — bairros zona oeste
-```text
-Jardim Adelfiore → Jardim D'Abril → Conj. Promorar Raposo Tavares
-(todos na região de Raposo Tavares, perto de Osasco/Cotia)
-```
+**Osasco (6 novos):** Umuarama, Veloso, Bonfim, I.A.P.I., Aliança, Baronesa
 
-### Santana de Parnaíba (1), Caieiras (1), Cajamar (1)
-Poucos pedidos, adjacência mínima.
+**Carapicuíba (11 novos):** Centro, Vila Maria Helena, Jardim Santa Brígida, Jardim Novo Horizonte, Jardim Helena, Jardim Marilu, Parque Sampaio Viana, Vila Silviania, Vila Capriotti, Recanto Campy, Parque Roseira, Cidade Ariston
 
-## Correções no Mapa de Adjacência
+**Barueri (2 novos):** Vila Universal, Vila Engenho Novo
 
-### Bairros de Osasco FALTANTES (6 bairros novos):
-- **Umuarama**: vizinho de KM 18, Quitaúna, Centro
-- **Veloso**: vizinho de Santa Maria, Conceição, Baronesa
-- **Bonfim**: vizinho de I.A.P.I., Rochdale, KM 18
-- **I.A.P.I.**: vizinho de Bonfim, Rochdale, Umuarama
-- **Aliança**: vizinho de Baronesa, Santa Maria, Conceição
-- **Baronesa**: vizinho de Aliança, Veloso, Santa Maria
+**SP (3 novos):** Jardim Adelfiore, Jardim D'Abril, Conjunto Promorar Raposo Tavares
 
-### Bairros de Carapicuíba FALTANTES (11 bairros novos):
-- **Centro (Carapicuíba)**: vizinho de Vila Maria Helena, Jardim Santa Brígida
-- **Vila Maria Helena**: vizinho de Centro, Jardim Santa Brígida
-- **Jardim Santa Brígida**: vizinho de Vila Maria Helena, Centro, Jardim Novo Horizonte
-- **Jardim Novo Horizonte**: vizinho de Jardim Santa Brígida, Jardim Helena
-- **Jardim Helena**: vizinho de Jardim Novo Horizonte, Jardim Marilu
-- **Jardim Marilu**: vizinho de Jardim Helena, Pousada dos Bandeirantes
-- **Parque Sampaio Viana**: vizinho de Pousada dos Bandeirantes, Vila Silviania
-- **Vila Silviania**: vizinho de Parque Sampaio Viana, Vila Capriotti
-- **Vila Capriotti**: vizinho de Vila Silviania, Recanto Campy
-- **Recanto Campy**: vizinho de Vila Capriotti, Parque Roseira
-- **Parque Roseira**: vizinho de Recanto Campy, Cidade Ariston
-- **Cidade Ariston**: vizinho de Parque Roseira
+Cada bairro com vizinhos validados pela posição geográfica real (CEP, mapa).
 
-### Bairros de Barueri FALTANTES:
-- **Vila Universal**: vizinho de Vila Engenho Novo, Parque Viana
-- **Vila Engenho Novo**: vizinho de Vila Universal, Parque Viana, Jardim Mutinga
-
-### Bairros de SP FALTANTES:
-- **Jardim Adelfiore**: vizinho de Jardim D'Abril, Parque Imperial
-- **Jardim D'Abril**: vizinho de Jardim Adelfiore, Conjunto Promorar Raposo Tavares
-- **Conjunto Promorar Raposo Tavares**: vizinho de Jardim D'Abril, Rio Pequeno
-
-### Transições inter-cidades importantes:
-- **Carapicuíba Centro** ↔ **Osasco (Veloso/Aliança)**: cidades vizinhas no limite sul
-- **Parque Roseira/Cidade Ariston (Carapicuíba)** ↔ **Jandira**: divisa sul de Carapicuíba
-- **Parque Viana (Barueri)** ↔ **Jardim Novo Horizonte (Jandira)**: divisa
-
-## Arquivos afetados
+## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/anchorRules.ts` | Adicionar ~20 bairros ao `NEIGHBORHOOD_NEIGHBORS` com adjacências corretas baseadas em posição geográfica real |
+| `src/lib/anchorRules.ts` | Adicionar ~22 bairros ao mapa `NEIGHBORHOOD_NEIGHBORS` com adjacências corretas |
+
