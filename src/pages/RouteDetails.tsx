@@ -355,46 +355,10 @@ export default function RouteDetails() {
   const handleLockTruck = useCallback(async (truckId: string) => {
     setLockedTruckIds(prev => new Set([...prev, truckId]));
     await lockTruckRoute.mutateAsync(truckId);
-
-    // Save snapshot to route_history_patterns immediately for learning
-    try {
-      const { supabase } = await import('@/integrations/supabase/client');
-      const { parseAddress } = await import('@/lib/geocoding');
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user && route) {
-        const rt = route.route_trucks.find(r => r.id === truckId);
-        if (rt) {
-          const plate = rt.truck?.plate || 'SEM-PLACA';
-          const today = new Date().toISOString().split('T')[0];
-          const patterns = (rt.assignments || [])
-            .filter(a => a.order)
-            .map(a => {
-              const order = a.order!;
-              const parsed = parseAddress(order.address);
-              return {
-                user_id: user.id,
-                truck_label: plate,
-                client_name: order.client_name,
-                address: order.address,
-                city: order.city || parsed.city || null,
-                neighborhood: parsed.neighborhood || null,
-                state: parsed.state || null,
-                sequence_order: a.delivery_sequence ?? 0,
-                route_date: today,
-                was_manually_moved: true, // All orders in a locked truck are treated as validated
-              };
-            });
-
-          if (patterns.length > 0) {
-            await supabase.from('route_history_patterns').insert(patterns);
-            console.log(`[PatternLearning] Saved ${patterns.length} patterns from locked truck ${plate}`);
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[PatternLearning] Error saving lock snapshot:', err);
-    }
-  }, [lockTruckRoute, route]);
+    // Continuous learning already handles snapshots via saveTruckSnapshot
+    // Force an immediate save (no debounce) when locking
+    saveTruckSnapshot(truckId);
+  }, [lockTruckRoute, saveTruckSnapshot]);
 
   const handleUnlockTruck = useCallback(async (truckId: string) => {
     setLockedTruckIds(prev => {
