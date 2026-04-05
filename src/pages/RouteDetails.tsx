@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
