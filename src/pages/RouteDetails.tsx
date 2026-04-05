@@ -284,6 +284,8 @@ export default function RouteDetails() {
     orderId: string, 
     newSequence: number
   ) => {
+    // Track reordered orders as manually moved for learning
+    setManuallyMovedOrderIds(prev => new Set([...prev, orderId]));
     await reorderSingleDelivery.mutateAsync({ routeTruckId: truckId, orderId, newSequence });
   }, [reorderSingleDelivery]);
 
