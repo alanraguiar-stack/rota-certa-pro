@@ -85,6 +85,64 @@ export default function RouteDetails() {
   // Track orders that were manually moved between trucks
   const [manuallyMovedOrderIds, setManuallyMovedOrderIds] = useState<Set<string>>(new Set());
   
+  // Debounced snapshot saving for continuous learning
+  const snapshotTimerRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  
+  const saveTruckSnapshot = useCallback(async (truckId: string) => {
+    // Clear previous timer for this truck
+    if (snapshotTimerRef.current[truckId]) {
+      clearTimeout(snapshotTimerRef.current[truckId]);
+    }
+    
+    snapshotTimerRef.current[truckId] = setTimeout(async () => {
+      try {
+        const { supabase } = await import('@/integrations/supabase/client');
+        const { parseAddress } = await import('@/lib/geocoding');
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || !route) return;
+
+        const rt = route.route_trucks.find(r => r.id === truckId);
+        if (!rt) return;
+
+        const plate = rt.truck?.plate || 'SEM-PLACA';
+        const today = new Date().toISOString().split('T')[0];
+
+        // Delete existing patterns for this truck+date to avoid duplicates
+        await supabase
+          .from('route_history_patterns')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('truck_label', plate)
+          .eq('route_date', today);
+
+        const patterns = (rt.assignments || [])
+          .filter(a => a.order)
+          .map(a => {
+            const order = a.order!;
+            const parsed = parseAddress(order.address);
+            return {
+              user_id: user.id,
+              truck_label: plate,
+              client_name: order.client_name,
+              address: order.address,
+              city: order.city || parsed.city || null,
+              neighborhood: parsed.neighborhood || null,
+              state: parsed.state || null,
+              sequence_order: a.delivery_sequence ?? 0,
+              route_date: today,
+              was_manually_moved: manuallyMovedOrderIds.has(order.id),
+            };
+          });
+
+        if (patterns.length > 0) {
+          await supabase.from('route_history_patterns').insert(patterns);
+          console.log(`[ContinuousLearning] Saved ${patterns.length} patterns for ${plate}`);
+        }
+      } catch (err) {
+        console.error('[ContinuousLearning] Error saving snapshot:', err);
+      }
+    }, 2000);
+  }, [route, manuallyMovedOrderIds]);
   
   // Track if fleet was pre-configured in wizard
   const [fleetFromWizard, setFleetFromWizard] = useState(false);
