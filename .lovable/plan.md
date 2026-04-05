@@ -1,46 +1,51 @@
 
 
-# Plano: 3 Correções no Motor de Roteirização
+# Plano: Aprendizado de Sequenciamento Manual
 
-## Correção 1: earlyNeighborhoods respeitado após priority
-**Status**: Já implementado corretamente no código (linhas 1141-1169 de `autoRouterEngine.ts`). O fluxo atual é: priority → early → anchor → remaining. **Nenhuma mudança necessária.**
+## Problema Atual
 
-## Correção 2: Mínimo de consolidação de 8 → 4
-**Arquivo**: `src/lib/autoRouterEngine.ts`, linha 632
+Hoje o sistema tem 3 lacunas no aprendizado:
 
-Alterar `const MIN_DELIVERIES = 8;` para `const MIN_DELIVERIES = 4;`
+1. **Reordenamentos dentro do caminhão não são rastreados** — Quando você move um pedido de posição 5 para posição 2, o `was_manually_moved` não é marcado (só marca quando move entre caminhões)
+2. **`was_manually_moved` é salvo no banco mas nunca lido** — O `historyPatternEngine` ignora completamente essa flag
+3. **O motor aprende agrupamento de cidades, mas não sequência de bairros** — Ele sabe que "Osasco + Carapicuíba vão juntas" mas não sabe que "KM 18 deve vir antes de Bonfim"
 
-Isso evita que territórios pequenos (Santana de Parnaíba, Caieiras) sejam dissolvidos e misturados no caminhão de apoio.
+## Solução: Aprendizado de Sequência por Bairro
 
-## Correção 3: neighborhoodFills de SP depois da cidade âncora
+### 1. Rastrear reordenamentos manuais (`RouteDetails.tsx`)
 
-O sequenciamento já coloca a cidade âncora primeiro (linhas 1249-1252), seguida das demais cidades por nearest-neighbor. Porém, os pedidos de `neighborhoodFills` (bairros de SP como Parque Imperial, Jaguaré) são adicionados ao array `assignedOrders` **antes** dos pedidos de `allowedFillCities` durante a alocação (step 4d antes de 4e). Na hora do sequenciamento, eles são classificados como cidade "sao paulo" e entram no pool de `remainingCityEntries`.
+No `handleReorderInTruck`, adicionar o orderId ao `manuallyMovedOrderIds` — assim tanto movimentos entre caminhões quanto reordenamentos internos são marcados.
 
-O problema é que o nearest-neighbor inter-cidades (linha 1256-1278) pode escolher SP como próxima cidade **antes** de terminar os pedidos da cidade âncora, caso algum bairro de SP esteja geograficamente mais próximo do último ponto.
+### 2. Criar motor de aprendizado de sequência (`historyPatternEngine.ts`)
 
-**Solução**: No `optimizeDeliverySequence`, sequenciar os `neighborhoodFills` logo **após** a cidade âncora (e antes das fill cities genéricas), garantindo continuidade geográfica.
+Nova função `extractNeighborhoodSequencePatterns` que:
+- Lê os patterns com `was_manually_moved = true` (peso 2x) e normais (peso 1x)
+- Para cada cidade, extrai a ordem relativa dos bairros: "Bairro A veio antes de Bairro B em X rotas"
+- Gera um grafo de precedência por cidade (ex: `km 18 → quitauna → bonfim → umuarama`)
 
-**Arquivo**: `src/lib/autoRouterEngine.ts`
-
-Entre o bloco da cidade âncora (linha 1252) e o loop de remaining cities (linha 1256), inserir lógica para:
-1. Identificar cidades que vêm dos `neighborhoodFills` do território
-2. Sequenciá-las imediatamente após a âncora
-3. Removê-las do pool de `remainingCityEntries`
-
-```text
-Fluxo final:
-  Priority neighborhoods (Jardim Mutinga)
-  → Early neighborhoods (KM 18, Quitaúna)
-  → Cidade âncora Osasco (Bonfim → I.A.P.I. → Umuarama → ...)
-  → NeighborhoodFills SP (Parque Imperial → Jaguaré → Rio Pequeno)
-  → Fill cities (Carapicuíba, Jandira, etc.)
-  → Late neighborhoods (Vila Yara)
+Adiciona ao `ExtractedPatterns`:
 ```
+neighborhoodSequences: Map<string, string[]>  // cidade → bairros ordenados
+```
+
+### 3. Aplicar sequência aprendida no motor de roteamento (`autoRouterEngine.ts`)
+
+No `optimizeDeliverySequence`, após agrupar pedidos por cidade:
+- Consultar `neighborhoodSequences` para a cidade
+- Se existe sequência aprendida, usar como critério de ordenação primário (antes do nearest-neighbor)
+- Pedidos de bairros com posição definida no histórico são sequenciados conforme o padrão aprendido
+- Pedidos de bairros novos (sem histórico) são encaixados por nearest-neighbor entre os bairros conhecidos
+
+### 4. Dar peso dobrado a movimentos manuais
+
+No `extractNeighborhoodSequencePatterns`, quando um pedido tem `was_manually_moved = true`, a relação de precedência entre seus bairros vizinhos conta com peso 2x, acelerando o aprendizado.
 
 ## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/autoRouterEngine.ts` | Linha 632: `MIN_DELIVERIES = 8` → `4` |
-| `src/lib/autoRouterEngine.ts` | Linhas ~1252-1256: Inserir sequenciamento de neighborhoodFills entre âncora e remaining cities |
+| `src/pages/RouteDetails.tsx` | Marcar `manuallyMovedOrderIds` também em reordenamentos internos |
+| `src/lib/historyPatternEngine.ts` | Nova função `extractNeighborhoodSequencePatterns` + adicionar ao `ExtractedPatterns` |
+| `src/hooks/useHistoryPatterns.ts` | Passar `was_manually_moved` na query SELECT |
+| `src/lib/autoRouterEngine.ts` | Usar `neighborhoodSequences` como critério primário na ordenação intra-cidade |
 
