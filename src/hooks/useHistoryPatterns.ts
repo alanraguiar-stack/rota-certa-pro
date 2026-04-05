@@ -23,7 +23,7 @@ export function useHistoryPatterns() {
       try {
         const { data, error } = await supabase
           .from('route_history_patterns')
-          .select('id, truck_label, city, client_name, address, neighborhood, sequence_order, route_date, state')
+          .select('id, truck_label, city, client_name, address, neighborhood, sequence_order, route_date, state, was_manually_moved')
           .eq('user_id', user.id);
 
         if (!error && data) {
