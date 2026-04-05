@@ -211,6 +211,124 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
 }
 
 // ================================================================
+// NEIGHBORHOOD SEQUENCE LEARNING
+// ================================================================
+
+/**
+ * Extract neighborhood sequence patterns from historical routes.
+ * Builds a precedence graph per city: "bairro A came before bairro B in N routes".
+ * Manual moves (was_manually_moved) count with 2x weight.
+ * Returns a Map<city, orderedNeighborhoods[]>.
+ */
+function extractNeighborhoodSequencePatterns(patterns: HistoryRow[]): Map<string, string[]> {
+  if (patterns.length === 0) return new Map();
+
+  // Group by route_date + truck_label → ordered list of neighborhoods
+  const routeTruckKey = (row: HistoryRow) => `${row.route_date || 'unknown'}::${row.truck_label}`;
+  const groups = new Map<string, HistoryRow[]>();
+
+  for (const row of patterns) {
+    if (!row.city || !row.neighborhood || row.sequence_order == null) continue;
+    const key = routeTruckKey(row);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(row);
+  }
+
+  // Build precedence graph per city: cityPrecedence[city][nhA][nhB] = weight
+  // means nhA should come BEFORE nhB
+  const cityPrecedence = new Map<string, Map<string, Map<string, number>>>();
+
+  for (const [, rows] of groups) {
+    // Sort by sequence_order within this truck-route
+    const sorted = [...rows].sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+
+    // Group consecutive rows by city
+    const cityBlocks = new Map<string, { nh: string; seq: number; manual: boolean }[]>();
+    for (const row of sorted) {
+      const city = normalizeCity(row.city);
+      if (city === 'desconhecida') continue;
+      const nh = normalizeCity(row.neighborhood);
+      if (!nh || nh === 'desconhecida') continue;
+
+      if (!cityBlocks.has(city)) cityBlocks.set(city, []);
+      cityBlocks.get(city)!.push({
+        nh,
+        seq: row.sequence_order || 0,
+        manual: row.was_manually_moved === true,
+      });
+    }
+
+    // For each city block, extract pairwise precedence
+    for (const [city, entries] of cityBlocks) {
+      if (entries.length < 2) continue;
+
+      // Sort entries by sequence
+      entries.sort((a, b) => a.seq - b.seq);
+
+      if (!cityPrecedence.has(city)) cityPrecedence.set(city, new Map());
+      const precedence = cityPrecedence.get(city)!;
+
+      // For consecutive DIFFERENT neighborhoods, record precedence
+      for (let i = 0; i < entries.length - 1; i++) {
+        const nhA = entries[i].nh;
+        const nhB = entries[i + 1].nh;
+        if (nhA === nhB) continue;
+
+        // Weight: 2x if either entry was manually moved
+        const weight = (entries[i].manual || entries[i + 1].manual) ? 2 : 1;
+
+        if (!precedence.has(nhA)) precedence.set(nhA, new Map());
+        const nhMap = precedence.get(nhA)!;
+        nhMap.set(nhB, (nhMap.get(nhB) || 0) + weight);
+      }
+    }
+  }
+
+  // Topological sort per city using weighted precedence
+  const result = new Map<string, string[]>();
+
+  for (const [city, precedence] of cityPrecedence) {
+    // Collect all neighborhoods
+    const allNhs = new Set<string>();
+    for (const [nhA, targets] of precedence) {
+      allNhs.add(nhA);
+      for (const [nhB] of targets) {
+        allNhs.add(nhB);
+      }
+    }
+
+    if (allNhs.size < 2) continue;
+
+    // Build net score: for each pair (A,B), netScore = weight(A→B) - weight(B→A)
+    // Then sort by total "should come first" score
+    const scores = new Map<string, number>();
+    for (const nh of allNhs) scores.set(nh, 0);
+
+    for (const [nhA, targets] of precedence) {
+      for (const [nhB, weight] of targets) {
+        // A comes before B → A gets +weight, B gets -weight
+        scores.set(nhA, (scores.get(nhA) || 0) + weight);
+        scores.set(nhB, (scores.get(nhB) || 0) - weight);
+      }
+    }
+
+    // Sort: highest score first (most often appears early in routes)
+    const sorted = Array.from(allNhs).sort((a, b) => (scores.get(b) || 0) - (scores.get(a) || 0));
+
+    // Only include if we have meaningful data (at least 2 route occurrences)
+    const totalWeight = Array.from(precedence.values())
+      .flatMap(m => Array.from(m.values()))
+      .reduce((sum, w) => sum + w, 0);
+
+    if (totalWeight >= 2) {
+      result.set(city, sorted);
+    }
+  }
+
+  return result;
+}
+
+// ================================================================
 // REGIONAL CORRIDORS - Core of the analyst's logic
 // ================================================================
 
