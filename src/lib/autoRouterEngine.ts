@@ -628,39 +628,90 @@ export function autoComposeRoute(
     }
   }
 
-  // Step 5d: Consolidation — move trucks with < 8 deliveries to support
+  // Step 5d: Consolidation — merge small territories with nearest geographic neighbor
   const MIN_DELIVERIES = 4;
-  const supportComp = compositions.find(c => c.territoryRule?.isSupport || c.anchorRule?.isSupport);
-  if (supportComp) {
-    for (const comp of compositions) {
-      if (comp === supportComp) continue;
-      if (comp.orders.length === 0) continue;
-      if (comp.territoryRule?.isSupport || comp.anchorRule?.isSupport) continue;
-      if (comp.orders.length < MIN_DELIVERIES) {
-        warnings.push(
-          `${comp.truck.plate}: apenas ${comp.orders.length} entregas (mín. ${MIN_DELIVERIES}). Pedidos transferidos para caminhão de apoio.`
-        );
-        reasoning.push(
-          `Consolidação: ${comp.truck.plate} (${comp.orders.length} entregas) → apoio ${supportComp.truck.plate}`
-        );
-        supportComp.orders.push(...comp.orders);
-        supportComp.totalWeight += comp.totalWeight;
-        supportComp.occupancyPercent = Math.round(
-          (supportComp.totalWeight / Number(supportComp.truck.capacity_kg)) * 100
-        );
-        supportComp.estimatedDeliveries = supportComp.orders.length;
-        for (const order of comp.orders) {
-          const city = normalizeCityName((order as any).city || (order as any).geocoded?.city || 'desconhecida');
-          if (!supportComp.cities.includes(city)) {
-            supportComp.cities.push(city);
-          }
-        }
-        comp.orders = [];
-        comp.totalWeight = 0;
-        comp.occupancyPercent = 0;
-        comp.estimatedDeliveries = 0;
-        comp.cities = [];
+
+  // Build territory adjacency map for intelligent merging
+  const TERRITORY_NEIGHBORS: Record<string, string[]> = {
+    'barueri': ['osasco', 'santana', 'cotia'],
+    'osasco': ['barueri', 'cotia', 'santana'],
+    'cotia': ['osasco', 'barueri'],
+    'santana': ['barueri', 'caieiras', 'osasco'],
+    'caieiras': ['santana', 'barueri'],
+    'apoio': [],
+  };
+
+  for (const comp of compositions) {
+    if (comp.orders.length === 0) continue;
+    if (comp.territoryRule?.isSupport || comp.anchorRule?.isSupport) continue;
+    if (comp.orders.length >= MIN_DELIVERIES) continue;
+
+    const territoryId = comp.territoryRule?.id || '';
+    const neighborIds = TERRITORY_NEIGHBORS[territoryId] || [];
+
+    // Find the best neighbor territory to merge into (by geographic affinity + capacity)
+    let bestTarget: TruckComposition | null = null;
+    let bestScore = -Infinity;
+
+    for (const neighborId of neighborIds) {
+      const candidate = compositions.find(
+        c => c !== comp && c.orders.length > 0 && 
+        (c.territoryRule?.id === neighborId || 
+         // Also match if the candidate has cities from the neighbor territory
+         c.cities.some(city => {
+           const rule = TERRITORY_RULES.find(r => r.id === neighborId);
+           return rule && (rule.anchorCity === city || rule.allowedFillCities.includes(city));
+         }))
+      );
+      if (!candidate) continue;
+
+      const capacity = Number(candidate.truck.capacity_kg);
+      const maxDel = candidate.truck.max_deliveries ? Number(candidate.truck.max_deliveries) : 25;
+      const remainingWeight = capacity - candidate.totalWeight;
+      const remainingSlots = maxDel - candidate.orders.length;
+
+      if (remainingWeight < comp.totalWeight) continue;
+      if (remainingSlots < comp.orders.length - 3) continue; // allow up to 3 extras
+
+      // Score: prefer neighbors with more capacity and fewer existing orders
+      let score = 100 - neighborIds.indexOf(neighborId) * 10; // closer neighbor = higher score
+      score += (remainingSlots / maxDel) * 20;
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestTarget = candidate;
       }
+    }
+
+    // Fallback: if no neighbor territory found, try the support truck
+    if (!bestTarget) {
+      bestTarget = compositions.find(c => c.territoryRule?.isSupport || c.anchorRule?.isSupport) || null;
+    }
+
+    if (bestTarget) {
+      warnings.push(
+        `${comp.truck.plate}: apenas ${comp.orders.length} entregas (mín. ${MIN_DELIVERIES}). Pedidos mesclados com ${bestTarget.truck.plate} (vizinho geográfico).`
+      );
+      reasoning.push(
+        `Consolidação inteligente: ${comp.truck.plate} (${comp.orders.length} entregas, território ${territoryId}) → ${bestTarget.truck.plate} (território ${bestTarget.territoryRule?.id || 'apoio'})`
+      );
+      bestTarget.orders.push(...comp.orders);
+      bestTarget.totalWeight += comp.totalWeight;
+      bestTarget.occupancyPercent = Math.round(
+        (bestTarget.totalWeight / Number(bestTarget.truck.capacity_kg)) * 100
+      );
+      bestTarget.estimatedDeliveries = bestTarget.orders.length;
+      for (const order of comp.orders) {
+        const city = normalizeCityName((order as any).city || (order as any).geocoded?.city || 'desconhecida');
+        if (!bestTarget.cities.includes(city)) {
+          bestTarget.cities.push(city);
+        }
+      }
+      comp.orders = [];
+      comp.totalWeight = 0;
+      comp.occupancyPercent = 0;
+      comp.estimatedDeliveries = 0;
+      comp.cities = [];
     }
   }
 
