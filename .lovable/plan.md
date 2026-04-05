@@ -1,24 +1,26 @@
 
 
-# Plano: Aprendizado Automático ao Bloquear + Proteger Caminhões Bloqueados
+# Plano: Aprendizado Contínuo em Toda Alteração Manual
 
-## O que será feito
+## Problema Atual
+O sistema só salva padrões no banco em dois momentos: ao bloquear caminhão e ao confirmar rotas. O usuário quer que **cada reordenamento ou movimentação** gere aprendizado imediato.
 
-### 1. Salvar snapshot automaticamente ao bloquear caminhão
-Quando o usuário clica "Bloquear", o sistema salva imediatamente a sequência atual daquele caminhão em `route_history_patterns` com `was_manually_moved = true` para todos os pedidos. Sem botão extra.
+## Solução
 
-**Arquivo:** `src/pages/RouteDetails.tsx` — `handleLockTruck`
+### 1. Salvar snapshot do caminhão após cada alteração manual
+Após cada `handleReorderInTruck` e `handleOrderMoveToTruck`, salvar automaticamente o snapshot completo do(s) caminhão(ões) afetado(s) em `route_history_patterns`, com `was_manually_moved = true` para o pedido movido.
 
-### 2. Não re-otimizar caminhões bloqueados ao confirmar
-No `handleConfirmAllRoutesAndProceed`, o `optimizeRoutes` atualmente re-otimiza TODOS os caminhões. Precisamos passar os IDs bloqueados para que o mutation os pule.
+Para evitar duplicatas no banco (múltiplas edições na mesma sessão), a lógica será: **deletar patterns existentes para aquele truck_label + route_date antes de inserir os novos**. Assim cada snapshot sobrescreve o anterior, mantendo sempre o estado mais recente.
 
-**Arquivo:** `src/pages/RouteDetails.tsx` — passar `lockedTruckIds` ao chamar optimize
-**Arquivo:** `src/hooks/useRoutes.ts` — `optimizeRoutesMutation` receber lista de truck IDs a pular (skip locked trucks no loop da linha 659)
+### 2. Debounce para não sobrecarregar o banco
+Usar debounce de 2 segundos — se o usuário fizer 5 movimentações rápidas, só o snapshot final é salvo. Isso evita escritas excessivas durante drag-and-drop rápido.
 
-## Resumo técnico
+### 3. Remover duplicação do handleLockTruck
+O `handleLockTruck` não precisa mais salvar snapshot separadamente, pois o aprendizado contínuo já cobre isso.
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/RouteDetails.tsx` | `handleLockTruck`: salvar snapshot ao banco imediatamente; `handleConfirmAllRoutesAndProceed`: passar lockedTruckIds ao optimize |
-| `src/hooks/useRoutes.ts` | `optimizeRoutesMutation`: aceitar `excludeTruckIds` e pular esses trucks no loop de otimização |
+| `src/pages/RouteDetails.tsx` | Criar função `savetruckSnapshot` com debounce; chamar após reorder e move; remover snapshot do handleLockTruck |
 
