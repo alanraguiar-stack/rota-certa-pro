@@ -17,6 +17,7 @@ export interface HistoryRow {
   sequence_order: number | null;
   route_date: string | null;
   state: string | null;
+  was_manually_moved?: boolean;
 }
 
 export interface RoutingHint {
@@ -63,6 +64,7 @@ export interface ExtractedPatterns {
   cityProfiles: Map<string, CityProfile>;
   coOccurrences: CityCoOccurrence[];
   corridors: RegionalCorridor[];
+  neighborhoodSequences: Map<string, string[]>; // city → learned neighborhood order
   routeCount: number;
   totalRecords: number;
 }
