@@ -1193,8 +1193,61 @@ function optimizeDeliverySequence(
   const anchorEntry = cityEntries.find(e => e.city === anchorCity);
   const remainingCityEntries = cityEntries.filter(e => e.city !== anchorCity);
 
-  // Helper: sequence a city block with insertion rules support
+  // Helper: sequence a city block with insertion rules support + learned neighborhood order
   const sequenceCityBlock = (cityOrders: GeocodedOrder[], fromLat: number, fromLng: number): void => {
+    // Determine city name for learned sequence lookup
+    const cityName = normalizeCityName(cityOrders[0]?.city || cityOrders[0]?.geocoded?.city || '');
+    const learnedOrder = neighborhoodSequences?.get(cityName);
+
+    // If we have a learned neighborhood sequence for this city, use it as primary sort
+    if (learnedOrder && learnedOrder.length >= 2) {
+      // Group orders by neighborhood
+      const nhGroups = new Map<string, GeocodedOrder[]>();
+      const unknownNhOrders: GeocodedOrder[] = [];
+
+      for (const order of cityOrders) {
+        const nh = normalizeNeighborhood(order.geocoded.neighborhood || '');
+        const nhNorm = nh.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const learnedIdx = learnedOrder.findIndex(l => l === nhNorm);
+        if (learnedIdx >= 0) {
+          const key = learnedOrder[learnedIdx];
+          if (!nhGroups.has(key)) nhGroups.set(key, []);
+          nhGroups.get(key)!.push(order);
+        } else {
+          unknownNhOrders.push(order);
+        }
+      }
+
+      // Sort groups by learned order
+      const sortedGroups: GeocodedOrder[][] = [];
+      for (const nh of learnedOrder) {
+        const group = nhGroups.get(nh);
+        if (group && group.length > 0) {
+          // Within each neighborhood group, use nearest-neighbor
+          nearestNeighborWithinCity(group, fromLat, fromLng);
+          sortedGroups.push(group);
+          // Update fromLat/fromLng for next group
+          const last = group[group.length - 1];
+          fromLat = last.geocoded.estimatedLat;
+          fromLng = last.geocoded.estimatedLng;
+        }
+      }
+
+      // Unknown neighborhoods: insert by nearest-neighbor between known groups
+      if (unknownNhOrders.length > 0) {
+        nearestNeighborWithinCity(unknownNhOrders, fromLat, fromLng);
+        sortedGroups.push(unknownNhOrders);
+      }
+
+      // Flatten
+      cityOrders.length = 0;
+      for (const group of sortedGroups) {
+        cityOrders.push(...group);
+      }
+      streetGroupSweep(cityOrders);
+      return;
+    }
+
     // Handle special neighborhood insertion rules
     if (anchorRule) {
       const insertionRules = anchorRule.neighborhoodExceptions.filter(e => e.insertAfterNeighborhood);
