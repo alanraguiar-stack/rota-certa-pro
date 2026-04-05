@@ -629,7 +629,7 @@ export function autoComposeRoute(
   }
 
   // Step 5d: Consolidation — move trucks with < 8 deliveries to support
-  const MIN_DELIVERIES = 8;
+  const MIN_DELIVERIES = 4;
   const supportComp = compositions.find(c => c.territoryRule?.isSupport || c.anchorRule?.isSupport);
   if (supportComp) {
     for (const comp of compositions) {
@@ -1251,8 +1251,51 @@ function optimizeDeliverySequence(
     result.push(...anchorEntry.orders);
   }
 
-  // Nearest-neighbor inter-cidades: escolher próxima cidade pela proximidade do último ponto
-  const pending = [...remainingCityEntries];
+  // Step 3.5: Sequence neighborhoodFill cities right after anchor (before generic fill cities)
+  const neighborhoodFillCities = new Set<string>();
+  if (territoryRule?.neighborhoodFills) {
+    for (const nf of territoryRule.neighborhoodFills) {
+      neighborhoodFillCities.add(normalizeCityName(nf.city));
+    }
+  }
+
+  const nfPending: typeof remainingCityEntries = [];
+  const otherPending: typeof remainingCityEntries = [];
+  for (const entry of remainingCityEntries) {
+    if (neighborhoodFillCities.has(entry.city)) {
+      nfPending.push(entry);
+    } else {
+      otherPending.push(entry);
+    }
+  }
+
+  // Sequence neighborhoodFill cities first (nearest-neighbor among them)
+  const nfQueue = [...nfPending];
+  while (nfQueue.length > 0) {
+    const lastOrder = result[result.length - 1];
+    const fromLat = lastOrder ? lastOrder.geocoded.estimatedLat : startLat;
+    const fromLng = lastOrder ? lastOrder.geocoded.estimatedLng : startLng;
+
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < nfQueue.length; i++) {
+      for (const order of nfQueue[i].orders) {
+        const dist = calculateDistance(fromLat, fromLng,
+          order.geocoded.estimatedLat, order.geocoded.estimatedLng);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
+        }
+      }
+    }
+
+    const nextCity = nfQueue.splice(bestIdx, 1)[0];
+    sequenceCityBlock(nextCity.orders, fromLat, fromLng);
+    result.push(...nextCity.orders);
+  }
+
+  // Nearest-neighbor inter-cidades: remaining fill cities
+  const pending = [...otherPending];
   while (pending.length > 0) {
     const lastOrder = result[result.length - 1];
     const fromLat = lastOrder ? lastOrder.geocoded.estimatedLat : startLat;
