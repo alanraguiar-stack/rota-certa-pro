@@ -85,7 +85,7 @@ const HUB_CITY = 'barueri';
  */
 export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
   if (patterns.length === 0) {
-    return { cityProfiles: new Map(), coOccurrences: [], corridors: [], routeCount: 0, totalRecords: 0 };
+    return { cityProfiles: new Map(), coOccurrences: [], corridors: [], neighborhoodSequences: new Map(), routeCount: 0, totalRecords: 0 };
   }
 
   // Group by route (using route_date as route identifier)
@@ -204,7 +204,10 @@ export function extractCityPatterns(patterns: HistoryRow[]): ExtractedPatterns {
   // Extract regional corridors
   const corridors = extractRegionalCorridors(routeMap, routeTruckDeliveries);
 
-  return { cityProfiles, coOccurrences, corridors, routeCount, totalRecords: patterns.length };
+  // Extract neighborhood sequence patterns
+  const neighborhoodSequences = extractNeighborhoodSequencePatterns(patterns);
+
+  return { cityProfiles, coOccurrences, corridors, neighborhoodSequences, routeCount, totalRecords: patterns.length };
 }
 
 // ================================================================
