@@ -876,7 +876,8 @@ export function autoComposeRoute(
         comp.orders as GeocodedOrder[],
         cd.lat, cd.lng, cfg.strategy,
         comp.anchorRule,
-        comp.territoryRule
+        comp.territoryRule,
+        extractedPatterns?.neighborhoodSequences
       );
     }
   }
@@ -1107,7 +1108,8 @@ function optimizeDeliverySequence(
   startLng: number,
   strategy: RoutingStrategy,
   anchorRule?: AnchorRule,
-  territoryRule?: TerritoryRule
+  territoryRule?: TerritoryRule,
+  neighborhoodSequences?: Map<string, string[]>
 ): void {
   if (orders.length <= 1) return;
 
