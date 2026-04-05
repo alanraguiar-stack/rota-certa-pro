@@ -292,7 +292,46 @@ export default function RouteDetails() {
   const handleLockTruck = useCallback(async (truckId: string) => {
     setLockedTruckIds(prev => new Set([...prev, truckId]));
     await lockTruckRoute.mutateAsync(truckId);
-  }, [lockTruckRoute]);
+
+    // Save snapshot to route_history_patterns immediately for learning
+    try {
+      const { supabase } = await import('@/integrations/supabase/client');
+      const { parseAddress } = await import('@/lib/geocoding');
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user && route) {
+        const rt = route.route_trucks.find(r => r.id === truckId);
+        if (rt) {
+          const plate = rt.truck?.plate || 'SEM-PLACA';
+          const today = new Date().toISOString().split('T')[0];
+          const patterns = (rt.assignments || [])
+            .filter(a => a.order)
+            .map(a => {
+              const order = a.order!;
+              const parsed = parseAddress(order.address);
+              return {
+                user_id: user.id,
+                truck_label: plate,
+                client_name: order.client_name,
+                address: order.address,
+                city: order.city || parsed.city || null,
+                neighborhood: parsed.neighborhood || null,
+                state: parsed.state || null,
+                sequence_order: a.delivery_sequence ?? 0,
+                route_date: today,
+                was_manually_moved: true, // All orders in a locked truck are treated as validated
+              };
+            });
+
+          if (patterns.length > 0) {
+            await supabase.from('route_history_patterns').insert(patterns);
+            console.log(`[PatternLearning] Saved ${patterns.length} patterns from locked truck ${plate}`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[PatternLearning] Error saving lock snapshot:', err);
+    }
+  }, [lockTruckRoute, route]);
 
   const handleUnlockTruck = useCallback(async (truckId: string) => {
     setLockedTruckIds(prev => {
@@ -304,8 +343,9 @@ export default function RouteDetails() {
   }, [unlockTruckRoute]);
 
   const handleConfirmAllRoutesAndProceed = useCallback(async () => {
-    // Optimize routes with the selected strategy
-    await optimizeRoutes.mutateAsync(routingStrategy);
+    // Optimize routes with the selected strategy, skipping locked trucks
+    const excludeIds = Array.from(lockedTruckIds);
+    await optimizeRoutes.mutateAsync({ strategy: routingStrategy, excludeTruckIds: excludeIds });
     await refetch();
 
     // Save snapshot to route_history_patterns for learning
@@ -374,7 +414,7 @@ export default function RouteDetails() {
       title: 'Rotas confirmadas e otimizadas!',
       description: 'Os romaneios estão prontos para geração.',
     });
-  }, [optimizeRoutes, routingStrategy, refetch, toast, route]);
+  }, [optimizeRoutes, routingStrategy, refetch, toast, route, lockedTruckIds, manuallyMovedOrderIds]);
 
 
   if (isLoading) {

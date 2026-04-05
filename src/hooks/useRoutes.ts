@@ -644,7 +644,10 @@ export function useRouteDetails(routeId: string | undefined) {
 
   // Step 3: Route optimization (after loading is confirmed)
   const optimizeRoutesMutation = useMutation({
-    mutationFn: async (strategy: RoutingStrategy = 'padrao') => {
+    mutationFn: async (params: RoutingStrategy | { strategy: RoutingStrategy; excludeTruckIds?: string[] }) => {
+      const strategy: RoutingStrategy = typeof params === 'string' ? params : params.strategy;
+      const excludeTruckIds: string[] = typeof params === 'object' && params.excludeTruckIds ? params.excludeTruckIds : [];
+      
       const route = routeQuery.data;
       if (!route || route.route_trucks.length === 0) {
         throw new Error('É necessário ter caminhões com carga atribuída');
@@ -657,6 +660,12 @@ export function useRouteDetails(routeId: string | undefined) {
       const allTruckMetricUpdates: Array<{ id: string; estimated_distance_km: number; estimated_time_minutes: number }> = [];
 
       for (const rt of route.route_trucks) {
+        // Skip locked trucks
+        if (excludeTruckIds.includes(rt.id)) {
+          console.log(`[OptimizeRoutes] Skipping locked truck ${rt.truck?.plate || rt.id}`);
+          continue;
+        }
+
         const assignments = rt.assignments || [];
         const truckOrders = assignments
           .map(a => ordersMap.get(a.order?.id || ''))
