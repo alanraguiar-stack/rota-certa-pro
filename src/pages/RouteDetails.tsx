@@ -335,7 +335,10 @@ export default function RouteDetails() {
       newSequence 
     });
     await refetch();
-  }, [moveOrderToTruck, refetch]);
+    // Save snapshots for both affected trucks
+    saveTruckSnapshot(fromTruckId);
+    saveTruckSnapshot(toTruckId);
+  }, [moveOrderToTruck, refetch, saveTruckSnapshot]);
 
   const handleReorderInTruck = useCallback(async (
     truckId: string, 
@@ -345,7 +348,9 @@ export default function RouteDetails() {
     // Track reordered orders as manually moved for learning
     setManuallyMovedOrderIds(prev => new Set([...prev, orderId]));
     await reorderSingleDelivery.mutateAsync({ routeTruckId: truckId, orderId, newSequence });
-  }, [reorderSingleDelivery]);
+    // Save snapshot for learning
+    saveTruckSnapshot(truckId);
+  }, [reorderSingleDelivery, saveTruckSnapshot]);
 
   const handleLockTruck = useCallback(async (truckId: string) => {
     setLockedTruckIds(prev => new Set([...prev, truckId]));
