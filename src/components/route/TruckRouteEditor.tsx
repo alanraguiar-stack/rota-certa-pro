@@ -1,6 +1,6 @@
 /**
  * Componente de Ajuste Manual de Rotas por Caminhão
- * Interface com tabs por caminhão, drag-and-drop, recálculo em tempo real
+ * Interface com tabs por caminhão, @dnd-kit sortable, recálculo em tempo real
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
@@ -20,6 +20,25 @@ import {
   Search,
   X
 } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,7 +46,6 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { 
   Select,
   SelectContent,
@@ -80,7 +98,8 @@ interface SearchMatch {
   sequence: number;
 }
 
-function OrderCard({ 
+// ─── Sortable Order Card ───────────────────────────────────────────
+function SortableOrderCard({ 
   order, 
   sequence, 
   isLocked,
@@ -90,11 +109,6 @@ function OrderCard({
   onMoveDown,
   isFirst,
   isLast,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-  isDragTarget,
   isHighlighted,
   orderRef,
 }: { 
@@ -107,13 +121,81 @@ function OrderCard({
   onMoveDown: () => void;
   isFirst: boolean;
   isLast: boolean;
-  onDragStart?: () => void;
-  onDragOver?: (e: React.DragEvent) => void;
-  onDrop?: (e: React.DragEvent) => void;
-  onDragEnd?: () => void;
-  isDragTarget?: boolean;
   isHighlighted?: boolean;
   orderRef?: React.Ref<HTMLDivElement>;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ 
+    id: order.id,
+    disabled: isLocked,
+  });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 50 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <OrderCardContent
+        order={order}
+        sequence={sequence}
+        isLocked={isLocked}
+        otherTrucks={otherTrucks}
+        onMoveToTruck={onMoveToTruck}
+        onMoveUp={onMoveUp}
+        onMoveDown={onMoveDown}
+        isFirst={isFirst}
+        isLast={isLast}
+        isHighlighted={isHighlighted}
+        orderRef={orderRef}
+        dragHandleRef={setActivatorNodeRef}
+        dragListeners={listeners}
+      />
+    </div>
+  );
+}
+
+// ─── Order Card Content (shared between sortable and overlay) ──────
+function OrderCardContent({ 
+  order, 
+  sequence, 
+  isLocked,
+  otherTrucks,
+  onMoveToTruck,
+  onMoveUp,
+  onMoveDown,
+  isFirst,
+  isLast,
+  isHighlighted,
+  orderRef,
+  dragHandleRef,
+  dragListeners,
+  isOverlay,
+}: { 
+  order: Order; 
+  sequence: number;
+  isLocked: boolean;
+  otherTrucks: Array<{ id: string; plate: string; canFit: boolean }>;
+  onMoveToTruck: (truckId: string) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  isFirst: boolean;
+  isLast: boolean;
+  isHighlighted?: boolean;
+  orderRef?: React.Ref<HTMLDivElement>;
+  dragHandleRef?: (node: HTMLElement | null) => void;
+  dragListeners?: Record<string, Function>;
+  isOverlay?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   
@@ -126,34 +208,19 @@ function OrderCard({
       className={cn(
         "rounded-lg border bg-card transition-all select-text",
         isLocked ? "opacity-75" : "hover:shadow-md",
-        isDragTarget && "border-primary border-2 shadow-lg bg-primary/5 -translate-y-0.5 scale-[1.01]",
         isHighlighted && "ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-900/20",
+        isOverlay && "shadow-2xl ring-2 ring-primary scale-[1.02] bg-card",
       )}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        onDragOver?.(e);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDrop?.(e);
-      }}
-      onDragEnd={onDragEnd}
     >
       <div className="flex items-center gap-3 p-3">
-        {/* Drag Handle — left section is draggable */}
+        {/* Drag Handle */}
         <div 
+          ref={dragHandleRef}
+          {...(dragListeners || {})}
           className={cn(
-            "flex items-center gap-1 py-2 pr-2 -ml-1 pl-1 rounded-l-lg",
+            "flex items-center gap-1 py-2 pr-2 -ml-1 pl-1 rounded-l-lg touch-none",
             !isLocked && "cursor-grab active:cursor-grabbing hover:bg-muted/80 transition-colors"
           )}
-          draggable={!isLocked}
-          onDragStart={(e) => {
-            if (isLocked) return;
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', order.id);
-            onDragStart?.();
-          }}
         >
           {!isLocked && (
             <GripVertical className="h-5 w-5 text-muted-foreground shrink-0" />
@@ -178,9 +245,8 @@ function OrderCard({
         </div>
         
         {/* Actions */}
-        {!isLocked && (
+        {!isLocked && !isOverlay && (
           <div className="flex items-center gap-1">
-            {/* Move Up/Down */}
             <div className="flex flex-col">
               <Button 
                 variant="ghost" 
@@ -202,7 +268,6 @@ function OrderCard({
               </Button>
             </div>
             
-            {/* Move to Another Truck */}
             {otherTrucks.length > 0 && (
               <Select onValueChange={onMoveToTruck}>
                 <SelectTrigger className="w-[100px] h-8 text-xs">
@@ -229,7 +294,7 @@ function OrderCard({
         )}
         
         {/* Expand for items */}
-        {hasItems && (
+        {hasItems && !isOverlay && (
           <Button
             variant="ghost"
             size="icon"
@@ -264,6 +329,7 @@ function OrderCard({
   );
 }
 
+// ─── Truck Tab ─────────────────────────────────────────────────────
 function TruckTab({
   truckData,
   otherTrucks,
@@ -284,20 +350,16 @@ function TruckTab({
   highlightedOrderId?: string | null;
 }) {
   const { toast } = useToast();
-  const [draggedOrderId, setDraggedOrderId] = useState<string | null>(null);
-  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   
   // Optimistic local state
   const [localOrders, setLocalOrders] = useState<Order[]>(truckData.orders);
   
-  // Sync with server data — only immediately if composition changed (items added/removed)
-  // If only order changed, debounce to avoid overwriting optimistic updates
+  // Sync with server data
   useEffect(() => {
     const localIds = localOrders.map(o => o.id);
     const serverIds = truckData.orders.map(o => o.id);
-    
-    // Composition changed (item added/removed) → sync immediately
     const localSet = new Set(localIds);
     const compositionChanged = localIds.length !== serverIds.length || 
       serverIds.some(id => !localSet.has(id));
@@ -307,7 +369,6 @@ function TruckTab({
       return;
     }
     
-    // Only order changed — debounce to let optimistic updates settle
     const timer = setTimeout(() => {
       setLocalOrders(truckData.orders);
     }, 500);
@@ -321,6 +382,53 @@ function TruckTab({
       highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [highlightedOrderId]);
+
+  // @dnd-kit sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const orderIds = useMemo(() => localOrders.map(o => o.id), [localOrders]);
+
+  const activeOrder = useMemo(() => {
+    if (!activeId) return null;
+    return localOrders.find(o => o.id === activeId) || null;
+  }, [activeId, localOrders]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  }, []);
+
+  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = localOrders.findIndex(o => o.id === active.id);
+    const newIndex = localOrders.findIndex(o => o.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const previousOrders = [...localOrders];
+    const newOrders = arrayMove(localOrders, oldIndex, newIndex);
+    setLocalOrders(newOrders);
+
+    try {
+      await onReorder(truckData.routeTruckId, active.id as string, newIndex + 1);
+    } catch (error) {
+      setLocalOrders(previousOrders);
+      toast({
+        title: 'Erro ao reordenar',
+        description: 'Não foi possível reordenar a entrega',
+        variant: 'destructive',
+      });
+    }
+  }, [localOrders, onReorder, truckData.routeTruckId, toast]);
   
   const handleMoveToTruck = useCallback(async (orderId: string, toTruckId: string) => {
     try {
@@ -338,18 +446,6 @@ function TruckTab({
     }
   }, [truckData.routeTruckId, onOrderMove, toast]);
   
-  // Optimistic reorder helper
-  const optimisticReorder = useCallback((orderId: string, newIndex: number) => {
-    setLocalOrders(prev => {
-      const arr = [...prev];
-      const oldIndex = arr.findIndex(o => o.id === orderId);
-      if (oldIndex === -1 || oldIndex === newIndex) return prev;
-      const [item] = arr.splice(oldIndex, 1);
-      arr.splice(newIndex, 0, item);
-      return arr;
-    });
-  }, []);
-  
   const handleReorder = useCallback(async (orderId: string, direction: 'up' | 'down') => {
     const currentIndex = localOrders.findIndex(o => o.id === orderId);
     if (currentIndex === -1) return;
@@ -358,7 +454,7 @@ function TruckTab({
     if (newIndex < 0 || newIndex >= localOrders.length) return;
     
     const previousOrders = [...localOrders];
-    optimisticReorder(orderId, newIndex);
+    setLocalOrders(arrayMove(localOrders, currentIndex, newIndex));
     
     try {
       await onReorder(truckData.routeTruckId, orderId, newIndex + 1);
@@ -370,26 +466,7 @@ function TruckTab({
         variant: 'destructive',
       });
     }
-  }, [localOrders, onReorder, truckData.routeTruckId, optimisticReorder, toast]);
-
-  const handleDragDrop = useCallback(async (targetIndex: number) => {
-    if (draggedOrderId === null) return;
-    const sourceIndex = localOrders.findIndex(o => o.id === draggedOrderId);
-    if (sourceIndex === -1 || sourceIndex === targetIndex) return;
-    
-    const previousOrders = [...localOrders];
-    optimisticReorder(draggedOrderId, targetIndex);
-    
-    try {
-      await onReorder(truckData.routeTruckId, draggedOrderId, targetIndex + 1);
-    } catch (error) {
-      setLocalOrders(previousOrders);
-      toast({
-        title: 'Erro ao reordenar',
-        variant: 'destructive',
-      });
-    }
-  }, [draggedOrderId, localOrders, truckData, onReorder, optimisticReorder, toast]);
+  }, [localOrders, onReorder, truckData.routeTruckId, toast]);
   
   const handleLockToggle = useCallback(async () => {
     try {
@@ -415,7 +492,6 @@ function TruckTab({
     }
   }, [truckData, onLockTruck, onUnlockTruck, toast]);
   
-  // Prepare other trucks with canFit info
   const otherTrucksWithCapacity = useMemo(() => {
     return otherTrucks.map(t => ({
       id: t.routeTruckId,
@@ -530,46 +606,57 @@ function TruckTab({
             <p>Nenhuma entrega atribuída</p>
           </div>
         ) : (
-          <div className="space-y-2 max-h-[500px] overflow-y-auto">
-            {localOrders.map((order, idx) => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                sequence={idx + 1}
-                isLocked={truckData.isLocked}
-                otherTrucks={otherTrucksWithCapacity}
-                onMoveToTruck={(toTruckId) => handleMoveToTruck(order.id, toTruckId)}
-                onMoveUp={() => handleReorder(order.id, 'up')}
-                onMoveDown={() => handleReorder(order.id, 'down')}
-                isFirst={idx === 0}
-                isLast={idx === localOrders.length - 1}
-                onDragStart={() => setDraggedOrderId(order.id)}
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setDropTargetIndex(idx);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  handleDragDrop(idx);
-                  setDraggedOrderId(null);
-                  setDropTargetIndex(null);
-                }}
-                onDragEnd={() => {
-                  setDraggedOrderId(null);
-                  setDropTargetIndex(null);
-                }}
-                isDragTarget={dropTargetIndex === idx && draggedOrderId !== order.id}
-                isHighlighted={highlightedOrderId === order.id}
-                orderRef={highlightedOrderId === order.id ? highlightRef : undefined}
-              />
-            ))}
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={orderIds} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {localOrders.map((order, idx) => (
+                  <SortableOrderCard
+                    key={order.id}
+                    order={order}
+                    sequence={idx + 1}
+                    isLocked={truckData.isLocked}
+                    otherTrucks={otherTrucksWithCapacity}
+                    onMoveToTruck={(toTruckId) => handleMoveToTruck(order.id, toTruckId)}
+                    onMoveUp={() => handleReorder(order.id, 'up')}
+                    onMoveDown={() => handleReorder(order.id, 'down')}
+                    isFirst={idx === 0}
+                    isLast={idx === localOrders.length - 1}
+                    isHighlighted={highlightedOrderId === order.id}
+                    orderRef={highlightedOrderId === order.id ? highlightRef : undefined}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+
+            <DragOverlay dropAnimation={{ duration: 200, easing: 'ease' }}>
+              {activeOrder ? (
+                <OrderCardContent
+                  order={activeOrder}
+                  sequence={localOrders.findIndex(o => o.id === activeOrder.id) + 1}
+                  isLocked={false}
+                  otherTrucks={[]}
+                  onMoveToTruck={() => {}}
+                  onMoveUp={() => {}}
+                  onMoveDown={() => {}}
+                  isFirst={false}
+                  isLast={false}
+                  isOverlay
+                />
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         )}
       </div>
     </div>
   );
 }
 
+// ─── Main Editor ───────────────────────────────────────────────────
 export function TruckRouteEditor({
   routeName,
   trucks,
@@ -587,7 +674,6 @@ export function TruckRouteEditor({
   const allLocked = trucks.every(t => t.isLocked);
   const lockedCount = trucks.filter(t => t.isLocked).length;
   
-  // Search matches
   const searchMatches = useMemo<SearchMatch[]>(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
     const q = normalizeText(searchQuery);
@@ -614,11 +700,9 @@ export function TruckRouteEditor({
     setActiveTab(match.routeTruckId);
     setHighlightedOrderId(match.orderId);
     setSearchQuery('');
-    // Clear highlight after 3 seconds
     setTimeout(() => setHighlightedOrderId(null), 3000);
   }, []);
   
-  // Summary stats
   const totalOrders = trucks.reduce((sum, t) => sum + t.orders.length, 0);
   const totalWeight = trucks.reduce((sum, t) => sum + t.totalWeight, 0);
   const avgOccupancy = trucks.length > 0 
@@ -686,7 +770,6 @@ export function TruckRouteEditor({
               </button>
             )}
             
-            {/* Search Results Dropdown */}
             {searchMatches.length > 0 && (
               <div className="absolute z-50 top-full mt-1 w-full rounded-lg border bg-popover shadow-md max-h-64 overflow-y-auto">
                 {searchMatches.map((match) => (
@@ -803,8 +886,7 @@ export function TruckRouteEditor({
       {/* Help Text */}
       {!allLocked && (
         <p className="text-center text-sm text-muted-foreground">
-          💡 Dica: Use as setas para reordenar entregas ou o seletor "Mover" para transferir entre caminhões.
-          Confirme cada rota quando estiver satisfeito com a distribuição.
+          💡 Dica: Arraste pelo ícone ≡ para reordenar, use as setas ↑↓ ou o seletor "Mover" para transferir entre caminhões.
         </p>
       )}
     </div>
