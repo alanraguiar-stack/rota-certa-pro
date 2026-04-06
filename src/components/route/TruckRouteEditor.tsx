@@ -1,12 +1,11 @@
 /**
  * Componente de Ajuste Manual de Rotas por Caminhão
- * Interface com tabs por caminhão, @dnd-kit sortable, recálculo em tempo real
+ * Interface com tabs por caminhão, botões ↑↓ e input de posição editável
  */
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { 
   Truck, 
-  GripVertical, 
   ArrowRightLeft, 
   Scale, 
   MapPin, 
@@ -20,25 +19,7 @@ import {
   Search,
   X
 } from 'lucide-react';
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  DragStartEvent,
-  DragOverlay,
-} from '@dnd-kit/core';
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+import { arrayMove } from '@dnd-kit/sortable';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -98,15 +79,17 @@ interface SearchMatch {
   sequence: number;
 }
 
-// ─── Sortable Order Card ───────────────────────────────────────────
-function SortableOrderCard({ 
+// ─── Order Card ────────────────────────────────────────────────────
+function OrderCard({ 
   order, 
   sequence, 
+  totalOrders,
   isLocked,
   otherTrucks,
   onMoveToTruck,
   onMoveUp,
   onMoveDown,
+  onJumpToPosition,
   isFirst,
   isLast,
   isHighlighted,
@@ -114,93 +97,50 @@ function SortableOrderCard({
 }: { 
   order: Order; 
   sequence: number;
+  totalOrders: number;
   isLocked: boolean;
   otherTrucks: Array<{ id: string; plate: string; canFit: boolean }>;
   onMoveToTruck: (truckId: string) => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  onJumpToPosition: (newPos: number) => void;
   isFirst: boolean;
   isLast: boolean;
   isHighlighted?: boolean;
   orderRef?: React.Ref<HTMLDivElement>;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    setActivatorNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ 
-    id: order.id,
-    disabled: isLocked,
-  });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.4 : 1,
-    zIndex: isDragging ? 50 : undefined,
-  };
-
-  return (
-    <div ref={setNodeRef} style={style} {...attributes}>
-      <OrderCardContent
-        order={order}
-        sequence={sequence}
-        isLocked={isLocked}
-        otherTrucks={otherTrucks}
-        onMoveToTruck={onMoveToTruck}
-        onMoveUp={onMoveUp}
-        onMoveDown={onMoveDown}
-        isFirst={isFirst}
-        isLast={isLast}
-        isHighlighted={isHighlighted}
-        orderRef={orderRef}
-        dragHandleRef={setActivatorNodeRef}
-        dragListeners={listeners}
-      />
-    </div>
-  );
-}
-
-// ─── Order Card Content (shared between sortable and overlay) ──────
-function OrderCardContent({ 
-  order, 
-  sequence, 
-  isLocked,
-  otherTrucks,
-  onMoveToTruck,
-  onMoveUp,
-  onMoveDown,
-  isFirst,
-  isLast,
-  isHighlighted,
-  orderRef,
-  dragHandleRef,
-  dragListeners,
-  isOverlay,
-}: { 
-  order: Order; 
-  sequence: number;
-  isLocked: boolean;
-  otherTrucks: Array<{ id: string; plate: string; canFit: boolean }>;
-  onMoveToTruck: (truckId: string) => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  isFirst: boolean;
-  isLast: boolean;
-  isHighlighted?: boolean;
-  orderRef?: React.Ref<HTMLDivElement>;
-  dragHandleRef?: (node: HTMLElement | null) => void;
-  dragListeners?: Record<string, Function>;
-  isOverlay?: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isEditingPosition, setIsEditingPosition] = useState(false);
+  const [positionInput, setPositionInput] = useState('');
+  const positionInputRef = useRef<HTMLInputElement>(null);
   
   const orderItems = order.items || [];
   const hasItems = orderItems.length > 0;
+
+  const handleStartEditPosition = () => {
+    if (isLocked) return;
+    setPositionInput(String(sequence));
+    setIsEditingPosition(true);
+    setTimeout(() => {
+      positionInputRef.current?.select();
+    }, 0);
+  };
+
+  const handleConfirmPosition = () => {
+    const newPos = parseInt(positionInput, 10);
+    if (!isNaN(newPos) && newPos >= 1 && newPos <= totalOrders && newPos !== sequence) {
+      onJumpToPosition(newPos);
+    }
+    setIsEditingPosition(false);
+  };
+
+  const handlePositionKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      handleConfirmPosition();
+    } else if (e.key === 'Escape') {
+      setIsEditingPosition(false);
+    }
+  };
   
   return (
     <div 
@@ -209,25 +149,36 @@ function OrderCardContent({
         "rounded-lg border bg-card transition-all select-text",
         isLocked ? "opacity-75" : "hover:shadow-md",
         isHighlighted && "ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-900/20",
-        isOverlay && "shadow-2xl ring-2 ring-primary scale-[1.02] bg-card",
       )}
     >
       <div className="flex items-center gap-3 p-3">
-        {/* Drag Handle */}
-        <div 
-          ref={dragHandleRef}
-          {...(dragListeners || {})}
-          className={cn(
-            "flex items-center gap-1 py-2 pr-2 -ml-1 pl-1 rounded-l-lg touch-none",
-            !isLocked && "cursor-grab active:cursor-grabbing hover:bg-muted/80 transition-colors"
+        {/* Position Number (clickable to edit) */}
+        <div className="flex items-center -ml-1 pl-1">
+          {isEditingPosition ? (
+            <input
+              ref={positionInputRef}
+              type="number"
+              min={1}
+              max={totalOrders}
+              value={positionInput}
+              onChange={(e) => setPositionInput(e.target.value)}
+              onKeyDown={handlePositionKeyDown}
+              onBlur={handleConfirmPosition}
+              className="h-8 w-10 rounded-full border-2 border-primary bg-primary/10 text-primary font-bold text-sm text-center focus:outline-none"
+            />
+          ) : (
+            <button
+              onClick={handleStartEditPosition}
+              disabled={isLocked}
+              title={isLocked ? '' : 'Clique para ir à posição desejada'}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm shrink-0 transition-colors",
+                !isLocked && "hover:bg-primary/20 hover:ring-2 hover:ring-primary/30 cursor-pointer"
+              )}
+            >
+              {sequence}
+            </button>
           )}
-        >
-          {!isLocked && (
-            <GripVertical className="h-5 w-5 text-muted-foreground shrink-0" />
-          )}
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-sm shrink-0">
-            {sequence}
-          </span>
         </div>
         
         {/* Order Info */}
@@ -245,7 +196,7 @@ function OrderCardContent({
         </div>
         
         {/* Actions */}
-        {!isLocked && !isOverlay && (
+        {!isLocked && (
           <div className="flex items-center gap-1">
             <div className="flex flex-col">
               <Button 
@@ -294,7 +245,7 @@ function OrderCardContent({
         )}
         
         {/* Expand for items */}
-        {hasItems && !isOverlay && (
+        {hasItems && (
           <Button
             variant="ghost"
             size="icon"
@@ -351,7 +302,6 @@ function TruckTab({
 }) {
   const { toast } = useToast();
   const highlightRef = useRef<HTMLDivElement>(null);
-  const [activeId, setActiveId] = useState<string | null>(null);
   
   // Optimistic local state
   const [localOrders, setLocalOrders] = useState<Order[]>(truckData.orders);
@@ -382,53 +332,6 @@ function TruckTab({
       highlightRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [highlightedOrderId]);
-
-  // @dnd-kit sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 5 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  const orderIds = useMemo(() => localOrders.map(o => o.id), [localOrders]);
-
-  const activeOrder = useMemo(() => {
-    if (!activeId) return null;
-    return localOrders.find(o => o.id === activeId) || null;
-  }, [activeId, localOrders]);
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
-  }, []);
-
-  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
-    const { active, over } = event;
-    setActiveId(null);
-
-    if (!over || active.id === over.id) return;
-
-    const oldIndex = localOrders.findIndex(o => o.id === active.id);
-    const newIndex = localOrders.findIndex(o => o.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
-
-    const previousOrders = [...localOrders];
-    const newOrders = arrayMove(localOrders, oldIndex, newIndex);
-    setLocalOrders(newOrders);
-
-    try {
-      await onReorder(truckData.routeTruckId, active.id as string, newIndex + 1);
-    } catch (error) {
-      setLocalOrders(previousOrders);
-      toast({
-        title: 'Erro ao reordenar',
-        description: 'Não foi possível reordenar a entrega',
-        variant: 'destructive',
-      });
-    }
-  }, [localOrders, onReorder, truckData.routeTruckId, toast]);
   
   const handleMoveToTruck = useCallback(async (orderId: string, toTruckId: string) => {
     try {
@@ -463,6 +366,28 @@ function TruckTab({
       toast({
         title: 'Erro ao reordenar',
         description: 'Não foi possível reordenar a entrega',
+        variant: 'destructive',
+      });
+    }
+  }, [localOrders, onReorder, truckData.routeTruckId, toast]);
+
+  const handleJumpToPosition = useCallback(async (orderId: string, newPos: number) => {
+    const currentIndex = localOrders.findIndex(o => o.id === orderId);
+    if (currentIndex === -1) return;
+    
+    const newIndex = newPos - 1;
+    if (newIndex === currentIndex) return;
+    
+    const previousOrders = [...localOrders];
+    setLocalOrders(arrayMove(localOrders, currentIndex, newIndex));
+    
+    try {
+      await onReorder(truckData.routeTruckId, orderId, newPos);
+    } catch (error) {
+      setLocalOrders(previousOrders);
+      toast({
+        title: 'Erro ao reordenar',
+        description: 'Não foi possível mover a entrega',
         variant: 'destructive',
       });
     }
@@ -597,7 +522,7 @@ function TruckTab({
       {/* Orders List */}
       <div className="space-y-2">
         <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
-          Sequência de Entregas {!truckData.isLocked && '(arraste para reordenar)'}
+          Sequência de Entregas {!truckData.isLocked && '(clique no número para mudar posição)'}
         </h4>
         
         {localOrders.length === 0 ? (
@@ -606,50 +531,26 @@ function TruckTab({
             <p>Nenhuma entrega atribuída</p>
           </div>
         ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext items={orderIds} strategy={verticalListSortingStrategy}>
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {localOrders.map((order, idx) => (
-                  <SortableOrderCard
-                    key={order.id}
-                    order={order}
-                    sequence={idx + 1}
-                    isLocked={truckData.isLocked}
-                    otherTrucks={otherTrucksWithCapacity}
-                    onMoveToTruck={(toTruckId) => handleMoveToTruck(order.id, toTruckId)}
-                    onMoveUp={() => handleReorder(order.id, 'up')}
-                    onMoveDown={() => handleReorder(order.id, 'down')}
-                    isFirst={idx === 0}
-                    isLast={idx === localOrders.length - 1}
-                    isHighlighted={highlightedOrderId === order.id}
-                    orderRef={highlightedOrderId === order.id ? highlightRef : undefined}
-                  />
-                ))}
-              </div>
-            </SortableContext>
-
-            <DragOverlay dropAnimation={{ duration: 200, easing: 'ease' }}>
-              {activeOrder ? (
-                <OrderCardContent
-                  order={activeOrder}
-                  sequence={localOrders.findIndex(o => o.id === activeOrder.id) + 1}
-                  isLocked={false}
-                  otherTrucks={[]}
-                  onMoveToTruck={() => {}}
-                  onMoveUp={() => {}}
-                  onMoveDown={() => {}}
-                  isFirst={false}
-                  isLast={false}
-                  isOverlay
-                />
-              ) : null}
-            </DragOverlay>
-          </DndContext>
+          <div className="space-y-2 max-h-[500px] overflow-y-auto">
+            {localOrders.map((order, idx) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                sequence={idx + 1}
+                totalOrders={localOrders.length}
+                isLocked={truckData.isLocked}
+                otherTrucks={otherTrucksWithCapacity}
+                onMoveToTruck={(toTruckId) => handleMoveToTruck(order.id, toTruckId)}
+                onMoveUp={() => handleReorder(order.id, 'up')}
+                onMoveDown={() => handleReorder(order.id, 'down')}
+                onJumpToPosition={(newPos) => handleJumpToPosition(order.id, newPos)}
+                isFirst={idx === 0}
+                isLast={idx === localOrders.length - 1}
+                isHighlighted={highlightedOrderId === order.id}
+                orderRef={highlightedOrderId === order.id ? highlightRef : undefined}
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -886,7 +787,7 @@ export function TruckRouteEditor({
       {/* Help Text */}
       {!allLocked && (
         <p className="text-center text-sm text-muted-foreground">
-          💡 Dica: Arraste pelo ícone ≡ para reordenar, use as setas ↑↓ ou o seletor "Mover" para transferir entre caminhões.
+          💡 Dica: Clique no número da posição para mover diretamente, use ↑↓ para ajuste fino, ou "Mover" para transferir entre caminhões.
         </p>
       )}
     </div>
