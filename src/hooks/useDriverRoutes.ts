@@ -212,5 +212,6 @@ export function useDriverRoutes() {
     markNotDelivered,
     finishRoute,
     uploadProof,
+    getSignedUrl,
   };
 }
