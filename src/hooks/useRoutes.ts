@@ -653,6 +653,21 @@ export function useRouteDetails(routeId: string | undefined) {
         throw new Error('É necessário ter caminhões com carga atribuída');
       }
 
+      // Fetch learned history patterns for this user
+      let historyPatterns: Array<{ id: string; truck_label: string; city: string | null; client_name: string | null; address: string | null; neighborhood: string | null; sequence_order: number | null; route_date: string | null; state: string | null; was_manually_moved: boolean }> = [];
+      try {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser) {
+          const { data } = await supabase
+            .from('route_history_patterns')
+            .select('id, truck_label, city, client_name, address, neighborhood, sequence_order, route_date, state, was_manually_moved')
+            .eq('user_id', currentUser.id);
+          if (data) historyPatterns = data;
+        }
+      } catch {
+        // Patterns are optional - continue without them
+      }
+
       const ordersMap = new Map(route.orders.map(o => [o.id, toOrder(o)]).filter((entry): entry is [string, Order] => entry[1] !== undefined));
 
       // Optimize each truck's route and collect all DB updates
@@ -673,7 +688,8 @@ export function useRouteDetails(routeId: string | undefined) {
 
         if (truckOrders.length === 0) continue;
 
-        const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy);
+        const truckPlate = rt.truck?.plate || undefined;
+        const optimizedRoute = await optimizeDeliveryOrder(truckOrders, strategy, historyPatterns, truckPlate);
 
         for (let i = 0; i < optimizedRoute.orderedDeliveries.length; i++) {
           const delivery = optimizedRoute.orderedDeliveries[i];
