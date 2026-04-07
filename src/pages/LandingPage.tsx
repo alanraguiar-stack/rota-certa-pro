@@ -340,7 +340,8 @@ export default function LandingPage() {
           </SectionTitle>
           <div className="grid gap-6 md:grid-cols-3">
             {/* Free */}
-            <div className="lp-glass rounded-2xl p-6">
+            {/* Free */}
+            <div className="lp-glass rounded-2xl p-6 flex flex-col">
               <h3 className="text-xl font-bold text-white">Free</h3>
               <p className="mt-1 text-sm text-slate-400">Para testar o sistema</p>
               <p className="mt-4 text-3xl font-extrabold text-white">R$ 0<span className="text-base font-normal text-slate-500">/mês</span></p>
@@ -352,13 +353,13 @@ export default function LandingPage() {
                   <li key={i} className="flex items-center gap-2 text-slate-500"><X className="h-4 w-4" />{f}</li>
                 ))}
               </ul>
-              <Link to="/login" className="mt-6 block">
-                <Button variant="outline" className="w-full border-white/20 text-white hover:bg-white/10">Começar grátis</Button>
+              <Link to="/login" className="mt-auto pt-6 block">
+                <Button className="w-full text-white hover:brightness-110" style={{ background: 'rgba(249,115,22,0.25)', border: '1px solid rgba(249,115,22,0.4)' }}>Começar grátis</Button>
               </Link>
             </div>
 
             {/* Premium */}
-            <div className="relative rounded-2xl p-6" style={{
+            <div className="relative rounded-2xl p-6 flex flex-col" style={{
               background: 'rgba(249,115,22,0.05)',
               border: '2px solid rgba(249,115,22,0.4)',
               boxShadow: '0 0 40px rgba(249,115,22,0.1)'
@@ -375,13 +376,13 @@ export default function LandingPage() {
                   <li key={i} className="flex items-center gap-2 text-slate-300"><Check className="h-4 w-4 text-orange-400" />{f}</li>
                 ))}
               </ul>
-              <Link to="/login" className="mt-6 block">
+              <Link to="/login" className="mt-auto pt-6 block">
                 <Button className="w-full text-white border-0" style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}>Começar agora</Button>
               </Link>
             </div>
 
             {/* Pro */}
-            <div className="lp-glass rounded-2xl p-6">
+            <div className="lp-glass rounded-2xl p-6 flex flex-col">
               <h3 className="text-xl font-bold text-white">Pro</h3>
               <p className="mt-1 text-sm text-slate-400">Para grandes operações</p>
               <p className="mt-4 text-3xl font-extrabold text-white">R$ 397<span className="text-base font-normal text-slate-500">/mês</span></p>
@@ -393,8 +394,8 @@ export default function LandingPage() {
                   <li key={i} className="flex items-center gap-2 text-slate-300"><Check className="h-4 w-4 text-orange-400" />{f}</li>
                 ))}
               </ul>
-              <Link to="/login" className="mt-6 block">
-                <Button variant="outline" className="w-full border-white/20 text-white hover:bg-white/10">Falar com vendas</Button>
+              <Link to="/login" className="mt-auto pt-6 block">
+                <Button className="w-full text-white hover:brightness-110" style={{ background: 'rgba(249,115,22,0.25)', border: '1px solid rgba(249,115,22,0.4)' }}>Falar com vendas</Button>
               </Link>
             </div>
           </div>
