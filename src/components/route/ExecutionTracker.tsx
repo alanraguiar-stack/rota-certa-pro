@@ -40,6 +40,23 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
   const [executions, setExecutions] = useState<Record<string, Execution[]>>({});
   const [loading, setLoading] = useState(true);
   const [evidenceModal, setEvidenceModal] = useState<Execution | null>(null);
+  const [signedUrls, setSignedUrls] = useState<{ signature?: string; photo?: string }>({});
+
+  const resolveSignedUrl = useCallback(async (path: string | null): Promise<string | undefined> => {
+    if (!path) return undefined;
+    if (path.startsWith('http')) return path;
+    const { data } = await supabase.storage.from('delivery-proofs').createSignedUrl(path, 3600);
+    return data?.signedUrl || undefined;
+  }, []);
+
+  const openEvidence = useCallback(async (execution: Execution) => {
+    setEvidenceModal(execution);
+    const [sig, photo] = await Promise.all([
+      resolveSignedUrl(execution.signature_url),
+      resolveSignedUrl(execution.photo_url),
+    ]);
+    setSignedUrls({ signature: sig, photo });
+  }, [resolveSignedUrl]);
 
   const fetchData = async () => {
     setLoading(true);
