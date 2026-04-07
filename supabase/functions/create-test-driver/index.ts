@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
     await supabase.from('driver_access_codes').insert({
       user_id: userId,
       access_code: accessCode,
-      driver_password: hashedPassword,
+      password_hash: hashedPassword,
     })
 
     return new Response(

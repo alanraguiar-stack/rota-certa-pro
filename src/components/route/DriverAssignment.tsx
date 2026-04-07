@@ -14,7 +14,6 @@ interface DriverUser {
 
 interface DriverAccessInfo {
   access_code: string;
-  driver_password: string;
 }
 
 interface Props {
@@ -86,7 +85,7 @@ export function DriverAssignment({ routeTrucks, routeId, onAssigned }: Props) {
     if (data) {
       const map: Record<string, DriverAccessInfo> = {};
       for (const d of data) {
-        map[d.user_id] = { access_code: d.access_code, driver_password: '' };
+        map[d.user_id] = { access_code: d.access_code };
       }
       setDriverAccessInfo(prev => ({ ...prev, ...map }));
     }
