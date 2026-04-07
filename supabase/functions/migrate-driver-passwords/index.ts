@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     // Fetch all access codes
     const { data: codes, error } = await supabase
       .from('driver_access_codes')
-      .select('id, driver_password')
+      .select('id, password_hash')
 
     if (error || !codes) {
       return new Response(JSON.stringify({ error: 'Failed to fetch codes' }), { status: 500, headers: corsHeaders })
@@ -55,15 +55,15 @@ Deno.serve(async (req) => {
 
     for (const code of codes) {
       // bcrypt hashes start with $2a$ or $2b$ — skip already hashed
-      if (code.driver_password.startsWith('$2a$') || code.driver_password.startsWith('$2b$')) {
+      if (code.password_hash.startsWith('$2a$') || code.password_hash.startsWith('$2b$')) {
         skipped++
         continue
       }
 
-      const hashed = await bcrypt.hash(code.driver_password)
+      const hashed = await bcrypt.hash(code.password_hash)
       await supabase
         .from('driver_access_codes')
-        .update({ driver_password: hashed })
+        .update({ password_hash: hashed })
         .eq('id', code.id)
 
       migrated++

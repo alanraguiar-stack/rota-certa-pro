@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
     // Look up the access code
     const { data: codeData, error: codeErr } = await supabase
       .from('driver_access_codes')
-      .select('user_id, driver_password')
+      .select('user_id, password_hash')
       .eq('access_code', accessCode.toUpperCase().trim())
       .single()
 
@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
     }
 
     // Verify password using bcrypt compare
-    const isValid = await bcrypt.compare(password, codeData.driver_password)
+    const isValid = await bcrypt.compare(password, codeData.password_hash)
     if (!isValid) {
       return new Response(JSON.stringify({ error: 'Senha incorreta' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
