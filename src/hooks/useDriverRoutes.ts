@@ -186,11 +186,20 @@ export function useDriverRoutes() {
       .upload(path, file, { contentType: file.type || 'image/png' });
     if (error) throw error;
 
-    const { data: urlData } = supabase.storage
-      .from('delivery-proofs')
-      .getPublicUrl(path);
-    return urlData.publicUrl;
+    // Return the storage path only — signed URLs are generated on demand
+    return path;
   }, [user]);
+
+  const getSignedUrl = useCallback(async (storagePath: string): Promise<string | null> => {
+    if (!storagePath) return null;
+    // If it's already a full URL (legacy), return as-is
+    if (storagePath.startsWith('http')) return storagePath;
+    const { data, error } = await supabase.storage
+      .from('delivery-proofs')
+      .createSignedUrl(storagePath, 3600);
+    if (error) return null;
+    return data.signedUrl;
+  }, []);
 
   return {
     loading,
