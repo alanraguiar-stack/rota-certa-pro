@@ -1,30 +1,14 @@
 
-
-# Plano: Substituir drag-and-drop por botões simples de reordenamento
+# Plano: Remover scroll interno da lista de entregas
 
 ## Problema
-O @dnd-kit está colocando itens no lugar errado durante o arraste. Em listas longas com scroll, a detecção de colisão frequentemente erra a posição final.
+A lista de entregas no `TruckRouteEditor` tem `max-h-[500px] overflow-y-auto`, criando um scroll interno que limita a visualização. O usuário quer ver a rota inteira na página, usando o scroll natural da página.
 
-## Solução: Remover drag-and-drop completamente
-Manter apenas os **botões ↑↓** que já existem e funcionam perfeitamente, e adicionar um **campo numérico de posição** para saltos grandes (ex: mover item 15 para posição 3).
-
-### Mudanças concretas
-
-1. **Remover @dnd-kit** do `TruckTab` — sem `DndContext`, `SortableContext`, `DragOverlay`, `useSortable`
-2. **Remover `SortableOrderCard`** — usar `OrderCardContent` diretamente
-3. **Remover drag handle** (GripVertical) — não tem mais arraste
-4. **Adicionar campo de posição editável** — ao lado do número da sequência, clicar nele abre um input numérico onde o usuário digita a nova posição e o item se move instantaneamente
-5. **Manter botões ↑↓** como estão — já funcionam corretamente
-
-### UX do campo de posição
-- O número da sequência (círculo azul "1", "2", etc.) vira clicável
-- Ao clicar, abre um mini-input numérico no lugar
-- Digitar novo número + Enter = mover para aquela posição
-- Escape ou blur = cancelar
+## Mudança
+Remover `max-h-[500px] overflow-y-auto` da div que envolve a lista de `OrderCard` (linha 534), deixando apenas `space-y-2`.
 
 ## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/route/TruckRouteEditor.tsx` | Remover toda lógica @dnd-kit; adicionar input de posição editável no OrderCardContent |
-
+| `src/components/route/TruckRouteEditor.tsx` | Linha 534: remover `max-h-[500px] overflow-y-auto` |
