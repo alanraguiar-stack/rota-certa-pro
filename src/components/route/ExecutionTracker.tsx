@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Eye, Clock, Check, AlertTriangle, FileDown, RefreshCw, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -40,6 +40,23 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
   const [executions, setExecutions] = useState<Record<string, Execution[]>>({});
   const [loading, setLoading] = useState(true);
   const [evidenceModal, setEvidenceModal] = useState<Execution | null>(null);
+  const [signedUrls, setSignedUrls] = useState<{ signature?: string; photo?: string }>({});
+
+  const resolveSignedUrl = useCallback(async (path: string | null): Promise<string | undefined> => {
+    if (!path) return undefined;
+    if (path.startsWith('http')) return path;
+    const { data } = await supabase.storage.from('delivery-proofs').createSignedUrl(path, 3600);
+    return data?.signedUrl || undefined;
+  }, []);
+
+  const openEvidence = useCallback(async (execution: Execution) => {
+    setEvidenceModal(execution);
+    const [sig, photo] = await Promise.all([
+      resolveSignedUrl(execution.signature_url),
+      resolveSignedUrl(execution.photo_url),
+    ]);
+    setSignedUrls({ signature: sig, photo });
+  }, [resolveSignedUrl]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -211,7 +228,7 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
                           </Button>
                         )}
                         {(d.signature_url || d.photo_url) && (
-                          <Button variant="ghost" size="sm" onClick={() => setEvidenceModal(d)}>
+                          <Button variant="ghost" size="sm" onClick={() => openEvidence(d)}>
                             <Eye className="h-4 w-4" />
                           </Button>
                         )}
@@ -232,16 +249,16 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
             <DialogTitle>Evidências da Entrega</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {evidenceModal?.signature_url && (
+            {signedUrls.signature && (
               <div>
                 <p className="text-sm font-medium mb-1">Assinatura</p>
-                <img src={evidenceModal.signature_url} alt="Assinatura" className="w-full rounded-lg border" />
+                <img src={signedUrls.signature} alt="Assinatura" className="w-full rounded-lg border" />
               </div>
             )}
-            {evidenceModal?.photo_url && (
+            {signedUrls.photo && (
               <div>
                 <p className="text-sm font-medium mb-1">Foto</p>
-                <img src={evidenceModal.photo_url} alt="Foto da entrega" className="w-full rounded-lg border" />
+                <img src={signedUrls.photo} alt="Foto da entrega" className="w-full rounded-lg border" />
               </div>
             )}
             {evidenceModal?.observations && (
