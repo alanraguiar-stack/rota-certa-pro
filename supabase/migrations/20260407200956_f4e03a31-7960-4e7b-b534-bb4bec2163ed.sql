@@ -1,0 +1,1 @@
+ALTER TABLE public.driver_access_codes RENAME COLUMN driver_password TO password_hash;

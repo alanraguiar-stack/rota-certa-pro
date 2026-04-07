@@ -120,22 +120,22 @@ export type Database = {
         Row: {
           access_code: string
           created_at: string
-          driver_password: string
           id: string
+          password_hash: string
           user_id: string
         }
         Insert: {
           access_code: string
           created_at?: string
-          driver_password: string
           id?: string
+          password_hash: string
           user_id: string
         }
         Update: {
           access_code?: string
           created_at?: string
-          driver_password?: string
           id?: string
+          password_hash?: string
           user_id?: string
         }
         Relationships: []
