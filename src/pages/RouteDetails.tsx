@@ -130,7 +130,7 @@ export default function RouteDetails() {
               state: parsed.state || null,
               sequence_order: a.delivery_sequence ?? 0,
               route_date: today,
-              was_manually_moved: manuallyMovedOrderIds.has(order.id),
+              was_manually_moved: true, // entire truck is analyst-validated when any edit occurs
             };
           });
 
