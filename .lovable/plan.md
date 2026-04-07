@@ -1,40 +1,35 @@
 
 
-# Plano: Restringir políticas da tabela `user_roles` ao role `authenticated`
+# Plano: Remover política permissiva da tabela `login_attempts`
 
 ## Problema
-As políticas INSERT, UPDATE e DELETE da tabela `user_roles` usam `TO {public}`, o que inclui usuários não autenticados. Mesmo com `has_role()` verificando admin, o role `public` é mais permissivo do que necessário.
+A tabela `login_attempts` tem (ou teve) uma política `USING (true)` para o role `public`, permitindo que qualquer pessoa (inclusive não autenticada) leia todos os IPs de tentativas de login.
 
 ## Solução
-Recriar as políticas de INSERT, UPDATE e DELETE com `TO authenticated` em vez de `TO public`, eliminando qualquer possibilidade de acesso não autenticado.
+Dropar qualquer política permissiva existente na tabela. O service_role (usado pelas Edge Functions) já bypassa RLS automaticamente, então nenhuma política de substituição é necessária.
 
 ## Migration SQL
 
 ```sql
--- Drop existing policies
-DROP POLICY IF EXISTS "Admins can insert roles" ON public.user_roles;
-DROP POLICY IF EXISTS "Admins can update roles" ON public.user_roles;
-DROP POLICY IF EXISTS "Admins can delete roles" ON public.user_roles;
+-- Remove any overly permissive policies
+DROP POLICY IF EXISTS "Service role full access" ON public.login_attempts;
+DROP POLICY IF EXISTS "Allow service role" ON public.login_attempts;
 
--- Recreate with authenticated role only
-CREATE POLICY "Admins can insert roles" ON public.user_roles
-  FOR INSERT TO authenticated
-  WITH CHECK (has_role(auth.uid(), 'admin'::app_role));
+-- Ensure RLS is enabled (should already be)
+ALTER TABLE public.login_attempts ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "Admins can update roles" ON public.user_roles
-  FOR UPDATE TO authenticated
-  USING (has_role(auth.uid(), 'admin'::app_role));
-
-CREATE POLICY "Admins can delete roles" ON public.user_roles
-  FOR DELETE TO authenticated
-  USING (has_role(auth.uid(), 'admin'::app_role));
+-- Force RLS even for table owner
+ALTER TABLE public.login_attempts FORCE ROW LEVEL SECURITY;
 ```
+
+Com isso, a tabela fica em modo "default deny" — nenhum client-side pode ler/escrever, e apenas o service_role (Edge Functions) tem acesso.
+
+## Após a migration
+Deletar o finding `login_attempts_open_read` do security manager.
 
 ## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| Nova migration SQL | Recriar políticas INSERT/UPDATE/DELETE com `TO authenticated` |
-
-Após a migration, o finding será deletado do security manager.
+| Nova migration SQL | Dropar políticas permissivas + FORCE RLS |
 
