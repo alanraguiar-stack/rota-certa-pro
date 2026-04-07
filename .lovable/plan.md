@@ -1,58 +1,42 @@
 
 
-# Plano: Restaurar visual decorativo da Landing Page
+# Plano: Resolver finding de "plaintext driver passwords"
 
-## Contexto
-A landing page original tinha fundo escuro com mesh gradient, cards glass, animações float, gradientes de texto, glow effects e SVGs animados. O redesign Apple removeu todas essas classes CSS globais e reescreveu a landing page em estilo flat/clean. O usuário quer o visual rico de volta, mas **apenas na landing page** — o resto do app mantém o estilo Apple.
+## Diagnóstico
+As senhas já são armazenadas como hashes bcrypt. Todos os 3 Edge Functions relevantes confirmam:
+- `create-test-driver`: usa `bcrypt.hash(plainPassword)` antes de inserir
+- `driver-login`: usa `bcrypt.compare(password, codeData.driver_password)` para verificar
+- `migrate-driver-passwords`: converte senhas legadas para bcrypt
 
-## Estratégia
-Ao invés de restaurar as classes CSS globais (o que afetaria o app inteiro), vou usar **estilos inline/scoped** diretamente no `LandingPage.tsx`, usando Tailwind arbitrary values e CSS-in-JSX.
+O scanner flagra porque o tipo da coluna é `text` e o nome é `driver_password`, mas os valores armazenados são hashes (`$2a$...`).
 
-## Mudanças
+## Solução: Renomear coluna + marcar finding como resolvido
 
-### 1. `src/pages/LandingPage.tsx` — Reescrever visual completo
+Para eliminar definitivamente o false positive e melhorar a clareza do schema:
 
-**Hero Section:**
-- Fundo escuro (navy/slate `bg-slate-900`) com mesh gradient via CSS radial-gradient inline
-- Texto branco com título usando gradient text (via `bg-clip-text text-transparent bg-gradient-to-r`)
-- Orbs decorativos animados (divs com blur e gradiente) posicionados absolute
-- SVG animado de rotas (linhas tracejadas com animação dash)
-- Ícones flutuantes (Truck, Package, MapPin) com animação float
-- CTA com gradiente laranja/coral
+### 1. Migration: Renomear `driver_password` → `password_hash`
+```sql
+ALTER TABLE public.driver_access_codes 
+  RENAME COLUMN driver_password TO password_hash;
+```
 
-**Cards das seções:**
-- Efeito glass: `bg-white/5 backdrop-blur-xl border border-white/10` nas seções escuras
-- `bg-card` normal nas seções claras, mas com hover scale/shadow
-- Hover lift: `hover:-translate-y-1 hover:shadow-lg transition-all`
+### 2. Atualizar Edge Functions que referenciam `driver_password`
+- `create-test-driver/index.ts` — trocar `driver_password` por `password_hash`
+- `driver-login/index.ts` — trocar `driver_password` por `password_hash`
+- `migrate-driver-passwords/index.ts` — trocar `driver_password` por `password_hash`
 
-**Seção "O Problema":**
-- Fundo com gradiente sutil escuro (`bg-gradient-to-b from-slate-900 to-slate-800`)
+### 3. Atualizar código frontend
+- `src/components/route/DriverAssignment.tsx` — referência a `driver_password` na interface
 
-**Seção "Como Funciona":**
-- Step icons com glow/shadow colorido
-- Linha conectora com gradiente
+### 4. Deletar o finding de segurança
 
-**Seção "Diferencial" e "CTA Final":**
-- Fundo gradiente (navy → azul) com overlay pattern
-- Texto branco com destaques em accent
-
-**Footer:**
-- Fundo escuro (`bg-slate-900`) com texto claro
-
-**Animações (definidas via `<style>` JSX no componente):**
-- `@keyframes float` — movimento suave para cima e para baixo
-- `@keyframes dash` — animação das linhas SVG
-- `@keyframes shimmer` — brilho sutil em elementos destaque
-
-### 2. Nenhuma mudança em `src/index.css` ou `tailwind.config.ts`
-Todas as classes decorativas ficam scoped dentro do componente LandingPage, sem afetar o resto do app.
-
-## Arquivo afetado
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/LandingPage.tsx` | Reescrever com visual rico: gradientes, glass cards, animações, fundo escuro, SVG animado |
-
-## Resultado esperado
-Landing page com visual impactante e colorido (estilo original), enquanto Dashboard, Frota, Rotas e demais páginas mantêm o estilo Apple clean.
+| Migration SQL | Renomear coluna `driver_password` → `password_hash` |
+| `supabase/functions/create-test-driver/index.ts` | `driver_password` → `password_hash` |
+| `supabase/functions/driver-login/index.ts` | `driver_password` → `password_hash` |
+| `supabase/functions/migrate-driver-passwords/index.ts` | `driver_password` → `password_hash` |
+| `src/components/route/DriverAssignment.tsx` | Remover referência a `driver_password` na interface |
 
