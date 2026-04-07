@@ -12,6 +12,8 @@ import {
 } from './geocoding';
 import { optimizeWithORS } from './orsOptimizer';
 import { areNeighborhoodsAdjacent, normalizeNeighborhood } from './anchorRules';
+import { orderByLearnedPatterns, buildLearnedTemplates } from './historyGuidedRouter';
+import { HistoryRow } from './historyPatternEngine';
 
 export interface OptimizedRoute {
   orderedDeliveries: OrderWithRouteInfo[];
@@ -46,7 +48,9 @@ interface GeocodedOrderItem {
  */
 export async function optimizeDeliveryOrder(
   orders: Order[],
-  strategy: RoutingStrategy
+  strategy: RoutingStrategy,
+  historyPatterns?: HistoryRow[],
+  truckPlate?: string
 ): Promise<OptimizedRoute> {
   if (orders.length === 0) {
     return {
@@ -95,7 +99,26 @@ export async function optimizeDeliveryOrder(
     }
   }
 
-  // Try ORS optimization first (real driving distances)
+  // Try history-guided optimization first (learned manual patterns)
+  if (historyPatterns && historyPatterns.length > 0) {
+    const templates = buildLearnedTemplates(historyPatterns);
+    const historyOrdered = orderByLearnedPatterns(orders, templates, truckPlate);
+    
+    if (historyOrdered) {
+      // Rebuild geocoded order from history-guided sequence
+      const orderMap = new Map(geocodedOrders.map(g => [g.order.id, g]));
+      const historySequence = historyOrdered
+        .map(o => orderMap.get(o.id))
+        .filter((g): g is GeocodedOrderItem => g !== undefined);
+      
+      if (historySequence.length === orders.length) {
+        console.log('[routing] Using history-guided sequence');
+        return buildRouteWithMetrics(historySequence);
+      }
+    }
+  }
+
+  // Try ORS optimization (real driving distances)
   const orsOrder = await optimizeWithORS(orders);
   
   if (orsOrder && orsOrder.length === orders.length) {
