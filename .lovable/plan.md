@@ -1,26 +1,23 @@
 
-# Plano: Corrigir botão branco e melhorar frase da Landing Page
+# Plano: Corrigir botões brancos nos cards de preço e alinhar
 
 ## Problema
-O botão "Ver demonstração" no hero da landing page aparece branco (variant outline com borda branca sutil), quase invisível contra o fundo escuro. A frase principal também precisa ser substituída.
+Os botões "Começar grátis" (plano Free, linha 356) e "Falar com vendas" (plano Pro, linha 397) usam `variant="outline"` com `border-white/20`, ficando quase invisíveis no fundo escuro. Além disso, os botões não estão alinhados verticalmente entre os 3 cards porque as listas têm alturas diferentes.
 
 ## Mudanças
 
-### 1. Botão "Ver demonstração" (linha 182)
-Trocar de `variant="outline"` com borda branca para um estilo com fundo semi-transparente laranja, tornando-o visível e harmonizado com o tema.
+### 1. Botões dos planos Free e Pro (linhas 356 e 397)
+Trocar de `variant="outline" border-white/20` para estilo semi-transparente laranja (mesmo padrão aplicado ao botão "Ver demonstração" do hero):
+```
+background: rgba(249,115,22,0.25)
+border: 1px solid rgba(249,115,22,0.4)
+```
 
-### 2. Frase principal do hero (linhas 163-168)
-Substituir "Planeje, execute e comprove suas entregas em um só lugar." por algo mais impactante e direto:
-
-**Nova frase:** "Sua logística no controle. Do pedido à prova de entrega."
-
-A parte em gradiente laranja será "Do pedido à prova de entrega."
-
-### 3. Verificar outros botões brancos
-O botão "Entrar" na navbar (linha 105) usa `variant="ghost"` com texto claro — está OK para navbar. O botão "Entrar" do menu mobile (linha 124) tem `variant="outline"` com `border-white/20` — vou ajustá-lo também para ficar mais visível.
+### 2. Alinhamento vertical dos botões
+Adicionar `flex flex-col` nos cards e `mt-auto` no Link dos botões, para que os 3 botões fiquem sempre alinhados na base, independente do tamanho da lista de features.
 
 ## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/LandingPage.tsx` | Trocar estilo dos botões outline + nova frase do hero |
+| `src/pages/LandingPage.tsx` | Linhas 343-399: flex layout nos cards + estilo laranja nos botões Free e Pro |
