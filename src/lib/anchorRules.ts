@@ -187,13 +187,8 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     label: 'Âncora Cotia',
     anchorCity: 'cotia',
     maxDeliveries: 25,
-    allowedFillCities: ['vargem grande paulista', 'embu', 'embu das artes', 'taboao da serra'],
-    neighborhoodFills: [
-      // Bairros específicos de Carapicuíba que entram neste agrupamento
-      { neighborhood: 'vila da oportunidade', city: 'carapicuiba' },
-      { neighborhood: 'jardim yaya', city: 'carapicuiba' },
-      { neighborhood: 'pousada dos bandeirantes', city: 'carapicuiba' },
-    ],
+    allowedFillCities: ['vargem grande paulista', 'embu', 'embu das artes', 'carapicuiba'],
+    neighborhoodFills: [],
     neighborhoodExceptions: [],
     excludedNeighborhoods: [],
     // Centro de Cotia deve ser sequenciado primeiro na rota
@@ -210,7 +205,7 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     label: 'Âncora Osasco',
     anchorCity: 'osasco',
     maxDeliveries: 25,
-    allowedFillCities: ['carapicuiba'],
+    allowedFillCities: ['taboao da serra'],
     neighborhoodFills: [
       // Bairros de SP que entram no caminhão de Osasco
       { neighborhood: 'parque imperial', city: 'sao paulo' },
