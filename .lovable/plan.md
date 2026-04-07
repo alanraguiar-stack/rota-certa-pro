@@ -1,42 +1,40 @@
 
 
-# Plano: Resolver finding de "plaintext driver passwords"
+# Plano: Restringir políticas da tabela `user_roles` ao role `authenticated`
 
-## Diagnóstico
-As senhas já são armazenadas como hashes bcrypt. Todos os 3 Edge Functions relevantes confirmam:
-- `create-test-driver`: usa `bcrypt.hash(plainPassword)` antes de inserir
-- `driver-login`: usa `bcrypt.compare(password, codeData.driver_password)` para verificar
-- `migrate-driver-passwords`: converte senhas legadas para bcrypt
+## Problema
+As políticas INSERT, UPDATE e DELETE da tabela `user_roles` usam `TO {public}`, o que inclui usuários não autenticados. Mesmo com `has_role()` verificando admin, o role `public` é mais permissivo do que necessário.
 
-O scanner flagra porque o tipo da coluna é `text` e o nome é `driver_password`, mas os valores armazenados são hashes (`$2a$...`).
+## Solução
+Recriar as políticas de INSERT, UPDATE e DELETE com `TO authenticated` em vez de `TO public`, eliminando qualquer possibilidade de acesso não autenticado.
 
-## Solução: Renomear coluna + marcar finding como resolvido
+## Migration SQL
 
-Para eliminar definitivamente o false positive e melhorar a clareza do schema:
-
-### 1. Migration: Renomear `driver_password` → `password_hash`
 ```sql
-ALTER TABLE public.driver_access_codes 
-  RENAME COLUMN driver_password TO password_hash;
+-- Drop existing policies
+DROP POLICY IF EXISTS "Admins can insert roles" ON public.user_roles;
+DROP POLICY IF EXISTS "Admins can update roles" ON public.user_roles;
+DROP POLICY IF EXISTS "Admins can delete roles" ON public.user_roles;
+
+-- Recreate with authenticated role only
+CREATE POLICY "Admins can insert roles" ON public.user_roles
+  FOR INSERT TO authenticated
+  WITH CHECK (has_role(auth.uid(), 'admin'::app_role));
+
+CREATE POLICY "Admins can update roles" ON public.user_roles
+  FOR UPDATE TO authenticated
+  USING (has_role(auth.uid(), 'admin'::app_role));
+
+CREATE POLICY "Admins can delete roles" ON public.user_roles
+  FOR DELETE TO authenticated
+  USING (has_role(auth.uid(), 'admin'::app_role));
 ```
 
-### 2. Atualizar Edge Functions que referenciam `driver_password`
-- `create-test-driver/index.ts` — trocar `driver_password` por `password_hash`
-- `driver-login/index.ts` — trocar `driver_password` por `password_hash`
-- `migrate-driver-passwords/index.ts` — trocar `driver_password` por `password_hash`
-
-### 3. Atualizar código frontend
-- `src/components/route/DriverAssignment.tsx` — referência a `driver_password` na interface
-
-### 4. Deletar o finding de segurança
-
-## Arquivos afetados
+## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| Migration SQL | Renomear coluna `driver_password` → `password_hash` |
-| `supabase/functions/create-test-driver/index.ts` | `driver_password` → `password_hash` |
-| `supabase/functions/driver-login/index.ts` | `driver_password` → `password_hash` |
-| `supabase/functions/migrate-driver-passwords/index.ts` | `driver_password` → `password_hash` |
-| `src/components/route/DriverAssignment.tsx` | Remover referência a `driver_password` na interface |
+| Nova migration SQL | Recriar políticas INSERT/UPDATE/DELETE com `TO authenticated` |
+
+Após a migration, o finding será deletado do security manager.
 
