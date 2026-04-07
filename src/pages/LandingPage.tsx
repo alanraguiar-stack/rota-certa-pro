@@ -121,7 +121,7 @@ export default function LandingPage() {
               <a href="#como-funciona" className="text-sm text-slate-300 py-2" onClick={() => setMobileMenuOpen(false)}>Como funciona</a>
               <a href="#beneficios" className="text-sm text-slate-300 py-2" onClick={() => setMobileMenuOpen(false)}>Benefícios</a>
               <a href="#planos" className="text-sm text-slate-300 py-2" onClick={() => setMobileMenuOpen(false)}>Planos</a>
-              <Link to="/login"><Button variant="outline" className="w-full border-white/20 text-white hover:bg-white/10">Entrar</Button></Link>
+              <Link to="/login"><Button className="w-full text-white border-0 hover:opacity-90" style={{ background: 'rgba(249,115,22,0.25)', border: '1px solid rgba(249,115,22,0.4)' }}>Entrar</Button></Link>
               <Link to="/login"><Button className="w-full text-white border-0" style={{ background: 'linear-gradient(135deg, #f97316, #ea580c)' }}>Começar grátis</Button></Link>
             </div>
           </div>
@@ -161,9 +161,9 @@ export default function LandingPage() {
 
         <div className="max-w-3xl text-center relative z-10">
           <h1 className="text-4xl font-extrabold leading-tight tracking-tight md:text-6xl">
-            <span className="text-white">Planeje, execute e comprove suas entregas </span>
+            <span className="text-white">Sua logística no controle. </span>
             <span className="bg-clip-text text-transparent" style={{ backgroundImage: 'linear-gradient(135deg, #f97316, #fb923c, #f59e0b)' }}>
-              em um só lugar.
+              Do pedido à prova de entrega.
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-slate-300 md:text-xl">
@@ -179,7 +179,7 @@ export default function LandingPage() {
               </Button>
             </Link>
             <a href="#como-funciona">
-              <Button size="lg" variant="outline" className="h-14 px-8 text-base border-white/20 text-white hover:bg-white/10">
+              <Button size="lg" className="h-14 px-8 text-base text-white hover:opacity-90 border-0" style={{ background: 'rgba(249,115,22,0.2)', border: '1px solid rgba(249,115,22,0.4)' }}>
                 Ver demonstração
               </Button>
             </a>
