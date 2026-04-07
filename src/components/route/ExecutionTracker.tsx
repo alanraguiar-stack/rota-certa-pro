@@ -228,7 +228,7 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
                           </Button>
                         )}
                         {(d.signature_url || d.photo_url) && (
-                          <Button variant="ghost" size="sm" onClick={() => setEvidenceModal(d)}>
+                          <Button variant="ghost" size="sm" onClick={() => openEvidence(d)}>
                             <Eye className="h-4 w-4" />
                           </Button>
                         )}
@@ -249,16 +249,16 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
             <DialogTitle>Evidências da Entrega</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {evidenceModal?.signature_url && (
+            {signedUrls.signature && (
               <div>
                 <p className="text-sm font-medium mb-1">Assinatura</p>
-                <img src={evidenceModal.signature_url} alt="Assinatura" className="w-full rounded-lg border" />
+                <img src={signedUrls.signature} alt="Assinatura" className="w-full rounded-lg border" />
               </div>
             )}
-            {evidenceModal?.photo_url && (
+            {signedUrls.photo && (
               <div>
                 <p className="text-sm font-medium mb-1">Foto</p>
-                <img src={evidenceModal.photo_url} alt="Foto da entrega" className="w-full rounded-lg border" />
+                <img src={signedUrls.photo} alt="Foto da entrega" className="w-full rounded-lg border" />
               </div>
             )}
             {evidenceModal?.observations && (
