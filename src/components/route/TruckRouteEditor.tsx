@@ -531,7 +531,7 @@ function TruckTab({
             <p>Nenhuma entrega atribuída</p>
           </div>
         ) : (
-          <div className="space-y-2 max-h-[500px] overflow-y-auto">
+          <div className="space-y-2">
             {localOrders.map((order, idx) => (
               <OrderCard
                 key={order.id}
