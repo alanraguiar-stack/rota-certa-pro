@@ -5,11 +5,10 @@
  * Não há mais vínculo fixo placa→cidade.
  * 
  * Agrupamentos operacionais:
- * 1. Barueri + Jandira + Itapevi
+ * 1. Barueri + Jandira + Itapevi + Santana de Parnaíba + Pirapora + Cajamar
  * 2. Cotia + Vargem Grande + Embu/Embu das Artes + Taboão da Serra
  * 3. Osasco (+ bairros SP: Parque Imperial, Jaguaré, Rio Pequeno, Santa Maria)
- * 4. Santana de Parnaíba + Pirapora + Cajamar
- * 5. Caieiras (+ Perus de SP)
+ * 4. Caieiras (+ Perus de SP)
  */
 
 export interface NeighborhoodException {
@@ -156,21 +155,20 @@ export function areNeighborhoodsAdjacent(nhA: string, nhB: string): boolean {
 /**
  * Regras de território — o motor seleciona automaticamente o caminhão.
  * 
- * Agrupamento 1: Barueri (âncora) + Jandira + Itapevi
+ * Agrupamento 1: Barueri (âncora) + Jandira + Itapevi + Santana de Parnaíba + Pirapora + Cajamar
  * Agrupamento 2: Cotia (âncora) + Vargem Grande + Embu + Embu das Artes + Taboão
  * Agrupamento 3: Osasco (âncora) + bairros SP (Parque Imperial, Jaguaré, Rio Pequeno)
- * Agrupamento 4: Santana de Parnaíba (âncora) + Pirapora + Cajamar
- * Agrupamento 5: Caieiras (âncora) + Perus (SP)
+ * Agrupamento 4: Caieiras (âncora) + Perus (SP)
  * Apoio: São Paulo (restante) + excedentes
  */
 export const TERRITORY_RULES: TerritoryRule[] = [
-  // ── Agrupamento 1: Barueri + Jandira + Itapevi ──
+  // ── Agrupamento 1: Barueri + Jandira + Itapevi + Santana de Parnaíba + Pirapora + Cajamar ──
   {
     id: 'barueri',
     label: 'Âncora Barueri',
     anchorCity: 'barueri',
     maxDeliveries: 25,
-    allowedFillCities: ['jandira', 'itapevi'],
+    allowedFillCities: ['jandira', 'itapevi', 'santana de parnaiba', 'pirapora do bom jesus', 'cajamar'],
     neighborhoodFills: [],
     neighborhoodExceptions: [],
     excludedNeighborhoods: [
@@ -234,20 +232,6 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     isSupport: false,
     priority: 3,
     fixedPlate: 'TRC1Z00',
-  },
-  // ── Agrupamento 4: Santana de Parnaíba + Pirapora + Cajamar ──
-  {
-    id: 'santana',
-    label: 'Âncora Santana de Parnaíba',
-    anchorCity: 'santana de parnaiba',
-    maxDeliveries: 25,
-    allowedFillCities: ['pirapora do bom jesus', 'cajamar'],
-    neighborhoodFills: [],
-    neighborhoodExceptions: [],
-    excludedNeighborhoods: [],
-    priorityNeighborhoods: [],
-    isSupport: false,
-    priority: 4,
   },
   // ── Agrupamento 5: Caieiras + Perus (SP) ──
   {

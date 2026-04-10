@@ -753,6 +753,39 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {activeStep === 'loading_manifest' && (
           <div className="space-y-6">
+            {/* Resumo de vendas por cidade */}
+            {(() => {
+              const cityTotals: Record<string, number> = {};
+              for (const rt of route.route_trucks) {
+                for (const a of (rt.assignments || [])) {
+                  const city = a.order?.city || 'Sem cidade';
+                  cityTotals[city] = (cityTotals[city] || 0) + 1;
+                }
+              }
+              const sorted = Object.entries(cityTotals).sort((a, b) => b[1] - a[1]);
+              if (sorted.length === 0) return null;
+              return (
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <MapPin className="h-4 w-4" />
+                      Resumo por Cidade ({sorted.reduce((s, [, v]) => s + v, 0)} vendas)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-1 text-sm">
+                      {sorted.map(([city, count]) => (
+                        <div key={city} className="flex justify-between">
+                          <span className="capitalize text-muted-foreground">{city}</span>
+                          <span className="font-medium">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+
             {/* Editor de Rotas por Caminhão */}
             <TruckRouteEditor
               routeName={route.name}
