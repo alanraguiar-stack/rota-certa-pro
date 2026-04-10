@@ -1,46 +1,61 @@
 
 
-# Plano: Corrigir Persistência de Itens no Fluxo Normal (Upload Duplo)
+# Plano: Corrigir Detecção de Header com Encoding Corrompido
 
 ## Problema Raiz
 
-O código em `useRoutes.ts` na mutation `addOrders` (linha 274) assume que o array retornado por `supabase.insert().select()` mantém a mesma ordem do array de entrada. **Isso não é garantido pelo Supabase/PostgreSQL.** Resultado: os items são mapeados para orders errados ou perdidos.
+O CSV exportado pelo ADV usa encoding Latin-1/Windows-1252. Quando lido como UTF-8, caracteres acentuados viram `\ufffd` (replacement character). Exemplo: `Descrição` → `Descri��o`.
 
-Além disso, erros de inserção de `order_items` são silenciosamente engolidos (linha 293-296), impedindo diagnóstico.
+O parser `parseADVDetailExcel` usa regex `/descri[çc][ãa]o/i` para detectar o header da tabela de itens, mas esse regex **não casa** com `Descri\ufffd\ufffdo`. Resultado: `itemColumnMap` nunca é criado → **zero itens extraídos** → romaneio de carga vazio.
+
+O mesmo problema afeta a detecção individual de colunas (`descricao: cells.findIndex(...)`).
 
 ## Solução
 
-### 1. Corrigir mapeamento de items em `src/hooks/useRoutes.ts` — `addOrders`
+Normalizar o texto removendo caracteres `\ufffd` e acentos antes de testar os regexes de header. Aplicar em 3 pontos no `parseADVDetailExcel`:
 
-Em vez de usar índice posicional (`insertedOrders[index]`), mapear orders inseridos de volta aos originais usando `client_name + weight_kg` como chave composta:
+### Arquivo: `src/lib/advParser.ts`
 
-```text
-1. Inserir orders no banco → receber insertedOrders
-2. Para cada insertedOrder, encontrar o original correspondente
-   por client_name normalizado + weight_kg
-3. Inserir order_items vinculados ao ID correto
-4. Batch de 500 items por vez
-5. Reportar erros via toast (não engolir silenciosamente)
+**1. Criar helper de normalização para matching (reutilizar `removeAccents` ou inline)**
+```
+function normalizeForMatch(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\ufffd/g, '').toLowerCase();
+}
 ```
 
-### 2. Adicionar log de diagnóstico
+**2. Linha ~1321 — Detecção do header de itens**
+Antes de testar o regex, normalizar `rowText`:
+```
+const normalizedRowText = normalizeForMatch(rowText);
+if (/descri.?[ao]/i.test(normalizedRowText) && /qtde\.?|quantidade/i.test(normalizedRowText))
+```
 
-- Logar quantos items foram preparados para inserção
-- Logar resultado da inserção (sucesso/erro)
-- Toast de aviso se items falharem
+**3. Linha ~1326 — Mapeamento de colunas**
+Normalizar cada célula antes do `findIndex`:
+```
+const cells = row.map(c => normalizeForMatch(String(c ?? '')));
+itemColumnMap = {
+  descricao: cells.findIndex(c => /descri.?[ao]/.test(c)),
+  qtde: cells.findIndex(c => /qtde\.?|quantidade/.test(c)),
+};
+```
 
-### 3. Garantir que o merge preserve items corretamente
-
-Adicionar log no `handleAutoDataReady` em `NewRoute.tsx` para confirmar que os orders passados via `navigate()` contêm items.
-
-## Arquivos afetados
-
-| Arquivo | Mudança |
-|---|---|
-| `src/hooks/useRoutes.ts` | Corrigir mapeamento posicional → por chave; batch insert de items; error reporting |
-| `src/pages/NewRoute.tsx` | Adicionar log de diagnóstico dos items antes de navegar |
+**4. Também proteger o regex de `Cliente :` (linha ~1272) e `Venda Nº` (linha ~1306)**
+Aplicar `normalizeForMatch` no `rowText` usado para esses matchings, garantindo que encoding corrompido não bloqueie nenhuma detecção.
 
 ## Impacto
 
-A partir desta correção, o fluxo normal (upload de 2 arquivos → criar rota) já persistirá os items corretamente, sem necessidade de reimportação.
+Com essa correção, o fluxo normal (upload de 2 relatórios) vai:
+1. Detectar corretamente o header `Código / Descrição / UN / Qtde.` mesmo com encoding corrompido
+2. Mapear colunas de descrição e quantidade
+3. Extrair todos os itens de cada venda
+4. Cruzar com o itinerário via `mergeItinerarioWithADV`
+5. Persistir em `order_items` via `addOrders`
+6. Romaneio de carga mostra produtos consolidados
+
+## Arquivo afetado
+
+| Arquivo | Mudança |
+|---|---|
+| `src/lib/advParser.ts` | Adicionar `normalizeForMatch` e usá-lo nos 3 pontos de detecção em `parseADVDetailExcel` |
 
