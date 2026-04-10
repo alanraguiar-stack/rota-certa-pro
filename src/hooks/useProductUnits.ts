@@ -49,21 +49,30 @@ function normalize(str: string): string {
 export function inferUnitFromName(productName: string): string {
   const upper = productName.toUpperCase();
 
-  // Refrigerante é SEMPRE fardo
-  if (upper.includes('REFRIGERANTE')) return 'fardo';
+  // Categorias de bebidas → sempre fardo
+  if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'fardo';
 
-  // Abreviações explícitas (com separadores - ou espaço)
+  // Abreviações flexíveis — aceita FD12UN, CX6, PCT24 etc.
+  // Ordem importa: FD antes de UN para não conflitar com "FD12UN"
   const abbrevMap: Array<[RegExp, string]> = [
-    [/\bCX\b/, 'caixa'],
-    [/\bUN\b/, 'unidade'],
-    [/\bFD\b/, 'fardo'],
-    [/\bPCT\b/, 'pacote'],
-    [/\bLT\b/, 'litro'],
-    [/\bLITRO\b/, 'litro'],
-    [/\bSC\b/, 'saco'],
-    [/\bDP\b/, 'display'],
-    [/\bGF\b/, 'garrafa'],
-    [/\bPC\b/, 'peca'],
+    [/FD\d*/, 'fardo'],
+    [/FARDO/, 'fardo'],
+    [/CX\d*/, 'caixa'],
+    [/CAIXA/, 'caixa'],
+    [/PCT\d*/, 'pacote'],
+    [/PACOTE/, 'pacote'],
+    [/SC\d*/, 'saco'],
+    [/SACO/, 'saco'],
+    [/DP\d*/, 'display'],
+    [/DISPLAY/, 'display'],
+    [/GF\d*/, 'garrafa'],
+    [/GARRAFA/, 'garrafa'],
+    [/\bLT\d*\b/, 'litro'],
+    [/LITRO/, 'litro'],
+    [/\bPC\d*\b/, 'peca'],
+    [/PECA|PEÇA/, 'peca'],
+    [/\bUN\d*\b/, 'unidade'],
+    [/UNIDADE/, 'unidade'],
   ];
 
   for (const [pattern, unit] of abbrevMap) {
@@ -119,7 +128,8 @@ export function useProductUnits() {
       }
     }
     
-    return 'kg'; // default
+    // Fallback: inferir pelo nome do produto em vez de assumir kg
+    return inferUnitFromName(productName);
   }, [normalizedMap]);
 
   const importProductUnits = useCallback(async (data: Array<{ product_name: string; unit_type: string }>) => {
