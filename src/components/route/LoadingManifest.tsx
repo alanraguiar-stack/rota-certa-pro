@@ -116,12 +116,6 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
     .sort((a, b) => a.product.localeCompare(b.product));
 }
 
-function formatQty(qty: number, unitType: string): string {
-  if (isWeightUnit(unitType)) {
-    return qty % 1 === 0 ? String(qty) : qty.toFixed(2).replace('.', ',');
-  }
-  return String(Math.round(qty));
-}
 
 /**
  * Combina quantidade + unidade por extenso para a coluna "Peso Total" do romaneio.
