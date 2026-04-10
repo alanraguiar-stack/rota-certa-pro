@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName } from '@/hooks/useProductUnits';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -65,39 +65,57 @@ function toASCII(text: string): string {
 }
 
 /**
- * Consolidate products from orders - uses order_items when available
- * Falls back to order.weight_kg with client_name when no items
+ * Resolve unit for a product name — same logic as LoadingManifest
  */
-function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
-  const productMap = new Map<string, { weight: number; count: number }>();
+function resolveUnit(productName: string, getUnitForProduct: (name: string) => string): string {
+  const inferred = inferUnitFromName(productName);
+  if (inferred !== 'kg') return inferred;
+  return getUnitForProduct(productName);
+}
+
+function normalizeProductKey(name: string): string {
+  return name.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Consolidate products from orders — item-by-item, never by concatenated description.
+ * Uses quantity for volumetric units, weight_kg for weight units.
+ */
+function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
+  const productMap = new Map<string, { product: string; weight: number; qty: number; unitType: string }>();
+  const allLackDetails = orders.every(o => !o.items || o.items.length === 0);
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
-      // Use detailed items when available
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
-        const existing = productMap.get(productName) || { weight: 0, count: 0 };
-        productMap.set(productName, {
-          weight: existing.weight + Number(item.weight_kg),
-          count: existing.count + 1,
-        });
+        const key = normalizeProductKey(productName);
+        const unitType = resolveUnit(productName, getUnitForProduct);
+        const existing = productMap.get(key) || { product: productName, weight: 0, qty: 0, unitType };
+        
+        if (isWeightUnit(unitType)) {
+          existing.qty += Number(item.weight_kg);
+          existing.weight += Number(item.weight_kg);
+        } else {
+          existing.qty += (item.quantity || 1);
+          existing.weight += Number(item.weight_kg);
+        }
+        
+        productMap.set(key, existing);
       });
-    } else {
-      // Fallback: use product_description or client name with order total weight
-      const label = order.product_description || `Pedido ${order.client_name}`;
-      const existing = productMap.get(label) || { weight: 0, count: 0 };
-      productMap.set(label, {
-        weight: existing.weight + Number(order.weight_kg),
-        count: existing.count + 1,
-      });
+    } else if (allLackDetails) {
+      const label = `Pedido - ${order.client_name}`;
+      const key = normalizeProductKey(label);
+      productMap.set(key, { product: label, weight: Number(order.weight_kg), qty: Number(order.weight_kg), unitType: 'kg' });
     }
   });
   
-  return Array.from(productMap.entries())
-    .map(([product, data]) => ({
-      product,
+  return Array.from(productMap.values())
+    .map(data => ({
+      product: data.product,
       totalWeight: data.weight,
-      orderCount: data.count,
+      qty: data.qty,
+      unitType: data.unitType,
     }))
     .sort((a, b) => a.product.localeCompare(b.product));
 }
