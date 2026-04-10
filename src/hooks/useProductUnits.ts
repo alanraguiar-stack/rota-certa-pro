@@ -11,6 +11,29 @@ export interface ProductUnit {
 
 const VALID_UNITS = ['kg', 'g', 'fardo', 'unidade', 'caixa', 'pacote', 'litro', 'garrafa', 'peca', 'saco', 'display'];
 
+const UNIT_ABBREV_MAP: Record<string, string> = {
+  kg: 'KG',
+  g: 'G',
+  fardo: 'FD',
+  unidade: 'UN',
+  caixa: 'CX',
+  pacote: 'PCT',
+  litro: 'LT',
+  garrafa: 'GF',
+  peca: 'PC',
+  saco: 'SC',
+  display: 'DP',
+};
+
+export function getUnitAbbrev(unitType: string): string {
+  return UNIT_ABBREV_MAP[unitType.toLowerCase().trim()] || unitType.toUpperCase();
+}
+
+export function isWeightUnit(unitType: string): boolean {
+  const u = unitType.toLowerCase().trim();
+  return u === 'kg' || u === 'g';
+}
+
 function normalize(str: string): string {
   return str
     .toLowerCase()

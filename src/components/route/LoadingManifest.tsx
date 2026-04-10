@@ -7,7 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER, ParsedOrder } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit } from '@/hooks/useProductUnits';
 import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
 import { decodeFileContent } from '@/lib/encoding';
 import { useToast } from '@/hooks/use-toast';
