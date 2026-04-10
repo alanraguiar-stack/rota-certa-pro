@@ -1217,6 +1217,9 @@ export function parseItinerarioExcel(rows: unknown[][]): ItinerarioRecord[] {
 /**
  * Parse Excel do Detalhe das Vendas MB (ADV hierárquico)
  * Formato: linhas com "Cliente:", "Venda Nº:", seguidas de itens
+ * 
+ * ROBUSTO: Mapeia múltiplas colunas candidatas (código, descrição, unidade, qtde, unitário, total)
+ * e usa fallbacks quando a coluna principal de quantidade está vazia ou inválida.
  */
 export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   console.log('[ADV Excel] Parsing', rows.length, 'rows');
@@ -1228,7 +1231,14 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   let currentVendaId = '';
   let currentItems: { product_name: string; weight_kg: number; quantity: number }[] = [];
   let inItemTable = false;
-  let itemColumnMap: { descricao: number; qtde: number } | null = null;
+  let itemColumnMap: {
+    codigo: number;
+    descricao: number;
+    unidade: number;
+    qtde: number;
+    unitario: number;
+    total: number;
+  } | null = null;
   
   // Helper: salva o pedido atual se tiver venda válida
   const flushCurrentOrder = () => {
@@ -1266,6 +1276,19 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     }
   };
   
+  // Helper: check if a row looks like a footer/subtotal/total
+  const isFooterOrTotal = (text: string): boolean => {
+    const norm = text.toLowerCase();
+    return /^\s*(total|sub\s*total|observa|obs\s*:|---)/i.test(norm) ||
+           /total\s*(geral|cliente|venda)/i.test(norm);
+  };
+
+  // Helper: check if row is a repeated header
+  const isRepeatedHeader = (text: string): boolean => {
+    const norm = normalizeForMatch(text);
+    return /descri.?[ao]/.test(norm) && /qtde\.?|quantidade/.test(norm);
+  };
+  
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
     if (!row) continue;
@@ -1276,11 +1299,9 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     // Detectar linha de Cliente
     const normalizedRowText = normalizeForMatch(rowText);
     
-    // Detectar linha de Cliente
     const clientMatch = normalizedRowText.match(/cliente\s*:\s*([a-z\s\-\.]+?)(?:\s+\d{11,14})?$/i);
     if (clientMatch) {
       flushCurrentOrder();
-      // Re-extract from original rowText to preserve proper casing
       const origMatch = rowText.match(/[Cc]liente\s*:\s*(.+?)(?:\s+\d{11,14})?$/);
       const clientName = origMatch ? origMatch[1].trim() : clientMatch[1].trim();
       currentClient = normalizeText(clientName);
@@ -1299,7 +1320,6 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     if (row.length > 5) {
       const colF = String(row[5] ?? '').trim();
       const col0 = String(row[0] ?? '').toLowerCase();
-      // Coluna F tem número 5+ dígitos E coluna A contém marcador "venda"
       if (/^\d{5,}$/.test(colF) && /venda/i.test(col0)) {
         flushCurrentOrder();
         currentVendaId = colF;
@@ -1327,35 +1347,119 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     
     if (vendaDetected) continue;
     
-    // Detectar header de tabela de itens
-    if (/descri.?[ao]/i.test(normalizedRowText) && /qtde\.?|quantidade/i.test(normalizedRowText)) {
+    // Detectar header de tabela de itens — map ALL candidate columns
+    if (/descri.?[ao]/i.test(normalizedRowText) && (/qtde\.?|quantidade/i.test(normalizedRowText) || /total/i.test(normalizedRowText))) {
       inItemTable = true;
-      // Mapear colunas de item usando texto normalizado
       const cells = row.map(c => normalizeForMatch(String(c ?? '')));
       itemColumnMap = {
+        codigo: cells.findIndex(c => /^cod(igo)?$/.test(c) || /codigo/.test(c)),
         descricao: cells.findIndex(c => /descri.?[ao]/.test(c)),
+        unidade: cells.findIndex(c => /^un(id(ade)?)?\.?$/.test(c) || /unidade/.test(c)),
         qtde: cells.findIndex(c => /qtde\.?|quantidade/.test(c)),
+        unitario: cells.findIndex(c => /unit[aá]rio/.test(c) || /vlr?\s*unit/.test(c)),
+        total: cells.findIndex(c => /^total$/.test(c) || /vlr?\s*total/.test(c)),
       };
-      console.log('[ADV Excel] Item columns:', itemColumnMap);
+      console.log('[ADV Excel] Item columns (full map):', itemColumnMap);
+      console.log('[ADV Excel] Header cells:', cells.filter(c => c).join(' | '));
       continue;
     }
     
     // Extrair item se estamos em uma tabela
     if (currentVendaId && inItemTable && itemColumnMap) {
-      const descricao = itemColumnMap.descricao !== -1 ? String(row[itemColumnMap.descricao] ?? '').trim() : '';
-      const qtdeStr = itemColumnMap.qtde !== -1 ? String(row[itemColumnMap.qtde] ?? '0') : '0';
+      // Skip footers/totals/repeated headers
+      if (isFooterOrTotal(rowText) || isRepeatedHeader(rowText)) {
+        console.log('[ADV Excel] Skipping footer/header line:', rowText.substring(0, 50));
+        continue;
+      }
       
-      if (descricao && descricao.length > 2) {
-        const weight = parseExcelWeight(qtdeStr);
-        if (weight > 0) {
-          currentItems.push({
-            product_name: normalizeText(descricao),
-            weight_kg: weight,
-            quantity: 1,
-          });
-          console.log('[ADV Excel] Item:', descricao.substring(0, 30), weight, 'kg');
+      const descricao = itemColumnMap.descricao !== -1 ? String(row[itemColumnMap.descricao] ?? '').trim() : '';
+      
+      // Skip empty/short descriptions or rows that are clearly not items
+      if (!descricao || descricao.length < 3) {
+        // Check if all cells are empty — means end of table section
+        const nonEmpty = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '');
+        if (nonEmpty.length <= 1) {
+          console.log('[ADV Excel] Empty row in item table at line', i, '- continuing');
+          continue;
+        }
+        console.log('[ADV Excel] ⏭ Skipped line', i, '- no valid description. Row:', rowText.substring(0, 60));
+        continue;
+      }
+      
+      // ===================================================================
+      // ROBUST QUANTITY/WEIGHT EXTRACTION with multiple fallbacks
+      // ===================================================================
+      let qty = 0;
+      let extractionSource = '';
+      
+      // ATTEMPT 1: Primary qtde column
+      if (itemColumnMap.qtde !== -1) {
+        qty = parseExcelWeight(row[itemColumnMap.qtde] as string | number | null | undefined);
+        if (qty > 0) extractionSource = 'qtde';
+      }
+      
+      // ATTEMPT 2: Try total column (often has the total weight/value)
+      if (qty === 0 && itemColumnMap.total !== -1) {
+        const totalVal = parseExcelWeight(row[itemColumnMap.total] as string | number | null | undefined);
+        if (totalVal > 0) {
+          qty = totalVal;
+          extractionSource = 'total';
         }
       }
+      
+      // ATTEMPT 3: Scan ALL numeric cells adjacent to description
+      if (qty === 0) {
+        const numericValues: { idx: number; val: number }[] = [];
+        for (let ci = 0; ci < row.length; ci++) {
+          if (ci === itemColumnMap.descricao || ci === itemColumnMap.codigo) continue;
+          const val = parseExcelWeight(row[ci] as string | number | null | undefined);
+          if (val > 0) {
+            numericValues.push({ idx: ci, val });
+          }
+        }
+        // Pick the first plausible numeric value (usually quantity comes before price)
+        if (numericValues.length > 0) {
+          qty = numericValues[0].val;
+          extractionSource = `fallback-col-${numericValues[0].idx}`;
+        }
+      }
+      
+      // ATTEMPT 4: Regex on concatenated row text (reuse PDF extractItem logic)
+      if (qty === 0) {
+        const cleanLine = rowText.replace(/[|│]/g, ' ').trim();
+        const regexMatch = cleanLine.match(/\s+([\d]+[,.][\d]+)\s+/);
+        if (regexMatch) {
+          qty = parseExcelWeight(regexMatch[1]);
+          extractionSource = 'regex-line';
+        }
+      }
+      
+      // FINAL: Accept item even with qty=0 if we have a description (use qty=1 as fallback)
+      if (qty === 0) {
+        qty = 1; // Default: at least 1 unit
+        extractionSource = 'default-1';
+        console.log('[ADV Excel] ⚠️ No numeric value found for item, defaulting to qty=1:', descricao.substring(0, 40));
+      }
+      
+      // Determine if this is weight or unit-count based
+      // If we have a unidade column, use it to decide
+      let unitType = '';
+      if (itemColumnMap.unidade !== -1) {
+        unitType = String(row[itemColumnMap.unidade] ?? '').trim().toLowerCase();
+      }
+      
+      // Decide weight_kg vs quantity based on unit
+      const isWeightBased = !unitType || /^(kg|g|kilo|quilo)s?$/i.test(unitType);
+      const itemWeightKg = isWeightBased ? qty : 0;
+      const itemQuantity = isWeightBased ? 1 : qty;
+      
+      currentItems.push({
+        product_name: normalizeText(descricao),
+        weight_kg: itemWeightKg > 0 ? itemWeightKg : qty, // Fallback: use qty as weight if no unit info
+        quantity: itemQuantity > 0 ? itemQuantity : 1,
+      });
+      console.log('[ADV Excel] ✅ Item:', descricao.substring(0, 35), '| qty:', qty, '| source:', extractionSource, '| unit:', unitType || 'N/A');
+      continue;
     }
     
     // Fallback: tentar extrair item por padrão de código + descrição + número
@@ -1370,6 +1474,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
             weight_kg: weight,
             quantity: 1,
           });
+          console.log('[ADV Excel] ✅ Item (fallback regex):', descricao.substring(0, 35), weight, 'kg');
         }
       }
     }
@@ -1378,7 +1483,16 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   // Processar último pedido
   flushCurrentOrder();
   
-  console.log('[ADV Excel] Total orders:', orders.length, '(vendas únicas:', seenVendaIds.size, ')');
+  // Summary stats
+  const totalItems = orders.reduce((s, o) => s + (o.items?.length || 0), 0);
+  const ordersWithItems = orders.filter(o => o.items && o.items.length > 0).length;
+  const ordersWithoutItems = orders.length - ordersWithItems;
+  console.log('[ADV Excel] ═══════════════════════════════════════');
+  console.log('[ADV Excel] RESULTADO FINAL:');
+  console.log('[ADV Excel]   Pedidos:', orders.length, '(vendas únicas:', seenVendaIds.size, ')');
+  console.log('[ADV Excel]   Total itens:', totalItems);
+  console.log('[ADV Excel]   Com itens:', ordersWithItems, '| Sem itens:', ordersWithoutItems);
+  console.log('[ADV Excel] ═══════════════════════════════════════');
   return orders;
 }
 
