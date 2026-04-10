@@ -1,23 +1,38 @@
 
-# Plano: Corrigir botões brancos nos cards de preço e alinhar
 
-## Problema
-Os botões "Começar grátis" (plano Free, linha 356) e "Falar com vendas" (plano Pro, linha 397) usam `variant="outline"` com `border-white/20`, ficando quase invisíveis no fundo escuro. Além disso, os botões não estão alinhados verticalmente entre os 3 cards porque as listas têm alturas diferentes.
+# Plano: Mover Santana de Parnaíba para Barueri + Resumo por cidade
 
-## Mudanças
+## Mudança 1: Território — Santana de Parnaíba → Barueri
 
-### 1. Botões dos planos Free e Pro (linhas 356 e 397)
-Trocar de `variant="outline" border-white/20` para estilo semi-transparente laranja (mesmo padrão aplicado ao botão "Ver demonstração" do hero):
+Atualmente Santana de Parnaíba é um território âncora separado (Agrupamento 4). Vou:
+
+- **Remover** o território "santana" como agrupamento independente
+- **Adicionar** `santana de parnaiba`, `pirapora do bom jesus` e `cajamar` como `allowedFillCities` do território Barueri
+
+Assim, as vendas de Santana de Parnaíba serão automaticamente alocadas no caminhão de Barueri.
+
+**Arquivo**: `src/lib/anchorRules.ts`
+
+## Mudança 2: Métrica de vendas por cidade (todos os caminhões)
+
+Adicionar um card simples na etapa `loading_manifest` (Etapa 3) do `RouteDetails.tsx` que mostra:
+
 ```
-background: rgba(249,115,22,0.25)
-border: 1px solid rgba(249,115,22,0.4)
+Resumo por Cidade
+Osasco        21
+Carapicuíba   10
+Barueri        8
+...
 ```
 
-### 2. Alinhamento vertical dos botões
-Adicionar `flex flex-col` nos cards e `mt-auto` no Link dos botões, para que os 3 botões fiquem sempre alinhados na base, independente do tamanho da lista de features.
+Conta o total de pedidos por cidade somando todos os caminhões. Exibido como uma lista compacta logo acima ou abaixo do editor de rotas.
 
-## Arquivo afetado
+**Arquivo**: `src/pages/RouteDetails.tsx` (adicionar bloco inline, sem componente separado)
+
+## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/pages/LandingPage.tsx` | Linhas 343-399: flex layout nos cards + estilo laranja nos botões Free e Pro |
+| `src/lib/anchorRules.ts` | Remover território "santana", adicionar fill cities ao Barueri |
+| `src/pages/RouteDetails.tsx` | Adicionar card de resumo vendas por cidade |
+
