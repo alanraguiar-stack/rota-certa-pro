@@ -46,25 +46,17 @@ function consolidateAllProducts(orders: Order[]): ConsolidatedProduct[] {
   const productMap = new Map<string, { weight: number; count: number }>();
   
   orders.forEach(order => {
-    // Se o pedido tem itens detalhados, usar eles
     if (order.items && order.items.length > 0) {
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
         const existing = productMap.get(productName) || { weight: 0, count: 0 };
         productMap.set(productName, {
           weight: existing.weight + Number(item.weight_kg),
-          count: existing.count + 1,
+          count: existing.count + (item.quantity || 1),
         });
       });
-    } else {
-      // Fallback para produto único por pedido
-      const productName = order.product_description || 'Produto não especificado';
-      const existing = productMap.get(productName) || { weight: 0, count: 0 };
-      productMap.set(productName, {
-        weight: existing.weight + Number(order.weight_kg),
-        count: existing.count + 1,
-      });
     }
+    // Orders without items are skipped — no client/description fallback
   });
   
   return Array.from(productMap.entries())
@@ -89,15 +81,8 @@ function consolidateProductsByTruck(orders: Order[]): ConsolidatedProduct[] {
         const existing = productMap.get(productName) || { weight: 0, count: 0 };
         productMap.set(productName, {
           weight: existing.weight + Number(item.weight_kg),
-          count: existing.count + 1,
+          count: existing.count + (item.quantity || 1),
         });
-      });
-    } else {
-      const productName = order.product_description || 'Produto não especificado';
-      const existing = productMap.get(productName) || { weight: 0, count: 0 };
-      productMap.set(productName, {
-        weight: existing.weight + Number(order.weight_kg),
-        count: existing.count + 1,
       });
     }
   });

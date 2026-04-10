@@ -81,7 +81,6 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
-      // Consolidar item a item — cada item vira uma linha
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
         const key = normalizeProductKey(productName);
@@ -96,14 +95,8 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
         
         productMap.set(key, existing);
       });
-    } else if (allLackDetails) {
-      // TODOS sem detalhamento: fallback por cliente/peso
-      const label = `Pedido - ${order.client_name}`;
-      const key = normalizeProductKey(label);
-      productMap.set(key, { product: label, qty: Number(order.weight_kg), unitType: 'kg' });
     }
-    // Se parcial (alguns com items, outros sem): ignorar pedidos sem items
-    // O aviso de dados incompletos será exibido separadamente
+    // Pedidos sem items são ignorados — aviso exibido separadamente
   });
   
   return Array.from(productMap.values())
@@ -301,8 +294,8 @@ function generateLoadingManifestPDF(
   // ── Conferência section ──
   let confY = (doc as any).lastAutoTable.finalY + 14;
 
-  // Check if we need a new page
-  if (confY > 240) {
+  // Check if we need a new page — need ~60mm for conference section
+  if (confY > 220) {
     doc.addPage();
     confY = 25;
   }

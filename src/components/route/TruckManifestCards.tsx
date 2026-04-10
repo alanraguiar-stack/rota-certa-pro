@@ -83,7 +83,6 @@ function normalizeProductKey(name: string): string {
  */
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
   const productMap = new Map<string, { product: string; weight: number; qty: number; unitType: string }>();
-  const allLackDetails = orders.every(o => !o.items || o.items.length === 0);
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
@@ -103,11 +102,8 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
         
         productMap.set(key, existing);
       });
-    } else if (allLackDetails) {
-      const label = `Pedido - ${order.client_name}`;
-      const key = normalizeProductKey(label);
-      productMap.set(key, { product: label, weight: Number(order.weight_kg), qty: Number(order.weight_kg), unitType: 'kg' });
     }
+    // Orders without items are skipped — warning shown separately
   });
   
   return Array.from(productMap.values())
@@ -173,37 +169,49 @@ function generateLoadingPDF(
   doc.setFont('helvetica', 'bold');
   doc.text('PRODUTOS PARA SEPARACAO', 20, 68);
   
+  const tableBody = products.map((p, idx) => {
+    let display: string;
+    if (isWeightUnit(p.unitType)) {
+      display = p.qty % 1 === 0 ? `${p.qty}kg` : `${p.qty.toFixed(1)}kg`;
+    } else {
+      const rounded = Math.round(p.qty);
+      const nameMap: Record<string, [string, string]> = {
+        fardo: ['fardo', 'fardos'], caixa: ['caixa', 'caixas'],
+        pacote: ['pacote', 'pacotes'], unidade: ['unidade', 'unidades'],
+        litro: ['litro', 'litros'], garrafa: ['garrafa', 'garrafas'],
+        saco: ['saco', 'sacos'], display: ['display', 'displays'],
+      };
+      const names = nameMap[p.unitType.toLowerCase()];
+      display = names ? `${rounded} ${rounded !== 1 ? names[1] : names[0]}` : `${rounded} ${p.unitType}`;
+    }
+    return [String(idx + 1), toASCII(p.product), display];
+  });
+  tableBody.push(['', 'TOTAL', formatWeight(totalWeight)]);
+
   autoTable(doc, {
     startY: 73,
-    head: [['#', 'Produto', 'UN', 'Qtde']],
-    body: products.map((p, idx) => {
-      const abbrev = getUnitAbbrev(p.unitType);
-      const display = isWeightUnit(p.unitType)
-        ? (p.qty % 1 === 0 ? String(p.qty) : p.qty.toFixed(2))
-        : String(Math.round(p.qty));
-      return [
-        String(idx + 1),
-        toASCII(p.product),
-        abbrev,
-        display,
-      ];
-    }),
-    foot: [['', 'TOTAL', formatWeight(totalWeight)]],
+    head: [['#', 'Produto', 'Peso Total']],
+    body: tableBody,
     theme: 'striped',
-    headStyles: { fillColor: [80, 80, 80], fontSize: 10 },
-    footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold' },
-    styles: { fontSize: 10 },
+    headStyles: { fillColor: [80, 80, 80], fontSize: 10, fontStyle: 'bold' },
+    styles: { fontSize: 9, cellPadding: 3 },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
+      0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 15, halign: 'center' },
-      3: { cellWidth: 22, halign: 'right' },
+      2: { cellWidth: 35, halign: 'right' },
+    },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.row.index === tableBody.length - 1) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fontSize = 10;
+      }
     },
   });
   
   // Signature fields
   const lastY = (doc as any).lastAutoTable?.finalY || 150;
-  const sigY = Math.min(lastY + 20, 220);
+  let sigY = lastY + 14;
+  if (sigY > 220) { doc.addPage(); sigY = 25; }
   
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');

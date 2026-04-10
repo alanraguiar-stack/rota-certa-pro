@@ -67,24 +67,16 @@ function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
-      // Use detailed items when available
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
         const existing = productMap.get(productName) || { weight: 0, count: 0 };
         productMap.set(productName, {
           weight: existing.weight + Number(item.weight_kg),
-          count: existing.count + 1,
+          count: existing.count + (item.quantity || 1),
         });
       });
-    } else {
-      // Fallback: use product_description or client name with order total weight
-      const label = order.product_description || `Pedido ${order.client_name}`;
-      const existing = productMap.get(label) || { weight: 0, count: 0 };
-      productMap.set(label, {
-        weight: existing.weight + Number(order.weight_kg),
-        count: existing.count + 1,
-      });
     }
+    // Orders without items are skipped — no client fallback
   });
   
   return Array.from(productMap.entries())
@@ -177,7 +169,8 @@ function generateLoadingPDF(
   
   // Signature fields
   const lastY = (doc as any).lastAutoTable?.finalY || 150;
-  const sigY = Math.min(lastY + 20, 220);
+  let sigY = lastY + 14;
+  if (sigY > 220) { doc.addPage(); sigY = 25; }
   
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
