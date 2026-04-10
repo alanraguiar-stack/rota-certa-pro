@@ -23,6 +23,9 @@ interface LoadingManifestProps {
     totalWeight: number;
     occupancyPercent: number;
   }>;
+  routeId?: string;
+  onReimportItems?: (advOrders: ParsedOrder[]) => Promise<any>;
+  isReimporting?: boolean;
 }
 
 interface ConsolidatedProduct {
