@@ -12,7 +12,12 @@
 import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { ParseResult, ValidationError } from './orderParser';
 import { extractRawTextFromPDF, parsePDFFile } from './pdfParser';
-import { normalizeText } from './encoding';
+import { normalizeText, removeAccents } from './encoding';
+
+/** Strip accents, replacement chars, and lowercase for robust matching */
+function normalizeForMatch(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\ufffd/g, '').toLowerCase();
+}
 
 export interface ADVSale {
   pedido_id: string;
