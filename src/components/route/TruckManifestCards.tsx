@@ -16,7 +16,7 @@ import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName } from 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const WEIGHT_UNITS = ['kg', 'g'];
+const WEIGHT_UNIT_KEYS = ['kg', 'g'];
 
 interface TruckManifestCardsProps {
   routeName: string;
@@ -194,9 +194,10 @@ function generateLoadingPDF(
     footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold' },
     styles: { fontSize: 10 },
     columnStyles: {
-      0: { cellWidth: 15, halign: 'center' },
+      0: { cellWidth: 10, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 40, halign: 'right' },
+      2: { cellWidth: 15, halign: 'center' },
+      3: { cellWidth: 22, halign: 'right' },
     },
   });
   
