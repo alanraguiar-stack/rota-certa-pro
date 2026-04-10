@@ -1,67 +1,75 @@
 
+Objetivo: corrigir agora a causa real do romaneio vazio. Pelo que encontrei, o PDF não está “quebrando” na geração; ele está fielmente imprimindo que a rota não tem itens detalhados. O problema continua no parser do relatório ADV: ele detecta a venda e o cabeçalho das colunas, mas não consegue transformar as linhas seguintes em itens válidos.
 
-# Plano: Reformular Romaneio de Carga para Formato ADV
+Diagnóstico confirmado:
+- O PDF enviado mostra 1 única linha: `Sem itens detalhados` com `441.9kg`.
+- Os logs confirmam:
+  - `Item columns` foi encontrado
+  - mas cada venda termina em `Venda sem itens válidos`
+  - depois `NewRoute` navega com `0 have items`
+- Portanto, o erro atual está antes do romaneio, dentro de `parseADVDetailExcel` em `src/lib/advParser.ts`.
 
-## Objetivo
-Alinhar o PDF do Romaneio de Carga ao modelo oficial do ADV, consolidando itens por produto com a unidade de medida correta (KG, CX, FD, UN).
+Causa provável no código atual:
+- O parser do Excel está assumindo que a coluna `Qtde.` sempre pode virar `weight_kg`.
+- Em muitos relatórios ADV, as linhas de item têm células vazias, valores em outra coluna, colunas deslocadas, ou a `Qtde.` não representa diretamente o peso esperado.
+- Hoje ele só faz:
+  - pega `descricao`
+  - pega `qtde`
+  - tenta `parseExcelWeight(qtde)`
+  - se der `0`, descarta a linha inteira
+- Resultado: encontra o cabeçalho, mas joga fora todos os itens.
 
-## Formato Alvo (baseado no PDF modelo)
+Plano de correção:
+1. Reforçar o parser de itens do ADV em `src/lib/advParser.ts`
+- Criar extração de item mais tolerante por linha.
+- Depois de detectar o header, mapear não só `descricao` e `qtde`, mas também colunas candidatas como:
+  - código
+  - unidade
+  - unitário
+  - total
+- Para cada linha da tabela:
+  - validar que existe descrição real
+  - procurar o melhor número de quantidade/peso na coluna mapeada
+  - se a coluna `qtde` vier vazia/inválida, tentar fallback em colunas numéricas vizinhas
+  - parar a leitura ao detectar nova venda, novo cliente, header repetido ou linha de rodapé
 
-```text
-| #  | Descrição                                    | UN | Qtde   |
-|----|----------------------------------------------|----|--------|
-| 1  | FARINHA DE MANDIOCA - PLAZA - GROSSA 0,5 KG  | FD |   1    |
-| 2  | FRANGO - SEARA - 20 KG - S MIUDOS           | KG |  60    |
-| 3  | MUSSARELA - ESPLANADA - 4 KG                | KG |  59,67 |
-| 4  | OLEO DE SOJA REFINADO VITALIV 900ML          | UN | 180    |
-```
+2. Adicionar fallback por linha inteira
+- Se a leitura por índice de coluna falhar, aplicar regex na linha concatenada, reaproveitando a lógica já existente do parser textual do ADV (`extractItem`) como fallback para Excel.
+- Isso evita depender 100% do índice fixo da coluna 17.
 
-- Itens com UN=KG/g: Qtde = soma dos pesos (weight_kg)
-- Itens com UN=CX/FD/UN/etc: Qtde = soma das quantidades (quantity)
-- Ordenação alfabética por Descrição
-- Header: N° Itinerário, Data, Placa (como no modelo)
-- Lista de vendas incluídas no topo
-- Assinatura no rodapé
+3. Melhorar o critério de “linha válida de item”
+- Ignorar cabeçalhos repetidos, subtotais, totais, observações e linhas em branco.
+- Aceitar item mesmo quando o peso/qtde vier em formato estranho, desde que haja descrição + número plausível.
+- Logar por que uma linha foi descartada, para parar de ficar “silencioso”.
 
-## Mudanças
+4. Preservar a unidade correta para o romaneio
+- Manter o fluxo atual do romaneio de carga, que já usa `product_units` para decidir se soma:
+  - `weight_kg` para KG/G
+  - `quantity` para CX/FD/UN/etc
+- Mas ajustar o parser para preencher melhor `quantity` quando o ADV trouxer quantidade física, em vez de gravar sempre `quantity: 1`.
 
-### Arquivo: `src/components/route/LoadingManifest.tsx`
+5. Melhorar a observabilidade durante o teste
+- Em `src/lib/advParser.ts`, adicionar logs temporários como:
+  - linha detectada como item
+  - descrição extraída
+  - valor bruto da coluna qtde
+  - motivo do descarte
+- Em `src/components/route/DualFileUpload.tsx`, mostrar no resumo:
+  - pedidos extraídos
+  - total de itens
+  - quantos pedidos vieram sem item
+- Isso permite confirmar imediatamente se o arquivo foi lido certo antes de criar a rota.
 
-**1. Refatorar `consolidateProducts`**
-- Para itens com unidade de peso (kg, g): consolidar somando `weight_kg`
-- Para itens volumétricos (CX, FD, UN, etc): consolidar somando `quantity`
-- A unidade exibida vem de `getUnitForProduct` (que consulta `product_units` no banco) ou `inferUnitFromName`
-- Mapear abreviações: caixa→CX, fardo→FD, unidade→UN, kg→KG
+Arquivos a alterar:
+- `src/lib/advParser.ts`
+- `src/components/route/DualFileUpload.tsx`
 
-**2. Refatorar `generateLoadingManifestPDF`**
-- Trocar colunas de `[#, Produto, Qtde, Unidade, Peso Total]` para `[#, Descrição, UN, Qtde]`
-- Formatar Qtde: decimais para KG (ex: 59,67), inteiros para volumétricos
-- Adicionar lista de vendas (sale IDs) no cabeçalho, se disponível nos orders
-- Remover coluna "Peso Total" separada — a quantidade já representa o volume correto
+Resultado esperado após a correção:
+- O upload do relatório detalhado volta a gerar `orders` com `items`
+- `NewRoute` deixa de mostrar `0 have items`
+- `order_items` volta a ser persistido
+- o Romaneio de Carga deixa de sair com `Sem itens detalhados` e passa a listar os produtos consolidados corretamente por caminhão
 
-**3. Atualizar preview na UI**
-- Alinhar a visualização em tela com o mesmo formato do PDF
-
-### Arquivo: `src/hooks/useProductUnits.ts`
-- Adicionar helper `getUnitAbbrev(unitType)` que mapeia nomes longos para abreviações: `caixa→CX`, `fardo→FD`, `unidade→UN`, `kg→KG`, `pacote→PCT`, `litro→LT`, `saco→SC`, `display→DP`, `peca→PC`, `garrafa→GF`
-
-## Lógica de Consolidação (detalhe)
-
-```text
-Para cada order do caminhão:
-  Para cada item do order:
-    unitType = getUnitForProduct(item.product_name)
-    Se unitType é peso (kg/g):
-      acumular weight_kg no mapa por product_name
-    Senão:
-      acumular quantity no mapa por product_name
-    
-Resultado: lista de {descrição, UN (abreviada), qtde}
-Ordenar alfabeticamente
-```
-
-## Impacto
-- PDF gerado seguirá o padrão ADV fielmente
-- Unidades corretas consultadas do banco `product_units`
-- Preview na tela alinhado com o PDF
-
+Detalhe técnico importante:
+- Não há evidência de problema no PDF do romaneio nem na persistência atual do `order_items`.
+- O gargalo atual está concentrado no parsing do ADV Excel/CSV, especificamente na extração das linhas de item após o cabeçalho ser detectado.
