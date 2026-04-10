@@ -5,9 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER, ParsedOrder } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits, getUnitAbbrev, isWeightUnit } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName } from '@/hooks/useProductUnits';
 import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
 import { decodeFileContent } from '@/lib/encoding';
 import { useToast } from '@/hooks/use-toast';
@@ -42,8 +43,39 @@ function ordersLackDetails(orders: Order[]): boolean {
   );
 }
 
+/**
+ * Resolve a unidade de medida com prioridade:
+ * 1. Marcadores fortes no nome do produto (FD12UN, CX6, etc.)
+ * 2. Cadastro do produto no banco
+ * 3. Inferência por categoria (bebidas, etc.)
+ * 4. Default: kg
+ */
+function resolveUnit(productName: string, getUnitForProduct: (name: string) => string): string {
+  // Primeiro: checar marcadores fortes no nome do produto
+  const inferred = inferUnitFromName(productName);
+  
+  // Se a inferência encontrou algo diferente de kg (marcador forte), usar ela
+  if (inferred !== 'kg') return inferred;
+  
+  // Senão, consultar o banco via getUnitForProduct (que já tem seu próprio fallback)
+  return getUnitForProduct(productName);
+}
+
+/**
+ * Normaliza nome do produto para consolidação
+ * Remove espaços extras, padroniza case
+ */
+function normalizeProductKey(name: string): string {
+  return name
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
-  const productMap = new Map<string, { qty: number; unitType: string }>();
+  const productMap = new Map<string, { product: string; qty: number; unitType: string }>();
   
   const noDetails = ordersLackDetails(orders);
   
@@ -51,8 +83,9 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
     if (order.items && order.items.length > 0) {
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
-        const unitType = getUnitForProduct(productName);
-        const existing = productMap.get(productName) || { qty: 0, unitType };
+        const key = normalizeProductKey(productName);
+        const unitType = resolveUnit(productName, getUnitForProduct);
+        const existing = productMap.get(key) || { product: productName, qty: 0, unitType };
         
         if (isWeightUnit(unitType)) {
           existing.qty += Number(item.weight_kg);
@@ -60,27 +93,30 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
           existing.qty += (item.quantity || 1);
         }
         
-        productMap.set(productName, existing);
+        productMap.set(key, existing);
       });
     } else if (noDetails) {
+      // Fallback: sem itens detalhados, usar peso bruto por cliente
       const label = `Pedido - ${order.client_name}`;
-      productMap.set(label, { qty: Number(order.weight_kg), unitType: 'kg' });
+      const key = normalizeProductKey(label);
+      productMap.set(key, { product: label, qty: Number(order.weight_kg), unitType: 'kg' });
     } else {
       const label = order.product_description || `Pedido ${order.client_name}`;
-      const unitType = getUnitForProduct(label);
-      const existing = productMap.get(label) || { qty: 0, unitType };
+      const key = normalizeProductKey(label);
+      const unitType = resolveUnit(label, getUnitForProduct);
+      const existing = productMap.get(key) || { product: label, qty: 0, unitType };
       if (isWeightUnit(unitType)) {
         existing.qty += Number(order.weight_kg);
       } else {
         existing.qty += 1;
       }
-      productMap.set(label, existing);
+      productMap.set(key, existing);
     }
   });
   
-  return Array.from(productMap.entries())
-    .map(([product, data]) => ({
-      product,
+  return Array.from(productMap.values())
+    .map(data => ({
+      product: data.product,
       qty: data.qty,
       unitAbbrev: getUnitAbbrev(data.unitType),
       unitType: data.unitType,
@@ -102,6 +138,41 @@ function formatWeight(weight: number): string {
   return `${weight.toFixed(1)}kg`;
 }
 
+/**
+ * Extrai lista de nomes de clientes únicos do caminhão
+ */
+function getClientList(orders: Order[]): string[] {
+  const unique = new Set<string>();
+  orders.forEach(o => unique.add(o.client_name));
+  return Array.from(unique).sort();
+}
+
+/**
+ * Converte caracteres especiais para compatibilidade com PDF (Helvetica)
+ */
+function pdfSafe(text: string): string {
+  if (!text) return '';
+  let r = text;
+  r = r.replace(/[""]/g, '"').replace(/['']/g, "'");
+  r = r.replace(/[–—]/g, '-').replace(/…/g, '...');
+  // Map accented chars to ASCII for Helvetica compatibility
+  const map: Record<string, string> = {
+    'á':'a','à':'a','ã':'a','â':'a','ä':'a',
+    'é':'e','è':'e','ê':'e','ë':'e',
+    'í':'i','ì':'i','î':'i','ï':'i',
+    'ó':'o','ò':'o','õ':'o','ô':'o','ö':'o',
+    'ú':'u','ù':'u','û':'u','ü':'u',
+    'ç':'c','ñ':'n',
+    'Á':'A','À':'A','Ã':'A','Â':'A','Ä':'A',
+    'É':'E','È':'E','Ê':'E','Ë':'E',
+    'Í':'I','Ì':'I','Î':'I','Ï':'I',
+    'Ó':'O','Ò':'O','Õ':'O','Ô':'O','Ö':'O',
+    'Ú':'U','Ù':'U','Û':'U','Ü':'U',
+    'Ç':'C','Ñ':'N','°':'o','º':'o','ª':'a',
+  };
+  return r.split('').map(c => map[c] || c).join('');
+}
+
 function generateLoadingManifestPDF(
   routeName: string,
   date: string,
@@ -113,125 +184,98 @@ function generateLoadingManifestPDF(
 ): jsPDF {
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageWidth = doc.internal.pageSize.getWidth();
-  
-  // Header
+  const margin = 15;
+  let y = 18;
+
+  // ── Title ──
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text('ROMANEIO DE CARGA', pageWidth / 2, 20, { align: 'center' });
-  
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
-  doc.text(routeName, pageWidth / 2, 28, { align: 'center' });
-  
-  // Truck info box
-  doc.setFillColor(245, 245, 245);
-  doc.rect(15, 35, pageWidth - 30, 25, 'F');
-  doc.setDrawColor(200, 200, 200);
-  doc.rect(15, 35, pageWidth - 30, 25, 'S');
-  
+  doc.text('Romaneio', pageWidth / 2, y, { align: 'center' });
+  y += 10;
+
+  // ── Header info line ──
   doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('VEÍCULO:', 20, 43);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${truck.plate} - ${truck.model}`, 45, 43);
-  
+  const headerLine = `Data: ${pdfSafe(date)}  |  Entregador: ${pdfSafe(truck.plate)} - ${pdfSafe(truck.model)}  |  Entregas: ${orders.length}  |  Peso: ${formatWeight(totalWeight)} (${occupancyPercent}%)`;
+  doc.text(pdfSafe(headerLine), pageWidth / 2, y, { align: 'center' });
+  y += 6;
+
+  // ── Vendas (client list) ──
+  const clients = getClientList(orders);
+  doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.text('DATA:', 110, 43);
+  doc.text('Clientes:', margin, y);
   doc.setFont('helvetica', 'normal');
-  doc.text(date, 125, 43);
-  
-  doc.setFont('helvetica', 'bold');
-  doc.text('CAPACIDADE:', 20, 52);
-  doc.setFont('helvetica', 'normal');
-  doc.text(formatWeight(Number(truck.capacity_kg)), 50, 52);
-  
-  doc.setFont('helvetica', 'bold');
-  doc.text('CARGA TOTAL:', 80, 52);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${formatWeight(totalWeight)} (${occupancyPercent}%)`, 110, 52);
-  
-  doc.setFont('helvetica', 'bold');
-  doc.text('ENTREGAS:', 155, 52);
-  doc.setFont('helvetica', 'normal');
-  doc.text(String(orders.length), 180, 52);
-  
-  // Consolidated Products Table
-  // Warning if no detailed items
+  const clientText = pdfSafe(clients.join(' , '));
+  // Wrap client text across multiple lines if needed
+  const clientLines = doc.splitTextToSize(clientText, pageWidth - 2 * margin - 20);
+  doc.text(clientLines, margin + 20, y);
+  y += Math.max(clientLines.length * 4, 5) + 4;
+
+  // ── Warning if no detailed items ──
   const noDetails = ordersLackDetails(orders);
-  let tableStartY = 80;
   if (noDetails) {
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(150, 100, 0);
-    doc.text('* Detalhamento de produtos nao importado - listando pedidos individuais por cliente/peso', 20, 75);
+    doc.text('* Detalhamento de produtos nao importado - listando pedidos individuais por cliente/peso', margin, y);
     doc.setTextColor(0, 0, 0);
-    tableStartY = 82;
+    y += 6;
   }
-  
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'bold');
-  doc.text(noDetails ? 'PEDIDOS PARA SEPARACAO' : 'PRODUTOS PARA SEPARACAO', 20, tableStartY);
-  
+
+  // ── Consolidated Products Table ──
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
-  
+
   autoTable(doc, {
-    startY: tableStartY + 5,
-    head: [['#', 'Descricao', 'UN', 'Qtde']],
+    startY: y,
+    head: [['#', pdfSafe('Descricao'), 'UN', 'Qtde']],
     body: consolidatedProducts.map((p, idx) => [
       String(idx + 1),
-      p.product,
+      pdfSafe(p.product),
       p.unitAbbrev,
       formatQty(p.qty, p.unitType),
     ]),
     theme: 'striped',
-    headStyles: { fillColor: [80, 80, 80], fontSize: 11 },
-    styles: { fontSize: 10 },
+    headStyles: { fillColor: [80, 80, 80], fontSize: 10, fontStyle: 'bold' },
+    styles: { fontSize: 9, cellPadding: 2 },
     columnStyles: {
-      0: { cellWidth: 12, halign: 'center' },
+      0: { cellWidth: 10, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 18, halign: 'center' },
-      3: { cellWidth: 25, halign: 'right' },
+      2: { cellWidth: 15, halign: 'center' },
+      3: { cellWidth: 22, halign: 'right' },
     },
+    margin: { left: margin, right: margin },
   });
-  
-  // Signature section
-  const signatureY = (doc as any).lastAutoTable?.finalY + 20 || 250;
-  
-  // Check if we need a new page for signatures
-  if (signatureY > 260) {
+
+  // ── Signature section ──
+  const tableEndY = (doc as any).lastAutoTable?.finalY || y + 20;
+  let sigY = tableEndY + 15;
+
+  // Check if we need a new page
+  if (sigY > 255) {
     doc.addPage();
+    sigY = 25;
   }
-  
-  const sigY = signatureY > 260 ? 30 : signatureY;
-  
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('CONFERÊNCIA DE CARGA', 20, sigY);
-  
-  // Separator signature box
+
+  doc.setFontSize(9);
+  doc.text('Data: ___/___/___', margin, sigY);
+  sigY += 10;
+
   doc.setDrawColor(150, 150, 150);
-  doc.rect(20, sigY + 5, 80, 30, 'S');
+  doc.line(margin, sigY, margin + 80, sigY);
   doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Separador:', 25, sigY + 12);
-  doc.line(25, sigY + 25, 95, sigY + 25);
-  doc.text('Assinatura', 55, sigY + 32);
-  
-  // Checker signature box
-  doc.rect(110, sigY + 5, 80, 30, 'S');
-  doc.text('Conferente:', 115, sigY + 12);
-  doc.line(115, sigY + 25, 185, sigY + 25);
-  doc.text('Assinatura', 145, sigY + 32);
-  
-  // Date/time box
-  doc.rect(20, sigY + 40, 170, 15, 'S');
-  doc.text('Data da conferência: ____/____/______ Hora: ____:____', 25, sigY + 50);
-  
-  // Footer
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'italic');
-  doc.text('Gerado por Rota Certa', pageWidth / 2, 290, { align: 'center' });
-  
+  doc.text('Assinatura', margin + 30, sigY + 5);
+
+  // ── Footer ──
+  doc.setFontSize(7);
+  doc.setTextColor(150, 150, 150);
+  doc.text(
+    pdfSafe(`Gerado em ${new Date().toLocaleString('pt-BR')} - Rota Certa`),
+    pageWidth / 2,
+    doc.internal.pageSize.getHeight() - 8,
+    { align: 'center' }
+  );
+
   return doc;
 }
 
@@ -253,7 +297,6 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
         const delimiter = text.includes(';') ? ';' : ',';
         rows = text.split('\n').map(line => line.split(delimiter));
       } else {
-        // Excel file
         const XLSX = await import('xlsx');
         const buffer = await file.arrayBuffer();
         const wb = XLSX.read(buffer, { type: 'array' });
@@ -289,7 +332,6 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
       });
     }
     
-    // Reset file input
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
   
@@ -297,33 +339,19 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
   
   const handleDownloadPDF = () => {
     if (!selectedTruck) return;
-    
     const doc = generateLoadingManifestPDF(
-      routeName,
-      date,
-      selectedTruck.truck,
-      selectedTruck.orders,
-      selectedTruck.totalWeight,
-      selectedTruck.occupancyPercent,
-      getUnitForProduct
+      routeName, date, selectedTruck.truck, selectedTruck.orders,
+      selectedTruck.totalWeight, selectedTruck.occupancyPercent, getUnitForProduct
     );
-    
     doc.save(`romaneio-carga-${selectedTruck.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
   };
   
   const handlePrint = () => {
     if (!selectedTruck) return;
-    
     const doc = generateLoadingManifestPDF(
-      routeName,
-      date,
-      selectedTruck.truck,
-      selectedTruck.orders,
-      selectedTruck.totalWeight,
-      selectedTruck.occupancyPercent,
-      getUnitForProduct
+      routeName, date, selectedTruck.truck, selectedTruck.orders,
+      selectedTruck.totalWeight, selectedTruck.occupancyPercent, getUnitForProduct
     );
-    
     const blob = doc.output('blob');
     const url = URL.createObjectURL(blob);
     const iframe = document.createElement('iframe');
@@ -343,13 +371,8 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
     trucks.forEach((truckData, index) => {
       setTimeout(() => {
         const doc = generateLoadingManifestPDF(
-          routeName,
-          date,
-          truckData.truck,
-          truckData.orders,
-          truckData.totalWeight,
-          truckData.occupancyPercent,
-          getUnitForProduct
+          routeName, date, truckData.truck, truckData.orders,
+          truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
         );
         doc.save(`romaneio-carga-${truckData.truck.plate}-${date.replace(/\//g, '-')}.pdf`);
       }, index * 500);
@@ -366,8 +389,6 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
       </Card>
     );
   }
-  
-  
   
   const consolidatedProducts = selectedTruck 
     ? consolidateProducts(selectedTruck.orders, getUnitForProduct) 
@@ -388,7 +409,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
             <Truck className="h-4 w-4" />
             {t.truck.plate}
             <Badge variant="secondary" className="ml-1">
-              {formatWeight(t.totalWeight)}
+              {t.orders.length} entregas
             </Badge>
           </Button>
         ))}
@@ -418,57 +439,32 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
           <CardHeader className="border-b bg-muted/30">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <ClipboardCheck className="h-5 w-5" />
-                  Romaneio de Carga
-                </CardTitle>
-                <CardDescription>{routeName} • {date}</CardDescription>
+                <CardTitle className="text-xl">Romaneio de Carga</CardTitle>
+                <CardDescription>
+                  {routeName} • {date} • {selectedTruck.truck.plate} - {selectedTruck.truck.model}
+                </CardDescription>
               </div>
-              <Badge variant="outline" className="text-lg font-bold">
-                {selectedTruck.truck.plate}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
-            {/* Truck summary */}
-            <div className="grid grid-cols-2 gap-4 border-b p-4 md:grid-cols-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Veículo</p>
-                <p className="font-semibold">{selectedTruck.truck.model}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Capacidade</p>
-                <p className="font-semibold">{formatWeight(Number(selectedTruck.truck.capacity_kg))}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Carga Total</p>
-                <p className="font-semibold">{formatWeight(selectedTruck.totalWeight)}</p>
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Ocupação</p>
-                <p className={cn(
-                  'font-semibold',
-                  selectedTruck.occupancyPercent > 90 ? 'text-destructive' : 
-                  selectedTruck.occupancyPercent > 70 ? 'text-warning' : 'text-success'
-                )}>
-                  {selectedTruck.occupancyPercent}%
+              <div className="text-right">
+                <Badge variant="outline" className="text-lg font-bold">
+                  {selectedTruck.truck.plate}
+                </Badge>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedTruck.orders.length} entregas • {formatWeight(selectedTruck.totalWeight)} ({selectedTruck.occupancyPercent}%)
                 </p>
               </div>
             </div>
-            
-            {/* Origin */}
-            <div className="flex items-center gap-3 border-b px-4 py-3 bg-primary/5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-bold">
-                CD
-              </div>
-              <div>
-                <p className="text-sm font-medium">{DISTRIBUTION_CENTER.name}</p>
-                <p className="text-xs text-muted-foreground">{DISTRIBUTION_CENTER.address}</p>
-              </div>
+          </CardHeader>
+          <CardContent className="p-0">
+            {/* Clientes */}
+            <div className="border-b px-4 py-3 bg-primary/5">
+              <p className="text-xs text-muted-foreground mb-1">Clientes neste caminhão</p>
+              <p className="text-sm">
+                {getClientList(selectedTruck.orders).join(' • ')}
+              </p>
             </div>
             
             {/* Warning for missing details */}
-            {selectedTruck && ordersLackDetails(selectedTruck.orders) && (
+            {ordersLackDetails(selectedTruck.orders) && (
               <Alert variant="default" className="mx-4 mt-4 border-warning/50 bg-warning/10">
                 <AlertTriangle className="h-4 w-4 text-warning" />
                 <AlertDescription className="flex items-center justify-between gap-4">
@@ -497,44 +493,45 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                 </AlertDescription>
               </Alert>
             )}
-
-            {/* Consolidated Products */}
-            <div className="border-b p-4">
-              <h3 className="flex items-center gap-2 font-semibold mb-3">
-                <Scale className="h-4 w-4" />
-                {selectedTruck && ordersLackDetails(selectedTruck.orders) ? 'Pedidos para Separação' : 'Produtos Consolidados'}
-              </h3>
-              <div className="space-y-2">
-                {consolidatedProducts.map((product, idx) => (
-                  <div 
-                    key={idx}
-                    className="flex items-center justify-between rounded-lg border p-3 bg-muted/30"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Package className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{product.product}</span>
-                      <Badge variant="outline" className="text-xs">
-                        {product.unitAbbrev}
-                      </Badge>
-                    </div>
-                    <span className="font-bold">
-                      {formatQty(product.qty, product.unitType)} {product.unitAbbrev}
-                    </span>
-                  </div>
-                ))}
-              </div>
+            
+            {/* Consolidated Products Table */}
+            <div className="p-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12 text-center">#</TableHead>
+                    <TableHead>Descrição</TableHead>
+                    <TableHead className="w-16 text-center">UN</TableHead>
+                    <TableHead className="w-20 text-right">Qtde</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {consolidatedProducts.map((product, idx) => (
+                    <TableRow key={idx}>
+                      <TableCell className="text-center text-muted-foreground">{idx + 1}</TableCell>
+                      <TableCell className="font-medium">{product.product}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className="text-xs">
+                          {product.unitAbbrev}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-bold">
+                        {formatQty(product.qty, product.unitType)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              
               <Separator className="my-3" />
-              <div className="flex items-center justify-between font-bold">
-                <span>TOTAL DA CARGA</span>
-                <span className="text-lg">{formatWeight(selectedTruck.totalWeight)}</span>
+              <div className="flex items-center justify-between font-bold text-sm">
+                <span>{consolidatedProducts.length} produtos</span>
+                <span>Peso total: {formatWeight(selectedTruck.totalWeight)}</span>
               </div>
             </div>
             
-            {/* Removed: Detailed orders list - Romaneio de Carga should only show consolidated products */}
-            
             {/* Signature fields */}
             <div className="border-t bg-muted/20 p-4">
-              <h3 className="font-semibold mb-3">Conferência de Carga</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div className="border rounded-lg p-3 bg-background">
                   <p className="text-xs text-muted-foreground mb-2">Separador</p>
