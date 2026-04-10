@@ -1,38 +1,38 @@
 
 
-# Plano: Mover Santana de Parnaíba para Barueri + Resumo por cidade
+# Plano: Redesign do card "Resumo por Cidade"
 
-## Mudança 1: Território — Santana de Parnaíba → Barueri
+## Problema
+O layout atual usa grid com colunas de texto pequeno e números alinhados à direita, dificultando a leitura rápida. O usuário quer algo mais visual e intuitivo.
 
-Atualmente Santana de Parnaíba é um território âncora separado (Agrupamento 4). Vou:
+## Proposta
 
-- **Remover** o território "santana" como agrupamento independente
-- **Adicionar** `santana de parnaiba`, `pirapora do bom jesus` e `cajamar` como `allowedFillCities` do território Barueri
+Redesenhar o card com layout de **badges/chips** compactos, onde cada cidade é um chip com o número em destaque:
 
-Assim, as vendas de Santana de Parnaíba serão automaticamente alocadas no caminhão de Barueri.
-
-**Arquivo**: `src/lib/anchorRules.ts`
-
-## Mudança 2: Métrica de vendas por cidade (todos os caminhões)
-
-Adicionar um card simples na etapa `loading_manifest` (Etapa 3) do `RouteDetails.tsx` que mostra:
-
-```
-Resumo por Cidade
-Osasco        21
-Carapicuíba   10
-Barueri        8
-...
+```text
+┌─────────────────────────────────────────────────┐
+│ 📍 Resumo por Cidade (46 vendas)                │
+│                                                 │
+│  ┌──────────────┐ ┌────────────┐ ┌───────────┐  │
+│  │ Osasco   [16]│ │ Cotia   [6]│ │Carap.  [6]│  │
+│  └──────────────┘ └────────────┘ └───────────┘  │
+│  ┌──────────────┐ ┌────────────┐ ┌───────────┐  │
+│  │ Embu      [4]│ │S.Parnaíba[4]│ │Jandira [2]│  │
+│  └──────────────┘ └────────────┘ └───────────┘  │
+│  ...                                            │
+└─────────────────────────────────────────────────┘
 ```
 
-Conta o total de pedidos por cidade somando todos os caminhões. Exibido como uma lista compacta logo acima ou abaixo do editor de rotas.
+Cada chip terá:
+- Nome da cidade capitalizado à esquerda
+- Número em badge circular/bold à direita
+- Fundo sutil (`bg-muted/50`) com borda leve
+- Cidades com mais entregas ganham destaque visual (badge `bg-primary` para top 3, `bg-muted` para as demais)
+- Layout `flex flex-wrap gap-2` para fluir naturalmente
 
-**Arquivo**: `src/pages/RouteDetails.tsx` (adicionar bloco inline, sem componente separado)
-
-## Arquivos afetados
+## Arquivo afetado
 
 | Arquivo | Mudança |
 |---|---|
-| `src/lib/anchorRules.ts` | Remover território "santana", adicionar fill cities ao Barueri |
-| `src/pages/RouteDetails.tsx` | Adicionar card de resumo vendas por cidade |
+| `src/pages/RouteDetails.tsx` | Linhas 776-783: trocar grid por flex-wrap com chips estilizados |
 
