@@ -367,7 +367,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
     );
   }
   
-  const isWeightU = (u: string) => isWeightUnit(u);
+  
   
   const consolidatedProducts = selectedTruck 
     ? consolidateProducts(selectedTruck.orders, getUnitForProduct) 
