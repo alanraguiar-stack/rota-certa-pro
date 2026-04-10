@@ -252,6 +252,58 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
   
+  const handleReimportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onReimportItems) return;
+    
+    try {
+      let rows: unknown[][] = [];
+      
+      if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
+        const text = await decodeFileContent(file);
+        const delimiter = text.includes(';') ? ';' : ',';
+        rows = text.split('\n').map(line => line.split(delimiter));
+      } else {
+        // Excel file
+        const XLSX = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][];
+      }
+      
+      if (!isADVExcelFormat(rows)) {
+        toast({
+          title: 'Formato não reconhecido',
+          description: 'O arquivo não parece ser um relatório de Detalhe das Vendas (ADV).',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      const advOrders = parseADVDetailExcel(rows);
+      if (advOrders.length === 0) {
+        toast({
+          title: 'Nenhum item encontrado',
+          description: 'O arquivo não contém itens detalhados de produtos.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      await onReimportItems(advOrders);
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao processar arquivo',
+        description: err.message || 'Erro desconhecido',
+        variant: 'destructive',
+      });
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+  
   const selectedTruck = trucks[selectedTruckIndex];
   
   const handleDownloadPDF = () => {
