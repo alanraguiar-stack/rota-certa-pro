@@ -1,42 +1,46 @@
 
 
-# Plano: Reimportar Detalhamento de Itens para Rota Existente
+# Plano: Corrigir Persistência de Itens no Fluxo Normal (Upload Duplo)
 
-## Problema
-A rota foi criada sem o arquivo ADV, resultando em `order_items` vazios. O romaneio mostra "Pedidos para Separação" em vez de produtos consolidados.
+## Problema Raiz
+
+O código em `useRoutes.ts` na mutation `addOrders` (linha 274) assume que o array retornado por `supabase.insert().select()` mantém a mesma ordem do array de entrada. **Isso não é garantido pelo Supabase/PostgreSQL.** Resultado: os items são mapeados para orders errados ou perdidos.
+
+Além disso, erros de inserção de `order_items` são silenciosamente engolidos (linha 293-296), impedindo diagnóstico.
 
 ## Solução
 
-### 1. Nova mutation em `src/hooks/useRoutes.ts`
-Adicionar `reimportItems` que:
-- Aceita o arquivo CSV/Excel ADV
-- Parseia com `parseADVDetailExcel` (já funciona com CSV `;`)
-- Busca os `orders` existentes da rota
-- Cruza ADV com orders por **client_name normalizado** (removeAccents + lowercase + trim)
-- Para desempate de clientes com múltiplos pedidos, usa o peso total
-- Deleta `order_items` antigos (se houver) e insere os novos
-- Atualiza `product_description` de cada order
+### 1. Corrigir mapeamento de items em `src/hooks/useRoutes.ts` — `addOrders`
 
-### 2. Botão no `src/components/route/LoadingManifest.tsx`
-Quando `ordersLackDetails` é true, mostrar botão "Reimportar Detalhamento" ao lado do aviso amarelo. O botão abre um file input que aceita CSV/Excel.
+Em vez de usar índice posicional (`insertedOrders[index]`), mapear orders inseridos de volta aos originais usando `client_name + weight_kg` como chave composta:
 
-### 3. Props adicionais no `LoadingManifest`
-Adicionar `routeId` e `onItemsReimported` (callback para refetch) como props opcionais.
-
-### 4. Lógica de matching
 ```text
-Para cada order ADV (por venda_id):
-  1. Buscar order no banco com client_name normalizado igual
-  2. Se múltiplos matches, usar peso mais próximo
-  3. Inserir order_items vinculados ao order.id
-  4. Atualizar product_description do order
+1. Inserir orders no banco → receber insertedOrders
+2. Para cada insertedOrder, encontrar o original correspondente
+   por client_name normalizado + weight_kg
+3. Inserir order_items vinculados ao ID correto
+4. Batch de 500 items por vez
+5. Reportar erros via toast (não engolir silenciosamente)
 ```
+
+### 2. Adicionar log de diagnóstico
+
+- Logar quantos items foram preparados para inserção
+- Logar resultado da inserção (sucesso/erro)
+- Toast de aviso se items falharem
+
+### 3. Garantir que o merge preserve items corretamente
+
+Adicionar log no `handleAutoDataReady` em `NewRoute.tsx` para confirmar que os orders passados via `navigate()` contêm items.
 
 ## Arquivos afetados
 
 | Arquivo | Mudança |
 |---|---|
-| `src/hooks/useRoutes.ts` | Nova mutation `reimportItems` |
-| `src/components/route/LoadingManifest.tsx` | Botão reimportação + file input + lógica de upload |
-| `src/pages/RouteDetails.tsx` | Passar `routeId` e `refetch` ao LoadingManifest |
+| `src/hooks/useRoutes.ts` | Corrigir mapeamento posicional → por chave; batch insert de items; error reporting |
+| `src/pages/NewRoute.tsx` | Adicionar log de diagnóstico dos items antes de navegar |
+
+## Impacto
+
+A partir desta correção, o fluxo normal (upload de 2 arquivos → criar rota) já persistirá os items corretamente, sem necessidade de reimportação.
 
