@@ -514,19 +514,12 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                       <Package className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">{product.product}</span>
                       <Badge variant="outline" className="text-xs">
-                        {product.unitType}
+                        {product.unitAbbrev}
                       </Badge>
                     </div>
-                    <div className="flex items-center gap-4">
-                      {!isWeightUnit(product.unitType) && (
-                        <span className="text-sm font-medium">
-                          {product.totalQuantity} {product.unitType}
-                        </span>
-                      )}
-                      {isWeightUnit(product.unitType) && (
-                        <span className="font-bold">{formatWeight(product.totalWeight)}</span>
-                      )}
-                    </div>
+                    <span className="font-bold">
+                      {formatQty(product.qty, product.unitType)} {product.unitAbbrev}
+                    </span>
                   </div>
                 ))}
               </div>
