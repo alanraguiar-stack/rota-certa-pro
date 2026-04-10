@@ -366,6 +366,7 @@ export type Database = {
           id: string
           latitude: number | null
           longitude: number | null
+          pedido_id: string | null
           product_description: string | null
           route_id: string
           sequence_order: number | null
@@ -380,6 +381,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
+          pedido_id?: string | null
           product_description?: string | null
           route_id: string
           sequence_order?: number | null
@@ -394,6 +396,7 @@ export type Database = {
           id?: string
           latitude?: number | null
           longitude?: number | null
+          pedido_id?: string | null
           product_description?: string | null
           route_id?: string
           sequence_order?: number | null

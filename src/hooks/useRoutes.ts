@@ -26,6 +26,7 @@ function toOrder(o: unknown): Order | undefined {
     longitude: obj.longitude != null ? Number(obj.longitude) : null,
     geocoding_status: obj.geocoding_status != null ? String(obj.geocoding_status) : null,
     city: obj.city != null ? String(obj.city) : null,
+    pedido_id: obj.pedido_id != null ? String(obj.pedido_id) : null,
   };
 }
 export function useRoutes() {
@@ -244,6 +245,7 @@ export function useRouteDetails(routeId: string | undefined) {
       product_description?: string;
       items?: ParsedOrderItem[];
       city?: string;
+      pedido_id?: string;
     }>) => {
       const ordersToInsert = orders.map((o, index) => ({
         route_id: routeId!,
@@ -253,6 +255,7 @@ export function useRouteDetails(routeId: string | undefined) {
         product_description: o.product_description || null,
         sequence_order: index + 1,
         city: o.city || null,
+        pedido_id: o.pedido_id || null,
       }));
 
       const { data: insertedOrders, error } = await supabase
@@ -263,8 +266,7 @@ export function useRouteDetails(routeId: string | undefined) {
       if (error) throw error;
       if (!insertedOrders) throw new Error('Falha ao inserir pedidos');
 
-      // Map inserted orders back to originals using composite key (name + weight)
-      // PostgreSQL does NOT guarantee insert return order matches input order
+      // Map inserted orders back to originals using pedido_id (deterministic) or name+weight (fallback)
       const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
       
       const itemsToInsert: Array<{
@@ -274,18 +276,24 @@ export function useRouteDetails(routeId: string | undefined) {
         quantity: number;
       }> = [];
 
-      // Build a map from originals that have items, keyed by normalized name + weight
       const originalsWithItems = orders.filter(o => o.items && o.items.length > 0);
       const usedInsertedIds = new Set<string>();
 
       for (const original of originalsWithItems) {
-        const normName = normalize(original.client_name);
-        // Find matching inserted order by name + weight (not yet used)
-        const match = insertedOrders.find(io => 
-          !usedInsertedIds.has(io.id) &&
-          normalize(io.client_name) === normName &&
-          Math.abs(Number(io.weight_kg) - original.weight_kg) < 0.1
-        );
+        // Priority 1: match by pedido_id (deterministic)
+        let match = original.pedido_id
+          ? insertedOrders.find(io => !usedInsertedIds.has(io.id) && io.pedido_id === original.pedido_id)
+          : undefined;
+
+        // Priority 2: fallback to name + weight
+        if (!match) {
+          const normName = normalize(original.client_name);
+          match = insertedOrders.find(io => 
+            !usedInsertedIds.has(io.id) &&
+            normalize(io.client_name) === normName &&
+            Math.abs(Number(io.weight_kg) - original.weight_kg) < 0.1
+          );
+        }
         
         if (match) {
           usedInsertedIds.add(match.id);
@@ -1262,28 +1270,42 @@ export function useRouteDetails(routeId: string | undefined) {
       let matched = 0;
 
       for (const order of route.orders) {
-        // Try matching by normalized client name + closest weight
-        const nc = normalize(order.client_name);
-        const candidates = advByClientMap.get(nc) || [];
-        
         let bestMatch: ParsedOrder | undefined;
-        if (candidates.length === 1) {
-          bestMatch = candidates[0];
-        } else if (candidates.length > 1) {
-          // Pick closest weight
-          bestMatch = candidates.reduce((best, c) => {
-            const diffBest = Math.abs(Number(order.weight_kg) - (best?.weight_kg || 0));
-            const diffC = Math.abs(Number(order.weight_kg) - c.weight_kg);
-            return diffC < diffBest ? c : best;
-          });
+
+        // Priority 1: match by pedido_id (deterministic)
+        const orderPedidoId = (order as any).pedido_id;
+        if (orderPedidoId) {
+          const nid = String(orderPedidoId).replace(/\D/g, '').replace(/^0+/, '');
+          if (nid && advByIdMap.has(nid)) {
+            bestMatch = advByIdMap.get(nid);
+            advByIdMap.delete(nid); // consume it
+          }
+        }
+
+        // Priority 2: fallback to client name + weight
+        if (!bestMatch) {
+          const nc = normalize(order.client_name);
+          const candidates = advByClientMap.get(nc) || [];
+          
+          if (candidates.length === 1) {
+            bestMatch = candidates[0];
+          } else if (candidates.length > 1) {
+            bestMatch = candidates.reduce((best, c) => {
+              const diffBest = Math.abs(Number(order.weight_kg) - (best?.weight_kg || 0));
+              const diffC = Math.abs(Number(order.weight_kg) - c.weight_kg);
+              return diffC < diffBest ? c : best;
+            });
+          }
+
+          if (bestMatch) {
+            const remaining = (advByClientMap.get(nc) || []).filter(c => c !== bestMatch);
+            if (remaining.length > 0) advByClientMap.set(nc, remaining);
+            else advByClientMap.delete(nc);
+          }
         }
 
         if (bestMatch && bestMatch.items && bestMatch.items.length > 0) {
           matched++;
-          // Remove used candidate
-          const remaining = candidates.filter(c => c !== bestMatch);
-          if (remaining.length > 0) advByClientMap.set(nc, remaining);
-          else advByClientMap.delete(nc);
 
           for (const item of bestMatch.items) {
             itemsToInsert.push({
