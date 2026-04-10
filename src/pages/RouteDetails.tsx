@@ -192,6 +192,7 @@ export default function RouteDetails() {
           product_description: o.product_description,
           items: o.items,
           city: o.city,
+          pedido_id: o.pedido_id,
         })),
         {
           onSuccess: () => {
