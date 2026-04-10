@@ -153,25 +153,34 @@ export function useRouteDetails(routeId: string | undefined) {
 
       if (ordersError) throw ordersError;
 
-      // Fetch order items for all orders
+      // Fetch order items for all orders — batched to avoid Supabase 1000-row limit
       const orderIds = (orders ?? []).map(o => o.id);
       let orderItems: Record<string, OrderItem[]> = {};
       
       if (orderIds.length > 0) {
-        const { data: items, error: itemsError } = await supabase
-          .from('order_items')
-          .select('*')
-          .in('order_id', orderIds);
+        const BATCH_SIZE = 200;
+        const allItems: any[] = [];
+        for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
+          const chunk = orderIds.slice(i, i + BATCH_SIZE);
+          const { data: items, error: itemsError } = await supabase
+            .from('order_items')
+            .select('*')
+            .in('order_id', chunk);
 
-        if (!itemsError && items) {
-          // Group items by order_id
-          items.forEach(item => {
-            if (!orderItems[item.order_id]) {
-              orderItems[item.order_id] = [];
-            }
-            orderItems[item.order_id].push(item as OrderItem);
-          });
+          if (!itemsError && items) {
+            allItems.push(...items);
+          }
         }
+        
+        // Group items by order_id
+        allItems.forEach(item => {
+          if (!orderItems[item.order_id]) {
+            orderItems[item.order_id] = [];
+          }
+          orderItems[item.order_id].push(item as OrderItem);
+        });
+        
+        console.log(`[useRouteDetails] Fetched ${allItems.length} order_items for ${orderIds.length} orders`);
       }
 
       // Attach items to orders
@@ -1259,10 +1268,11 @@ export function useRouteDetails(routeId: string | undefined) {
         }
       }
 
-      // Delete existing order_items for this route
+      // Delete existing order_items for this route — batched to avoid limits
       const orderIds = route.orders.map(o => o.id);
-      if (orderIds.length > 0) {
-        await supabase.from('order_items').delete().in('order_id', orderIds);
+      for (let i = 0; i < orderIds.length; i += 200) {
+        const chunk = orderIds.slice(i, i + 200);
+        await supabase.from('order_items').delete().in('order_id', chunk);
       }
 
       const itemsToInsert: Array<{ order_id: string; product_name: string; weight_kg: number; quantity: number }> = [];
