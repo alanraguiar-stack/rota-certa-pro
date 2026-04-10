@@ -5,11 +5,10 @@
  * Não há mais vínculo fixo placa→cidade.
  * 
  * Agrupamentos operacionais:
- * 1. Barueri + Jandira + Itapevi
+ * 1. Barueri + Jandira + Itapevi + Santana de Parnaíba + Pirapora + Cajamar
  * 2. Cotia + Vargem Grande + Embu/Embu das Artes + Taboão da Serra
  * 3. Osasco (+ bairros SP: Parque Imperial, Jaguaré, Rio Pequeno, Santa Maria)
- * 4. Santana de Parnaíba + Pirapora + Cajamar
- * 5. Caieiras (+ Perus de SP)
+ * 4. Caieiras (+ Perus de SP)
  */
 
 export interface NeighborhoodException {
@@ -156,11 +155,10 @@ export function areNeighborhoodsAdjacent(nhA: string, nhB: string): boolean {
 /**
  * Regras de território — o motor seleciona automaticamente o caminhão.
  * 
- * Agrupamento 1: Barueri (âncora) + Jandira + Itapevi
+ * Agrupamento 1: Barueri (âncora) + Jandira + Itapevi + Santana de Parnaíba + Pirapora + Cajamar
  * Agrupamento 2: Cotia (âncora) + Vargem Grande + Embu + Embu das Artes + Taboão
  * Agrupamento 3: Osasco (âncora) + bairros SP (Parque Imperial, Jaguaré, Rio Pequeno)
- * Agrupamento 4: Santana de Parnaíba (âncora) + Pirapora + Cajamar
- * Agrupamento 5: Caieiras (âncora) + Perus (SP)
+ * Agrupamento 4: Caieiras (âncora) + Perus (SP)
  * Apoio: São Paulo (restante) + excedentes
  */
 export const TERRITORY_RULES: TerritoryRule[] = [
