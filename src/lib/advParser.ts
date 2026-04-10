@@ -1274,11 +1274,16 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     if (!rowText) continue;
     
     // Detectar linha de Cliente
-    const clientMatch = rowText.match(/cliente\s*:\s*([A-ZÁÉÍÓÚÀÃÕÇÂÊÎÔÛÄËÏÖÜ\s\-\.]+?)(?:\s+\d{11,14})?$/i);
+    const normalizedRowText = normalizeForMatch(rowText);
+    const clientMatch = normalizedRowText.match(/cliente\s*:\s*([a-z\s\-\.]+?)(?:\s+\d{11,14})?$/i);
+    if (clientMatch) {
+      // Re-extract from original rowText to preserve proper casing
+      const origMatch = rowText.match(/[Cc]liente\s*:\s*(.+?)(?:\s+\d{11,14})?$/);
+      const clientName = origMatch ? origMatch[1].trim() : clientMatch[1].trim();
     if (clientMatch) {
       flushCurrentOrder();
       
-      currentClient = normalizeText(clientMatch[1].trim());
+      currentClient = normalizeText(clientName);
       currentVendaId = '';
       currentItems = [];
       inItemTable = false;
@@ -1308,7 +1313,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     
     // MÉTODO 2: Fallback — regex no texto concatenado
     if (!vendaDetected) {
-      const vendaMatch = rowText.match(/venda\s*n[º°]?\s*:\s*(\d+)/i);
+      const vendaMatch = normalizedRowText.match(/venda\s*n[o]?\s*:?\s*(\d+)/i) || rowText.match(/venda\s*n[º°]?\s*:\s*(\d+)/i);
       if (vendaMatch) {
         flushCurrentOrder();
         currentVendaId = vendaMatch[1];
@@ -1323,13 +1328,13 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     if (vendaDetected) continue;
     
     // Detectar header de tabela de itens
-    if (/descri[çc][ãa]o/i.test(rowText) && /qtde\.?|quantidade/i.test(rowText)) {
+    if (/descri.?[ao]/i.test(normalizedRowText) && /qtde\.?|quantidade/i.test(normalizedRowText)) {
       inItemTable = true;
-      // Mapear colunas de item
-      const cells = row.map(c => String(c ?? '').toLowerCase());
+      // Mapear colunas de item usando texto normalizado
+      const cells = row.map(c => normalizeForMatch(String(c ?? '')));
       itemColumnMap = {
-        descricao: cells.findIndex(c => /descri[çc][ãa]o/i.test(c)),
-        qtde: cells.findIndex(c => /qtde\.?|quantidade/i.test(c)),
+        descricao: cells.findIndex(c => /descri.?[ao]/.test(c)),
+        qtde: cells.findIndex(c => /qtde\.?|quantidade/.test(c)),
       };
       console.log('[ADV Excel] Item columns:', itemColumnMap);
       continue;
