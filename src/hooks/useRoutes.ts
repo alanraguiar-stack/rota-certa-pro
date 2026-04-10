@@ -263,7 +263,10 @@ export function useRouteDetails(routeId: string | undefined) {
       if (error) throw error;
       if (!insertedOrders) throw new Error('Falha ao inserir pedidos');
 
-      // Insert order items for each order
+      // Map inserted orders back to originals using composite key (name + weight)
+      // PostgreSQL does NOT guarantee insert return order matches input order
+      const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      
       const itemsToInsert: Array<{
         order_id: string;
         product_name: string;
@@ -271,28 +274,52 @@ export function useRouteDetails(routeId: string | undefined) {
         quantity: number;
       }> = [];
 
-      insertedOrders.forEach((insertedOrder, index) => {
-        const originalOrder = orders[index];
-        if (originalOrder.items && originalOrder.items.length > 0) {
-          originalOrder.items.forEach(item => {
+      // Build a map from originals that have items, keyed by normalized name + weight
+      const originalsWithItems = orders.filter(o => o.items && o.items.length > 0);
+      const usedInsertedIds = new Set<string>();
+
+      for (const original of originalsWithItems) {
+        const normName = normalize(original.client_name);
+        // Find matching inserted order by name + weight (not yet used)
+        const match = insertedOrders.find(io => 
+          !usedInsertedIds.has(io.id) &&
+          normalize(io.client_name) === normName &&
+          Math.abs(Number(io.weight_kg) - original.weight_kg) < 0.1
+        );
+        
+        if (match) {
+          usedInsertedIds.add(match.id);
+          for (const item of original.items!) {
             itemsToInsert.push({
-              order_id: insertedOrder.id,
+              order_id: match.id,
               product_name: item.product_name,
               weight_kg: item.weight_kg,
               quantity: item.quantity,
             });
-          });
+          }
+        } else {
+          console.warn('[addOrders] No match for items of:', original.client_name, original.weight_kg);
         }
-      });
+      }
+
+      console.log(`[addOrders] ${itemsToInsert.length} items prepared for ${originalsWithItems.length} orders with details`);
 
       if (itemsToInsert.length > 0) {
-        const { error: itemsError } = await supabase
-          .from('order_items')
-          .insert(itemsToInsert);
+        // Batch insert in chunks of 500
+        for (let i = 0; i < itemsToInsert.length; i += 500) {
+          const batch = itemsToInsert.slice(i, i + 500);
+          const { error: itemsError } = await supabase
+            .from('order_items')
+            .insert(batch);
 
-        if (itemsError) {
-          console.error('Failed to insert order items:', itemsError);
-          // Don't throw - orders are already inserted
+          if (itemsError) {
+            console.error('[addOrders] Failed to insert order items batch:', itemsError);
+            toast({
+              title: 'Aviso: falha ao salvar detalhes dos produtos',
+              description: itemsError.message,
+              variant: 'destructive',
+            });
+          }
         }
       }
 

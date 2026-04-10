@@ -258,6 +258,9 @@ export default function NewRoute() {
         await markAsRouted(recoveredOrders.map(o => o.id), route.id);
       }
 
+      const ordersWithItems = validOrders.filter(o => o.items && o.items.length > 0);
+      console.log(`[NewRoute] Navigating with ${validOrders.length} orders, ${ordersWithItems.length} have items (${ordersWithItems.reduce((s, o) => s + (o.items?.length || 0), 0)} total items)`);
+
       navigate(`/rota/${route.id}`, {
         state: { 
           pendingOrders: validOrders,
