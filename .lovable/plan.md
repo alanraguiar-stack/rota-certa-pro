@@ -1,49 +1,58 @@
 
+Objetivo: corrigir de vez o Romaneio de Carga para que ele mostre somente o compilado dos itens do caminhão, nunca nomes de clientes, e eliminar a sobreposição no rodapé do PDF.
 
-# Corrigir Romaneio de Carga para formato correto
+Diagnóstico confirmado
+- O problema atual está no próprio código do romaneio, não no dado enviado por você.
+- Em `src/components/route/LoadingManifest.tsx`, a função `consolidateProducts` ainda tem um fallback que gera linhas como `Pedido - {cliente}` quando faltam itens detalhados em todos os pedidos. É exatamente isso que faz aparecer nome de cliente no romaneio de carga.
+- O PDF também usa posicionamento fixo para conferência/rodapé, então quando a tabela cresce o bloco final pode encostar ou sobrepor.
+- O parser ADV já carrega itens detalhados com `product_name`, `quantity` e `weight_kg`, então o romaneio deve ser guiado só por esses itens.
 
-## Problema
-O PDF gerado atualmente usa 4 colunas (#, Descrição, UN, Qtde) e layout incorreto. O modelo correto tem 3 colunas (#, Produto, Peso Total) com quantidade e unidade combinadas numa coluna só (ex: "3 fardos", "1.0kg", "2 caixas").
+O que vou ajustar
+1. Remover definitivamente cliente do Romaneio de Carga
+- Eliminar o fallback por cliente em `LoadingManifest.tsx`.
+- O romaneio de carga passará a consolidar apenas `order.items`.
+- Se um caminhão estiver sem itens detalhados, o sistema não vai mais “inventar” linhas por cliente; vai exibir aviso claro de detalhamento ausente.
 
-## Diferenças entre o atual e o modelo correto
+2. Consolidar somente por item real
+- Agrupar por produto normalizado + unidade resolvida.
+- Para itens de peso: somar `weight_kg`.
+- Para itens volumétricos: somar `quantity`.
+- O resultado será no formato operacional que você descreveu, por exemplo:
+  - `MORTADELA X — 50 kg`
+  - `REFRIGERANTE Y — 15 fardos`
 
-| Elemento | Atual (errado) | Modelo (correto) |
-|---|---|---|
-| Título | "Romaneio" | "ROMANEIO DE CARGA" |
-| Cabeçalho | Linha única com todos dados | Box com VEICULO/DATA/CARGA TOTAL/CAPACIDADE |
-| Seção | Nenhuma | "PRODUTOS PARA SEPARACAO" |
-| Tabela | 4 colunas (#, Descrição, UN, Qtde) | 3 colunas (#, Produto, Peso Total) |
-| Qtde | Número separado da unidade | Combinado: "3 fardos", "120.0kg" |
-| Total | Sem linha de total | Linha "TOTAL" com peso total |
-| Conferência | 1 assinatura | "CONFERENCIA DE CARGA" + Separador + Conferente |
-| Data | "Data: ___/___/___" | "Data da conferencia: ___/___/______ Hora: ___:___" |
-| Footer | Com timestamp | "Gerado por Rota Certa" |
-| Clientes | Lista no cabeçalho | Sem lista de clientes |
+3. Ajustar o TOTAL e a semântica da tabela
+- Manter a tabela com 3 colunas: `#`, `Produto`, `Peso Total`.
+- A última coluna continuará mostrando quantidade + unidade compilada, como no modelo correto.
+- O TOTAL continuará mostrando a carga total do caminhão.
 
-## Mudanças em `src/components/route/LoadingManifest.tsx`
+4. Corrigir paginação e rodapé do PDF
+- Refazer a área de conferência/rodapé para respeitar a altura real da tabela.
+- Se não houver espaço suficiente, a conferência vai para a próxima página em vez de sobrepor.
+- Garantir footer limpo no final da página.
 
-### 1. Nova função `formatQtyWithUnit`
-Combinar quantidade + nome da unidade por extenso:
-- `3` + `fardo` → `"3 fardos"`
-- `120.0` + `kg` → `"120.0kg"`
-- `1` + `caixa` → `"1 caixa"`
-- Incluir plural automático (fardo/fardos, caixa/caixas, etc.)
+5. Alinhar preview da tela com a mesma regra
+- A pré-visualização HTML também ficará sem nome de cliente.
+- Quando faltarem itens detalhados, mostrar aviso operacional em vez de lista errada.
 
-### 2. Refazer `generateLoadingManifestPDF`
-Seguir exatamente o layout do modelo:
-- Título "ROMANEIO DE CARGA" grande e centralizado
-- Número da rota abaixo
-- Box com VEICULO / DATA / CARGA TOTAL / CAPACIDADE usando `autoTable` com 2 linhas
-- Subtítulo "PRODUTOS PARA SEPARACAO"
-- Tabela de 3 colunas: #, Produto, Peso Total (alinhado à direita)
-- Linha de TOTAL no final da tabela
-- Seção "CONFERENCIA DE CARGA" com Separador e Conferente lado a lado
-- Box "Data da conferencia: ___/___/______ Hora: ___:___"
-- Footer "Gerado por Rota Certa"
+6. Verificar componentes paralelos que ainda usam fallback ruim
+- Revisar também `src/components/route/TruckManifestCards.tsx`, `SideBySideManifests.tsx` e `LoadConsolidationView.tsx` para evitar que outro fluxo volte a gerar romaneio por cliente ou por `product_description` concatenado.
 
-### 3. Atualizar preview HTML (tela)
-Alinhar a pré-visualização na tela ao mesmo formato do PDF para consistência visual.
+Arquivos a ajustar
+- `src/components/route/LoadingManifest.tsx`
+- `src/components/route/TruckManifestCards.tsx`
+- possivelmente:
+  - `src/components/route/SideBySideManifests.tsx`
+  - `src/components/route/LoadConsolidationView.tsx`
 
-## Arquivo
-- `src/components/route/LoadingManifest.tsx` — refatorar PDF e preview
+Resultado esperado
+- nenhum nome de cliente no romaneio de carga
+- 1 produto por linha
+- quantidades compiladas corretamente por caminhão
+- tabela fiel ao relatório detalhado importado no início
+- rodapé e conferência sem sobreposição
+- aviso claro quando faltarem itens detalhados
 
+Detalhe técnico importante
+- A correção principal é remover o fallback `Pedido - cliente` e tornar o romaneio estritamente dependente de `order_items`.
+- O PDF de referência que você anexou confirma exatamente esse comportamento: só produtos compilados, em várias páginas quando necessário, sem cliente aparecendo.
