@@ -12,11 +12,11 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName } from '@/hooks/useProductUnits';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
-const WEIGHT_UNITS = ['kg', 'g'];
+const WEIGHT_UNIT_KEYS = ['kg', 'g'];
 
 interface TruckManifestCardsProps {
   routeName: string;
@@ -34,7 +34,8 @@ interface TruckManifestCardsProps {
 interface ConsolidatedProduct {
   product: string;
   totalWeight: number;
-  orderCount: number;
+  qty: number;
+  unitType: string;
 }
 
 function formatWeight(weight: number): string {
@@ -64,39 +65,57 @@ function toASCII(text: string): string {
 }
 
 /**
- * Consolidate products from orders - uses order_items when available
- * Falls back to order.weight_kg with client_name when no items
+ * Resolve unit for a product name — same logic as LoadingManifest
  */
-function consolidateProducts(orders: Order[]): ConsolidatedProduct[] {
-  const productMap = new Map<string, { weight: number; count: number }>();
+function resolveUnit(productName: string, getUnitForProduct: (name: string) => string): string {
+  const inferred = inferUnitFromName(productName);
+  if (inferred !== 'kg') return inferred;
+  return getUnitForProduct(productName);
+}
+
+function normalizeProductKey(name: string): string {
+  return name.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Consolidate products from orders — item-by-item, never by concatenated description.
+ * Uses quantity for volumetric units, weight_kg for weight units.
+ */
+function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
+  const productMap = new Map<string, { product: string; weight: number; qty: number; unitType: string }>();
+  const allLackDetails = orders.every(o => !o.items || o.items.length === 0);
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
-      // Use detailed items when available
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
-        const existing = productMap.get(productName) || { weight: 0, count: 0 };
-        productMap.set(productName, {
-          weight: existing.weight + Number(item.weight_kg),
-          count: existing.count + 1,
-        });
+        const key = normalizeProductKey(productName);
+        const unitType = resolveUnit(productName, getUnitForProduct);
+        const existing = productMap.get(key) || { product: productName, weight: 0, qty: 0, unitType };
+        
+        if (isWeightUnit(unitType)) {
+          existing.qty += Number(item.weight_kg);
+          existing.weight += Number(item.weight_kg);
+        } else {
+          existing.qty += (item.quantity || 1);
+          existing.weight += Number(item.weight_kg);
+        }
+        
+        productMap.set(key, existing);
       });
-    } else {
-      // Fallback: use product_description or client name with order total weight
-      const label = order.product_description || `Pedido ${order.client_name}`;
-      const existing = productMap.get(label) || { weight: 0, count: 0 };
-      productMap.set(label, {
-        weight: existing.weight + Number(order.weight_kg),
-        count: existing.count + 1,
-      });
+    } else if (allLackDetails) {
+      const label = `Pedido - ${order.client_name}`;
+      const key = normalizeProductKey(label);
+      productMap.set(key, { product: label, weight: Number(order.weight_kg), qty: Number(order.weight_kg), unitType: 'kg' });
     }
   });
   
-  return Array.from(productMap.entries())
-    .map(([product, data]) => ({
-      product,
+  return Array.from(productMap.values())
+    .map(data => ({
+      product: data.product,
       totalWeight: data.weight,
-      orderCount: data.count,
+      qty: data.qty,
+      unitType: data.unitType,
     }))
     .sort((a, b) => a.product.localeCompare(b.product));
 }
@@ -156,18 +175,16 @@ function generateLoadingPDF(
   
   autoTable(doc, {
     startY: 73,
-    head: [['#', 'Produto', 'Peso Total']],
+    head: [['#', 'Produto', 'UN', 'Qtde']],
     body: products.map((p, idx) => {
-      let display = formatWeight(p.totalWeight);
-      if (getUnitForProduct) {
-        const unit = getUnitForProduct(p.product);
-        if (!WEIGHT_UNITS.includes(unit)) {
-          display = `${p.orderCount} ${unit}${p.orderCount > 1 ? 's' : ''}`;
-        }
-      }
+      const abbrev = getUnitAbbrev(p.unitType);
+      const display = isWeightUnit(p.unitType)
+        ? (p.qty % 1 === 0 ? String(p.qty) : p.qty.toFixed(2))
+        : String(Math.round(p.qty));
       return [
         String(idx + 1),
         toASCII(p.product),
+        abbrev,
         display,
       ];
     }),
@@ -177,9 +194,10 @@ function generateLoadingPDF(
     footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold' },
     styles: { fontSize: 10 },
     columnStyles: {
-      0: { cellWidth: 15, halign: 'center' },
+      0: { cellWidth: 10, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 40, halign: 'right' },
+      2: { cellWidth: 15, halign: 'center' },
+      3: { cellWidth: 22, halign: 'right' },
     },
   });
   
@@ -353,7 +371,7 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
   
   const handleDownloadAllLoading = () => {
     trucks.forEach((truckData, index) => {
-      const products = consolidateProducts(truckData.orders);
+      const products = consolidateProducts(truckData.orders, getUnitForProduct);
       setTimeout(() => {
         const doc = generateLoadingPDF(
           routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
@@ -428,7 +446,7 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
       {/* Truck Cards Grid */}
       <div className="grid gap-6 md:grid-cols-2">
         {trucks.map((truckData) => {
-          const products = consolidateProducts(truckData.orders);
+          const products = consolidateProducts(truckData.orders, getUnitForProduct);
           
           const handleDownloadLoading = () => {
             const doc = generateLoadingPDF(
@@ -574,11 +592,9 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
                       <div key={idx} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-muted/30">
                         <span className="truncate flex-1">{product.product}</span>
                         <Badge variant="secondary" className="ml-2 shrink-0">
-                          {(() => {
-                            const unit = getUnitForProduct(product.product);
-                            if (WEIGHT_UNITS.includes(unit)) return formatWeight(product.totalWeight);
-                            return `${product.orderCount} ${unit}${product.orderCount > 1 ? 's' : ''}`;
-                          })()}
+                          {isWeightUnit(product.unitType)
+                            ? formatWeight(product.totalWeight)
+                            : `${Math.round(product.qty)} ${getUnitAbbrev(product.unitType)}`}
                         </Badge>
                       </div>
                     ))}

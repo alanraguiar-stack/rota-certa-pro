@@ -1461,8 +1461,8 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       
       currentItems.push({
         product_name: normalizeText(descricao),
-        weight_kg: itemWeightKg > 0 ? itemWeightKg : qty, // Fallback: use qty as weight if no unit info
-        quantity: itemQuantity > 0 ? itemQuantity : 1,
+        weight_kg: itemWeightKg,
+        quantity: isWeightBased ? 1 : (itemQuantity > 0 ? itemQuantity : 1),
       });
       console.log('[ADV Excel] ✅ Item:', descricao.substring(0, 35), '| qty:', qty, '| source:', extractionSource, '| unit:', unitType || 'N/A');
       continue;

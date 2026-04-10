@@ -37,10 +37,11 @@ interface ConsolidatedProduct {
 }
 
 function ordersLackDetails(orders: Order[]): boolean {
-  return orders.every(order => 
-    (!order.items || order.items.length === 0) && 
-    (!order.product_description || order.product_description === 'Sem itens detalhados')
-  );
+  return orders.every(order => !order.items || order.items.length === 0);
+}
+
+function countOrdersWithoutItems(orders: Order[]): number {
+  return orders.filter(order => !order.items || order.items.length === 0).length;
 }
 
 /**
@@ -77,10 +78,11 @@ function normalizeProductKey(name: string): string {
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
   const productMap = new Map<string, { product: string; qty: number; unitType: string }>();
   
-  const noDetails = ordersLackDetails(orders);
+  const allLackDetails = ordersLackDetails(orders);
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
+      // Consolidar item a item — cada item vira uma linha
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
         const key = normalizeProductKey(productName);
@@ -95,23 +97,14 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
         
         productMap.set(key, existing);
       });
-    } else if (noDetails) {
-      // Fallback: sem itens detalhados, usar peso bruto por cliente
+    } else if (allLackDetails) {
+      // TODOS sem detalhamento: fallback por cliente/peso
       const label = `Pedido - ${order.client_name}`;
       const key = normalizeProductKey(label);
       productMap.set(key, { product: label, qty: Number(order.weight_kg), unitType: 'kg' });
-    } else {
-      const label = order.product_description || `Pedido ${order.client_name}`;
-      const key = normalizeProductKey(label);
-      const unitType = resolveUnit(label, getUnitForProduct);
-      const existing = productMap.get(key) || { product: label, qty: 0, unitType };
-      if (isWeightUnit(unitType)) {
-        existing.qty += Number(order.weight_kg);
-      } else {
-        existing.qty += 1;
-      }
-      productMap.set(key, existing);
     }
+    // Se parcial (alguns com items, outros sem): ignorar pedidos sem items
+    // O aviso de dados incompletos será exibido separadamente
   });
   
   return Array.from(productMap.values())
@@ -464,35 +457,44 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
             </div>
             
             {/* Warning for missing details */}
-            {ordersLackDetails(selectedTruck.orders) && (
-              <Alert variant="default" className="mx-4 mt-4 border-warning/50 bg-warning/10">
-                <AlertTriangle className="h-4 w-4 text-warning" />
-                <AlertDescription className="flex items-center justify-between gap-4">
-                  <span>Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.</span>
-                  {onReimportItems && (
-                    <>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept=".csv,.xlsx,.xls,.txt"
-                        className="hidden"
-                        onChange={handleReimportFile}
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0 gap-2"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={isReimporting}
-                      >
-                        <Upload className="h-4 w-4" />
-                        {isReimporting ? 'Importando...' : 'Reimportar Detalhamento'}
-                      </Button>
-                    </>
-                  )}
-                </AlertDescription>
-              </Alert>
-            )}
+            {(() => {
+              const missingCount = countOrdersWithoutItems(selectedTruck.orders);
+              const allMissing = ordersLackDetails(selectedTruck.orders);
+              if (missingCount === 0) return null;
+              return (
+                <Alert variant="default" className="mx-4 mt-4 border-warning/50 bg-warning/10">
+                  <AlertTriangle className="h-4 w-4 text-warning" />
+                  <AlertDescription className="flex items-center justify-between gap-4">
+                    <span>
+                      {allMissing
+                        ? 'Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.'
+                        : `${missingCount} pedido(s) deste caminhão estão sem itens detalhados e foram omitidos da consolidação. Reimporte o ADV para incluí-los.`}
+                    </span>
+                    {onReimportItems && (
+                      <>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept=".csv,.xlsx,.xls,.txt"
+                          className="hidden"
+                          onChange={handleReimportFile}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="shrink-0 gap-2"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isReimporting}
+                        >
+                          <Upload className="h-4 w-4" />
+                          {isReimporting ? 'Importando...' : 'Reimportar Detalhamento'}
+                        </Button>
+                      </>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              );
+            })()}
             
             {/* Consolidated Products Table */}
             <div className="p-4">
