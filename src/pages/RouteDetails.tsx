@@ -68,6 +68,7 @@ export default function RouteDetails() {
     reorderSingleDelivery,
     lockTruckRoute,
     unlockTruckRoute,
+    reimportItems,
     refetch 
   } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
@@ -835,6 +836,9 @@ export default function RouteDetails() {
                   routeName={route.name}
                   date={new Date(route.created_at).toLocaleDateString('pt-BR')}
                   trucks={truckDataForComponents}
+                  routeId={route.id}
+                  onReimportItems={(advOrders) => reimportItems.mutateAsync(advOrders)}
+                  isReimporting={reimportItems.isPending}
                 />
               </div>
             </details>

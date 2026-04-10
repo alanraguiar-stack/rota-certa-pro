@@ -1,13 +1,16 @@
-import { useState } from 'react';
-import { FileDown, Printer, Truck, Package, ClipboardCheck, Scale, AlertTriangle } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { FileDown, Printer, Truck, Package, ClipboardCheck, Scale, AlertTriangle, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
+import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER, ParsedOrder } from '@/types';
 import { cn } from '@/lib/utils';
 import { useProductUnits } from '@/hooks/useProductUnits';
+import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
+import { decodeFileContent } from '@/lib/encoding';
+import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -20,6 +23,9 @@ interface LoadingManifestProps {
     totalWeight: number;
     occupancyPercent: number;
   }>;
+  routeId?: string;
+  onReimportItems?: (advOrders: ParsedOrder[]) => Promise<any>;
+  isReimporting?: boolean;
 }
 
 interface ConsolidatedProduct {
@@ -240,9 +246,63 @@ function generateLoadingManifestPDF(
   return doc;
 }
 
-export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProps) {
+export function LoadingManifest({ routeName, date, trucks, routeId, onReimportItems, isReimporting }: LoadingManifestProps) {
   const [selectedTruckIndex, setSelectedTruckIndex] = useState(0);
   const { getUnitForProduct } = useProductUnits();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const handleReimportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onReimportItems) return;
+    
+    try {
+      let rows: unknown[][] = [];
+      
+      if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
+        const text = await decodeFileContent(file);
+        const delimiter = text.includes(';') ? ';' : ',';
+        rows = text.split('\n').map(line => line.split(delimiter));
+      } else {
+        // Excel file
+        const XLSX = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][];
+      }
+      
+      if (!isADVExcelFormat(rows)) {
+        toast({
+          title: 'Formato não reconhecido',
+          description: 'O arquivo não parece ser um relatório de Detalhe das Vendas (ADV).',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      const advOrders = parseADVDetailExcel(rows);
+      if (advOrders.length === 0) {
+        toast({
+          title: 'Nenhum item encontrado',
+          description: 'O arquivo não contém itens detalhados de produtos.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      
+      await onReimportItems(advOrders);
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao processar arquivo',
+        description: err.message || 'Erro desconhecido',
+        variant: 'destructive',
+      });
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
   
   const selectedTruck = trucks[selectedTruckIndex];
   
@@ -420,10 +480,31 @@ export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProp
             
             {/* Warning for missing details */}
             {selectedTruck && ordersLackDetails(selectedTruck.orders) && (
-              <Alert variant="default" className="mx-4 mt-4 border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
-                <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                <AlertDescription className="text-yellow-800 dark:text-yellow-200">
-                  Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.
+              <Alert variant="default" className="mx-4 mt-4 border-warning/50 bg-warning/10">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <AlertDescription className="flex items-center justify-between gap-4">
+                  <span>Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.</span>
+                  {onReimportItems && (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv,.xlsx,.xls,.txt"
+                        className="hidden"
+                        onChange={handleReimportFile}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-2"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isReimporting}
+                      >
+                        <Upload className="h-4 w-4" />
+                        {isReimporting ? 'Importando...' : 'Reimportar Detalhamento'}
+                      </Button>
+                    </>
+                  )}
                 </AlertDescription>
               </Alert>
             )}
