@@ -248,7 +248,7 @@ function generateLoadingManifestPDF(
     doc.setFontSize(8);
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(150, 100, 0);
-    doc.text('* Detalhamento de produtos nao importado - listando pedidos individuais por cliente/peso', margin, y);
+    doc.text('* Detalhamento de produtos nao importado. Reimporte o arquivo ADV para gerar o romaneio.', margin, y);
     doc.setTextColor(0, 0, 0);
     y += 6;
   }
@@ -547,7 +547,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                   <AlertDescription className="flex items-center justify-between gap-4">
                     <span>
                       {allMissing
-                        ? 'Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.'
+                        ? 'Detalhamento de produtos não importado. Reimporte o arquivo ADV para gerar o romaneio.'
                         : `${missingCount} pedido(s) deste caminhão estão sem itens detalhados e foram omitidos da consolidação. Reimporte o ADV para incluí-los.`}
                     </span>
                     {onReimportItems && (

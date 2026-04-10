@@ -1270,28 +1270,42 @@ export function useRouteDetails(routeId: string | undefined) {
       let matched = 0;
 
       for (const order of route.orders) {
-        // Try matching by normalized client name + closest weight
-        const nc = normalize(order.client_name);
-        const candidates = advByClientMap.get(nc) || [];
-        
         let bestMatch: ParsedOrder | undefined;
-        if (candidates.length === 1) {
-          bestMatch = candidates[0];
-        } else if (candidates.length > 1) {
-          // Pick closest weight
-          bestMatch = candidates.reduce((best, c) => {
-            const diffBest = Math.abs(Number(order.weight_kg) - (best?.weight_kg || 0));
-            const diffC = Math.abs(Number(order.weight_kg) - c.weight_kg);
-            return diffC < diffBest ? c : best;
-          });
+
+        // Priority 1: match by pedido_id (deterministic)
+        const orderPedidoId = (order as any).pedido_id;
+        if (orderPedidoId) {
+          const nid = String(orderPedidoId).replace(/\D/g, '').replace(/^0+/, '');
+          if (nid && advByIdMap.has(nid)) {
+            bestMatch = advByIdMap.get(nid);
+            advByIdMap.delete(nid); // consume it
+          }
+        }
+
+        // Priority 2: fallback to client name + weight
+        if (!bestMatch) {
+          const nc = normalize(order.client_name);
+          const candidates = advByClientMap.get(nc) || [];
+          
+          if (candidates.length === 1) {
+            bestMatch = candidates[0];
+          } else if (candidates.length > 1) {
+            bestMatch = candidates.reduce((best, c) => {
+              const diffBest = Math.abs(Number(order.weight_kg) - (best?.weight_kg || 0));
+              const diffC = Math.abs(Number(order.weight_kg) - c.weight_kg);
+              return diffC < diffBest ? c : best;
+            });
+          }
+
+          if (bestMatch) {
+            const remaining = (advByClientMap.get(nc) || []).filter(c => c !== bestMatch);
+            if (remaining.length > 0) advByClientMap.set(nc, remaining);
+            else advByClientMap.delete(nc);
+          }
         }
 
         if (bestMatch && bestMatch.items && bestMatch.items.length > 0) {
           matched++;
-          // Remove used candidate
-          const remaining = candidates.filter(c => c !== bestMatch);
-          if (remaining.length > 0) advByClientMap.set(nc, remaining);
-          else advByClientMap.delete(nc);
 
           for (const item of bestMatch.items) {
             itemsToInsert.push({
