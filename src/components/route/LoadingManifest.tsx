@@ -124,20 +124,51 @@ function formatQty(qty: number, unitType: string): string {
   return String(Math.round(qty));
 }
 
+/**
+ * Combina quantidade + unidade por extenso para a coluna "Peso Total" do romaneio.
+ * Ex: 3 + fardo → "3 fardos", 120.5 + kg → "120.5kg", 1 + caixa → "1 caixa"
+ */
+function formatQtyWithUnit(qty: number, unitType: string): string {
+  const u = unitType.toLowerCase().trim();
+
+  // Unidades de peso: sem espaço, ex "120.5kg"
+  if (u === 'kg') {
+    const formatted = qty % 1 === 0 ? String(qty) : qty.toFixed(1);
+    return `${formatted}kg`;
+  }
+  if (u === 'g') {
+    const formatted = qty % 1 === 0 ? String(qty) : qty.toFixed(0);
+    return `${formatted}g`;
+  }
+
+  const rounded = Math.round(qty);
+  const plural = rounded !== 1;
+
+  const nameMap: Record<string, [string, string]> = {
+    fardo: ['fardo', 'fardos'],
+    caixa: ['caixa', 'caixas'],
+    pacote: ['pacote', 'pacotes'],
+    unidade: ['unidade', 'unidades'],
+    litro: ['litro', 'litros'],
+    garrafa: ['garrafa', 'garrafas'],
+    peca: ['peca', 'pecas'],
+    saco: ['saco', 'sacos'],
+    display: ['display', 'displays'],
+  };
+
+  const names = nameMap[u];
+  if (names) {
+    return `${rounded} ${plural ? names[1] : names[0]}`;
+  }
+
+  return `${rounded} ${unitType}`;
+}
+
 function formatWeight(weight: number): string {
   if (weight >= 1000) {
     return `${(weight / 1000).toFixed(2)}t`;
   }
   return `${weight.toFixed(1)}kg`;
-}
-
-/**
- * Extrai lista de nomes de clientes únicos do caminhão
- */
-function getClientList(orders: Order[]): string[] {
-  const unique = new Set<string>();
-  orders.forEach(o => unique.add(o.client_name));
-  return Array.from(unique).sort();
 }
 
 /**
@@ -148,7 +179,6 @@ function pdfSafe(text: string): string {
   let r = text;
   r = r.replace(/[""]/g, '"').replace(/['']/g, "'");
   r = r.replace(/[–—]/g, '-').replace(/…/g, '...');
-  // Map accented chars to ASCII for Helvetica compatibility
   const map: Record<string, string> = {
     'á':'a','à':'a','ã':'a','â':'a','ä':'a',
     'é':'e','è':'e','ê':'e','ë':'e',
@@ -178,32 +208,53 @@ function generateLoadingManifestPDF(
   const doc = new jsPDF('p', 'mm', 'a4');
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 15;
-  let y = 18;
+  let y = 20;
 
   // ── Title ──
-  doc.setFontSize(18);
+  doc.setFontSize(20);
   doc.setFont('helvetica', 'bold');
-  doc.text('Romaneio', pageWidth / 2, y, { align: 'center' });
+  doc.text('ROMANEIO DE CARGA', pageWidth / 2, y, { align: 'center' });
+  y += 8;
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(pdfSafe(routeName), pageWidth / 2, y, { align: 'center' });
   y += 10;
 
-  // ── Header info line ──
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  const headerLine = `Data: ${pdfSafe(date)}  |  Entregador: ${pdfSafe(truck.plate)} - ${pdfSafe(truck.model)}  |  Entregas: ${orders.length}  |  Peso: ${formatWeight(totalWeight)} (${occupancyPercent}%)`;
-  doc.text(pdfSafe(headerLine), pageWidth / 2, y, { align: 'center' });
-  y += 6;
+  // ── Header info box using autoTable (2 rows: VEICULO/DATA, CARGA TOTAL/CAPACIDADE) ──
+  autoTable(doc, {
+    startY: y,
+    body: [
+      [
+        { content: 'VEICULO', styles: { fontStyle: 'bold', fontSize: 9 } },
+        { content: pdfSafe(`${truck.plate} - ${truck.model}`), styles: { fontSize: 9 } },
+        { content: 'DATA', styles: { fontStyle: 'bold', fontSize: 9 } },
+        { content: pdfSafe(date), styles: { fontSize: 9 } },
+      ],
+      [
+        { content: 'CARGA TOTAL', styles: { fontStyle: 'bold', fontSize: 9 } },
+        { content: formatWeight(totalWeight), styles: { fontSize: 9 } },
+        { content: 'CAPACIDADE', styles: { fontStyle: 'bold', fontSize: 9 } },
+        { content: `${formatWeight(truck.capacity_kg)} (${occupancyPercent}%)`, styles: { fontSize: 9 } },
+      ],
+    ],
+    theme: 'grid',
+    styles: { cellPadding: 3, lineColor: [180, 180, 180], lineWidth: 0.3 },
+    columnStyles: {
+      0: { cellWidth: 28 },
+      1: { cellWidth: 60 },
+      2: { cellWidth: 28 },
+      3: { cellWidth: 'auto' },
+    },
+    margin: { left: margin, right: margin },
+  });
 
-  // ── Vendas (client list) ──
-  const clients = getClientList(orders);
-  doc.setFontSize(9);
+  y = (doc as any).lastAutoTable.finalY + 10;
+
+  // ── Section title ──
+  doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  doc.text('Clientes:', margin, y);
-  doc.setFont('helvetica', 'normal');
-  const clientText = pdfSafe(clients.join(' , '));
-  // Wrap client text across multiple lines if needed
-  const clientLines = doc.splitTextToSize(clientText, pageWidth - 2 * margin - 20);
-  doc.text(clientLines, margin + 20, y);
-  y += Math.max(clientLines.length * 4, 5) + 4;
+  doc.text('PRODUTOS PARA SEPARACAO', pageWidth / 2, y, { align: 'center' });
+  y += 6;
 
   // ── Warning if no detailed items ──
   const noDetails = ordersLackDetails(orders);
@@ -216,54 +267,92 @@ function generateLoadingManifestPDF(
     y += 6;
   }
 
-  // ── Consolidated Products Table ──
+  // ── Consolidated Products Table (3 columns: #, Produto, Peso Total) ──
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
+
+  const tableBody = consolidatedProducts.map((p, idx) => [
+    String(idx + 1),
+    pdfSafe(p.product),
+    formatQtyWithUnit(p.qty, p.unitType),
+  ]);
+
+  // Add TOTAL row
+  tableBody.push([
+    '',
+    'TOTAL',
+    formatWeight(totalWeight),
+  ]);
 
   autoTable(doc, {
     startY: y,
-    head: [['#', pdfSafe('Descricao'), 'UN', 'Qtde']],
-    body: consolidatedProducts.map((p, idx) => [
-      String(idx + 1),
-      pdfSafe(p.product),
-      p.unitAbbrev,
-      formatQty(p.qty, p.unitType),
-    ]),
+    head: [['#', 'Produto', 'Peso Total']],
+    body: tableBody,
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 10, fontStyle: 'bold' },
-    styles: { fontSize: 9, cellPadding: 2 },
+    styles: { fontSize: 9, cellPadding: 3 },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
+      0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 15, halign: 'center' },
-      3: { cellWidth: 22, halign: 'right' },
+      2: { cellWidth: 35, halign: 'right' },
     },
     margin: { left: margin, right: margin },
+    didParseCell: (data) => {
+      // Style the TOTAL row (last body row)
+      if (data.section === 'body' && data.row.index === tableBody.length - 1) {
+        data.cell.styles.fontStyle = 'bold';
+        data.cell.styles.fontSize = 10;
+      }
+    },
   });
 
-  // ── Signature section ──
-  const tableEndY = (doc as any).lastAutoTable?.finalY || y + 20;
-  let sigY = tableEndY + 15;
+  // ── Conferência section ──
+  let confY = (doc as any).lastAutoTable.finalY + 14;
 
   // Check if we need a new page
-  if (sigY > 255) {
+  if (confY > 240) {
     doc.addPage();
-    sigY = 25;
+    confY = 25;
   }
 
-  doc.setFontSize(9);
-  doc.text('Data: ___/___/___', margin, sigY);
-  sigY += 10;
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'bold');
+  doc.text('CONFERENCIA DE CARGA', pageWidth / 2, confY, { align: 'center' });
+  confY += 12;
 
+  // Separador + Conferente side by side
+  const colWidth = (pageWidth - 2 * margin - 10) / 2;
   doc.setDrawColor(150, 150, 150);
-  doc.line(margin, sigY, margin + 80, sigY);
+
+  // Separador
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Separador:', margin, confY);
+  confY += 10;
+  doc.line(margin, confY, margin + colWidth, confY);
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.text('Assinatura', margin + 30, sigY + 5);
+  doc.text('Assinatura', margin + colWidth / 2, confY + 5, { align: 'center' });
+
+  // Conferente
+  const rightX = margin + colWidth + 10;
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Conferente:', rightX, confY - 10);
+  doc.line(rightX, confY, rightX + colWidth, confY);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.text('Assinatura', rightX + colWidth / 2, confY + 5, { align: 'center' });
+
+  confY += 14;
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Data da conferencia: ___/___/______ Hora: ___:___', margin, confY);
 
   // ── Footer ──
   doc.setFontSize(7);
   doc.setTextColor(150, 150, 150);
   doc.text(
-    pdfSafe(`Gerado em ${new Date().toLocaleString('pt-BR')} - Rota Certa`),
+    'Gerado por Rota Certa',
     pageWidth / 2,
     doc.internal.pageSize.getHeight() - 8,
     { align: 'center' }
