@@ -1,58 +1,63 @@
 
-Objetivo: corrigir de vez o Romaneio de Carga para que ele mostre somente o compilado dos itens do caminhão, nunca nomes de clientes, e eliminar a sobreposição no rodapé do PDF.
 
-Diagnóstico confirmado
-- O problema atual está no próprio código do romaneio, não no dado enviado por você.
-- Em `src/components/route/LoadingManifest.tsx`, a função `consolidateProducts` ainda tem um fallback que gera linhas como `Pedido - {cliente}` quando faltam itens detalhados em todos os pedidos. É exatamente isso que faz aparecer nome de cliente no romaneio de carga.
-- O PDF também usa posicionamento fixo para conferência/rodapé, então quando a tabela cresce o bloco final pode encostar ou sobrepor.
-- O parser ADV já carrega itens detalhados com `product_name`, `quantity` e `weight_kg`, então o romaneio deve ser guiado só por esses itens.
+# Vincular itens do ADV ao romaneio via `pedido_id` determinístico
 
-O que vou ajustar
-1. Remover definitivamente cliente do Romaneio de Carga
-- Eliminar o fallback por cliente em `LoadingManifest.tsx`.
-- O romaneio de carga passará a consolidar apenas `order.items`.
-- Se um caminhão estiver sem itens detalhados, o sistema não vai mais “inventar” linhas por cliente; vai exibir aviso claro de detalhamento ausente.
+## Problema raiz
+O romaneio sai vazio porque os `order_items` não estão sendo vinculados corretamente aos pedidos da rota. Hoje o vínculo usa apenas `client_name + weight_kg`, que falha quando há diferenças mínimas de encoding ou peso. A tabela `orders` não guarda o `pedido_id` (número da venda do ADV), então não há como fazer match exato.
 
-2. Consolidar somente por item real
-- Agrupar por produto normalizado + unidade resolvida.
-- Para itens de peso: somar `weight_kg`.
-- Para itens volumétricos: somar `quantity`.
-- O resultado será no formato operacional que você descreveu, por exemplo:
-  - `MORTADELA X — 50 kg`
-  - `REFRIGERANTE Y — 15 fardos`
+## O que o CSV contém
+O arquivo "Vendas Detalhadas" tem a estrutura hierárquica do ADV:
+- `Cliente:` → nome do cliente
+- `Venda Nº:` → ID da venda (ex: 281600)
+- Tabela de itens: Código, Descrição, UN, Qtde, Unitário, Total
 
-3. Ajustar o TOTAL e a semântica da tabela
-- Manter a tabela com 3 colunas: `#`, `Produto`, `Peso Total`.
-- A última coluna continuará mostrando quantidade + unidade compilada, como no modelo correto.
-- O TOTAL continuará mostrando a carga total do caminhão.
+O parser `parseADVDetailExcel` já extrai tudo isso corretamente (pedido_id, items com product_name, quantity, weight_kg, unit). O problema está na persistência e no matching.
 
-4. Corrigir paginação e rodapé do PDF
-- Refazer a área de conferência/rodapé para respeitar a altura real da tabela.
-- Se não houver espaço suficiente, a conferência vai para a próxima página em vez de sobrepor.
-- Garantir footer limpo no final da página.
+## Mudanças
 
-5. Alinhar preview da tela com a mesma regra
-- A pré-visualização HTML também ficará sem nome de cliente.
-- Quando faltarem itens detalhados, mostrar aviso operacional em vez de lista errada.
+### 1. Migration: adicionar `pedido_id` na tabela `orders`
+```sql
+ALTER TABLE public.orders ADD COLUMN pedido_id text;
+CREATE INDEX idx_orders_pedido_id ON public.orders(pedido_id);
+```
 
-6. Verificar componentes paralelos que ainda usam fallback ruim
-- Revisar também `src/components/route/TruckManifestCards.tsx`, `SideBySideManifests.tsx` e `LoadConsolidationView.tsx` para evitar que outro fluxo volte a gerar romaneio por cliente ou por `product_description` concatenado.
+### 2. `src/types/index.ts` — adicionar `pedido_id` ao tipo `Order`
+```typescript
+export interface Order {
+  // ... existing fields
+  pedido_id?: string | null;
+}
+```
 
-Arquivos a ajustar
-- `src/components/route/LoadingManifest.tsx`
-- `src/components/route/TruckManifestCards.tsx`
-- possivelmente:
-  - `src/components/route/SideBySideManifests.tsx`
-  - `src/components/route/LoadConsolidationView.tsx`
+### 3. `src/hooks/useRoutes.ts` — `toOrder()` incluir `pedido_id`
+Adicionar `pedido_id` ao helper de conversão.
 
-Resultado esperado
-- nenhum nome de cliente no romaneio de carga
-- 1 produto por linha
-- quantidades compiladas corretamente por caminhão
-- tabela fiel ao relatório detalhado importado no início
-- rodapé e conferência sem sobreposição
-- aviso claro quando faltarem itens detalhados
+### 4. `src/hooks/useRoutes.ts` — `addOrders()` persistir `pedido_id`
+- Aceitar `pedido_id` no input do mutation
+- Inserir na tabela `orders` junto com os demais campos
+- Usar `pedido_id` como chave primária de matching para vincular `order_items` (fallback: name+weight)
 
-Detalhe técnico importante
-- A correção principal é remover o fallback `Pedido - cliente` e tornar o romaneio estritamente dependente de `order_items`.
-- O PDF de referência que você anexou confirma exatamente esse comportamento: só produtos compilados, em várias páginas quando necessário, sem cliente aparecendo.
+### 5. `src/hooks/useRoutes.ts` — `reimportItems()` usar `pedido_id`
+- Se o `order` já tem `pedido_id`, procurar no ADV por esse ID primeiro
+- Fallback: client_name + weight (como hoje)
+- Isso torna o match determinístico e resistente a encoding
+
+### 6. `src/components/route/LoadingManifest.tsx` — corrigir texto de aviso
+A linha 251 ainda diz "listando pedidos individuais por cliente/peso" mas o romaneio já não faz isso. Trocar por:
+> "Detalhamento de produtos nao importado. Reimporte o arquivo ADV para gerar o romaneio."
+
+### 7. Propagar `pedido_id` no fluxo de importação
+No componente que chama `addOrders` durante a criação da rota, garantir que o `pedido_id` do `ParsedOrder` seja passado para o mutation.
+
+## Arquivos
+- Nova migration SQL
+- `src/types/index.ts`
+- `src/hooks/useRoutes.ts` (toOrder, addOrders, reimportItems)
+- `src/components/route/LoadingManifest.tsx` (texto do aviso)
+
+## Resultado esperado
+- `pedido_id` salvo em cada pedido desde a criação da rota
+- Match por ID exato no reimport — itens sempre vinculados
+- Romaneio de carga nunca mais vazio quando o ADV foi importado junto
+- Aviso correto quando falta detalhamento
+
