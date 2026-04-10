@@ -173,29 +173,24 @@ function generateLoadingManifestPDF(
   doc.text(noDetails ? 'PEDIDOS PARA SEPARACAO' : 'PRODUTOS PARA SEPARACAO', 20, tableStartY);
   
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
-  const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
   
   autoTable(doc, {
     startY: tableStartY + 5,
-    head: [['#', 'Produto', 'Qtde', 'Unidade', 'Peso Total']],
+    head: [['#', 'Descricao', 'UN', 'Qtde']],
     body: consolidatedProducts.map((p, idx) => [
       String(idx + 1),
       p.product,
-      isWeightUnit(p.unitType) ? '-' : String(p.totalQuantity),
-      p.unitType,
-      isWeightUnit(p.unitType) ? formatWeight(p.totalWeight) : '-',
+      p.unitAbbrev,
+      formatQty(p.qty, p.unitType),
     ]),
-    foot: [['', 'TOTAL', '', '', formatWeight(totalWeight)]],
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 11 },
-    footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
     styles: { fontSize: 10 },
     columnStyles: {
       0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 20, halign: 'center' },
-      3: { cellWidth: 25, halign: 'center' },
-      4: { cellWidth: 30, halign: 'right' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 25, halign: 'right' },
     },
   });
   
