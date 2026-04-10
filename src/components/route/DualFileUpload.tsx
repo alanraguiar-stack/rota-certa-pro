@@ -177,26 +177,34 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           if (advOrders.length > 0) {
             // Calcular estatísticas corretas: pedidos únicos e total de itens
             const uniqueOrderIds = new Set(advOrders.map(o => o.pedido_id));
-            const totalItems = advOrders.reduce((sum, o) => sum + (o.items?.length || 1), 0);
+            const totalItems = advOrders.reduce((sum, o) => sum + (o.items?.length || 0), 0);
             const totalWeight = advOrders.reduce((sum, o) => sum + o.weight_kg, 0);
+            const ordersWithItems = advOrders.filter(o => o.items && o.items.length > 0).length;
+            const ordersWithoutItems = advOrders.length - ordersWithItems;
             
             console.log('[DualFileUpload] ADV resultado:', {
               pedidosUnicos: uniqueOrderIds.size,
               totalItens: totalItems,
               pesoTotal: totalWeight,
+              comItens: ordersWithItems,
+              semItens: ordersWithoutItems,
             });
+            
+            const itemSummary = ordersWithoutItems > 0 
+              ? `${advOrders.length} pedidos | ${totalItems} itens | ⚠️ ${ordersWithoutItems} sem itens | ${formatWeightIntl(totalWeight)}`
+              : `${advOrders.length} pedidos | ${totalItems} itens | ${formatWeightIntl(totalWeight)}`;
             
             setUploadState({
               file,
               status: 'success',
-              message: `${advOrders.length} pedidos | ${totalItems} itens | ${formatWeightIntl(totalWeight)}`,
+              message: itemSummary,
               data: advOrders,
               detectedType: 'adv',
             });
             
             toast({
               title: '📦 Detalhe das Vendas detectado!',
-              description: `${advOrders.length} pedidos com ${totalItems} itens`,
+              description: `${ordersWithItems} pedidos com ${totalItems} itens` + (ordersWithoutItems > 0 ? ` (${ordersWithoutItems} sem itens)` : ''),
             });
             
             // Auto-cadastrar produtos novos
