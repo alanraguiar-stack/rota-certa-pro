@@ -13,6 +13,7 @@ import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { ParseResult, ValidationError } from './orderParser';
 import { extractRawTextFromPDF, parsePDFFile } from './pdfParser';
 import { normalizeText, removeAccents } from './encoding';
+import { inferUnitFromName } from '@/hooks/useProductUnits';
 
 /** Strip accents, replacement chars, and lowercase for robust matching */
 function normalizeForMatch(s: string): string {
@@ -1450,7 +1451,6 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       
       // If no unit column or empty, infer from product name
       if (!unitType) {
-        const { inferUnitFromName } = await import('@/hooks/useProductUnits');
         unitType = inferUnitFromName(descricao);
       }
       
