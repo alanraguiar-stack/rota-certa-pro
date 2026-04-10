@@ -175,18 +175,16 @@ function generateLoadingPDF(
   
   autoTable(doc, {
     startY: 73,
-    head: [['#', 'Produto', 'Peso Total']],
+    head: [['#', 'Produto', 'UN', 'Qtde']],
     body: products.map((p, idx) => {
-      let display = formatWeight(p.totalWeight);
-      if (getUnitForProduct) {
-        const unit = getUnitForProduct(p.product);
-        if (!WEIGHT_UNITS.includes(unit)) {
-          display = `${p.orderCount} ${unit}${p.orderCount > 1 ? 's' : ''}`;
-        }
-      }
+      const abbrev = getUnitAbbrev(p.unitType);
+      const display = isWeightUnit(p.unitType)
+        ? (p.qty % 1 === 0 ? String(p.qty) : p.qty.toFixed(2))
+        : String(Math.round(p.qty));
       return [
         String(idx + 1),
         toASCII(p.product),
+        abbrev,
         display,
       ];
     }),
@@ -372,7 +370,7 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
   
   const handleDownloadAllLoading = () => {
     trucks.forEach((truckData, index) => {
-      const products = consolidateProducts(truckData.orders);
+      const products = consolidateProducts(truckData.orders, getUnitForProduct);
       setTimeout(() => {
         const doc = generateLoadingPDF(
           routeName, date, truckData.truck, products, truckData.totalWeight, truckData.occupancyPercent, getUnitForProduct
@@ -447,7 +445,7 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
       {/* Truck Cards Grid */}
       <div className="grid gap-6 md:grid-cols-2">
         {trucks.map((truckData) => {
-          const products = consolidateProducts(truckData.orders);
+          const products = consolidateProducts(truckData.orders, getUnitForProduct);
           
           const handleDownloadLoading = () => {
             const doc = generateLoadingPDF(
@@ -593,11 +591,9 @@ export function TruckManifestCards({ routeName, date, trucks }: TruckManifestCar
                       <div key={idx} className="flex items-center justify-between text-sm py-1 px-2 rounded bg-muted/30">
                         <span className="truncate flex-1">{product.product}</span>
                         <Badge variant="secondary" className="ml-2 shrink-0">
-                          {(() => {
-                            const unit = getUnitForProduct(product.product);
-                            if (WEIGHT_UNITS.includes(unit)) return formatWeight(product.totalWeight);
-                            return `${product.orderCount} ${unit}${product.orderCount > 1 ? 's' : ''}`;
-                          })()}
+                          {isWeightUnit(product.unitType)
+                            ? formatWeight(product.totalWeight)
+                            : `${Math.round(product.qty)} ${getUnitAbbrev(product.unitType)}`}
                         </Badge>
                       </div>
                     ))}
