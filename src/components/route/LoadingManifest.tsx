@@ -30,18 +30,11 @@ interface LoadingManifestProps {
 
 interface ConsolidatedProduct {
   product: string;
-  totalWeight: number;
-  totalQuantity: number;
+  qty: number;
+  unitAbbrev: string;
   unitType: string;
-  orderCount: number;
 }
 
-/**
- * Consolidate products from orders with unit type awareness
- */
-/**
- * Check if orders lack detailed item data
- */
 function ordersLackDetails(orders: Order[]): boolean {
   return orders.every(order => 
     (!order.items || order.items.length === 0) && 
@@ -50,9 +43,8 @@ function ordersLackDetails(orders: Order[]): boolean {
 }
 
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
-  const productMap = new Map<string, { weight: number; quantity: number; count: number; unitType: string }>();
+  const productMap = new Map<string, { qty: number; unitType: string }>();
   
-  // If no orders have detailed items, list each order individually by client
   const noDetails = ordersLackDetails(orders);
   
   orders.forEach(order => {
@@ -60,45 +52,47 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
         const unitType = getUnitForProduct(productName);
-        const existing = productMap.get(productName) || { weight: 0, quantity: 0, count: 0, unitType };
-        productMap.set(productName, {
-          weight: existing.weight + Number(item.weight_kg),
-          quantity: existing.quantity + (item.quantity || 1),
-          count: existing.count + 1,
-          unitType,
-        });
+        const existing = productMap.get(productName) || { qty: 0, unitType };
+        
+        if (isWeightUnit(unitType)) {
+          existing.qty += Number(item.weight_kg);
+        } else {
+          existing.qty += (item.quantity || 1);
+        }
+        
+        productMap.set(productName, existing);
       });
     } else if (noDetails) {
-      // Fallback: list each order individually by client name
       const label = `Pedido - ${order.client_name}`;
-      productMap.set(label, {
-        weight: Number(order.weight_kg),
-        quantity: 1,
-        count: 1,
-        unitType: 'kg',
-      });
+      productMap.set(label, { qty: Number(order.weight_kg), unitType: 'kg' });
     } else {
       const label = order.product_description || `Pedido ${order.client_name}`;
       const unitType = getUnitForProduct(label);
-      const existing = productMap.get(label) || { weight: 0, quantity: 0, count: 0, unitType };
-      productMap.set(label, {
-        weight: existing.weight + Number(order.weight_kg),
-        quantity: existing.quantity + 1,
-        count: existing.count + 1,
-        unitType,
-      });
+      const existing = productMap.get(label) || { qty: 0, unitType };
+      if (isWeightUnit(unitType)) {
+        existing.qty += Number(order.weight_kg);
+      } else {
+        existing.qty += 1;
+      }
+      productMap.set(label, existing);
     }
   });
   
   return Array.from(productMap.entries())
     .map(([product, data]) => ({
       product,
-      totalWeight: data.weight,
-      totalQuantity: data.quantity,
+      qty: data.qty,
+      unitAbbrev: getUnitAbbrev(data.unitType),
       unitType: data.unitType,
-      orderCount: data.count,
     }))
     .sort((a, b) => a.product.localeCompare(b.product));
+}
+
+function formatQty(qty: number, unitType: string): string {
+  if (isWeightUnit(unitType)) {
+    return qty % 1 === 0 ? String(qty) : qty.toFixed(2).replace('.', ',');
+  }
+  return String(Math.round(qty));
 }
 
 function formatWeight(weight: number): string {
