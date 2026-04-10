@@ -164,13 +164,13 @@ export function areNeighborhoodsAdjacent(nhA: string, nhB: string): boolean {
  * Apoio: São Paulo (restante) + excedentes
  */
 export const TERRITORY_RULES: TerritoryRule[] = [
-  // ── Agrupamento 1: Barueri + Jandira + Itapevi ──
+  // ── Agrupamento 1: Barueri + Jandira + Itapevi + Santana de Parnaíba + Pirapora + Cajamar ──
   {
     id: 'barueri',
     label: 'Âncora Barueri',
     anchorCity: 'barueri',
     maxDeliveries: 25,
-    allowedFillCities: ['jandira', 'itapevi'],
+    allowedFillCities: ['jandira', 'itapevi', 'santana de parnaiba', 'pirapora do bom jesus', 'cajamar'],
     neighborhoodFills: [],
     neighborhoodExceptions: [],
     excludedNeighborhoods: [
@@ -234,20 +234,6 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     isSupport: false,
     priority: 3,
     fixedPlate: 'TRC1Z00',
-  },
-  // ── Agrupamento 4: Santana de Parnaíba + Pirapora + Cajamar ──
-  {
-    id: 'santana',
-    label: 'Âncora Santana de Parnaíba',
-    anchorCity: 'santana de parnaiba',
-    maxDeliveries: 25,
-    allowedFillCities: ['pirapora do bom jesus', 'cajamar'],
-    neighborhoodFills: [],
-    neighborhoodExceptions: [],
-    excludedNeighborhoods: [],
-    priorityNeighborhoods: [],
-    isSupport: false,
-    priority: 4,
   },
   // ── Agrupamento 5: Caieiras + Perus (SP) ──
   {
