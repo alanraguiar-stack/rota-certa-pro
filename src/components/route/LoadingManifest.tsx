@@ -484,22 +484,46 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
       </div>
       
       {/* Action buttons */}
-      <div className="flex gap-2">
-        <Button onClick={handleDownloadPDF} className="gap-2">
-          <FileDown className="h-4 w-4" />
-          Baixar PDF
-        </Button>
-        <Button variant="outline" onClick={handlePrint} className="gap-2">
-          <Printer className="h-4 w-4" />
-          Imprimir
-        </Button>
-        {trucks.length > 1 && (
-          <Button variant="outline" onClick={handleDownloadAll} className="gap-2">
-            <FileDown className="h-4 w-4" />
-            Baixar Todos
-          </Button>
-        )}
-      </div>
+      {(() => {
+        const noItems = selectedTruck ? ordersLackDetails(selectedTruck.orders) : true;
+        return (
+          <div className="flex gap-2 flex-wrap">
+            {noItems && onReimportItems && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.xlsx,.xls,.txt"
+                  className="hidden"
+                  onChange={handleReimportFile}
+                />
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isReimporting}
+                  className="gap-2"
+                >
+                  <Upload className="h-4 w-4" />
+                  {isReimporting ? 'Importando...' : 'Reimportar Detalhamento ADV'}
+                </Button>
+              </>
+            )}
+            <Button onClick={handleDownloadPDF} className="gap-2" disabled={noItems} title={noItems ? 'Reimporte o ADV antes de gerar o PDF' : ''}>
+              <FileDown className="h-4 w-4" />
+              Baixar PDF
+            </Button>
+            <Button variant="outline" onClick={handlePrint} className="gap-2" disabled={noItems}>
+              <Printer className="h-4 w-4" />
+              Imprimir
+            </Button>
+            {trucks.length > 1 && (
+              <Button variant="outline" onClick={handleDownloadAll} className="gap-2" disabled={noItems}>
+                <FileDown className="h-4 w-4" />
+                Baixar Todos
+              </Button>
+            )}
+          </div>
+        );
+      })()}
       
       {/* Loading Manifest preview */}
       {selectedTruck && (
