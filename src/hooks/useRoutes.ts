@@ -286,6 +286,7 @@ export function useRouteDetails(routeId: string | undefined) {
       }> = [];
 
       const originalsWithItems = orders.filter(o => o.items && o.items.length > 0);
+      console.log(`[addOrders] Total: ${orders.length} orders, ${originalsWithItems.length} with items, ${orders.length - originalsWithItems.length} without items`);
       const usedInsertedIds = new Set<string>();
 
       for (const original of originalsWithItems) {
