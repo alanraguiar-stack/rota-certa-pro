@@ -246,9 +246,11 @@ function generateLoadingManifestPDF(
   return doc;
 }
 
-export function LoadingManifest({ routeName, date, trucks }: LoadingManifestProps) {
+export function LoadingManifest({ routeName, date, trucks, routeId, onReimportItems, isReimporting }: LoadingManifestProps) {
   const [selectedTruckIndex, setSelectedTruckIndex] = useState(0);
   const { getUnitForProduct } = useProductUnits();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const selectedTruck = trucks[selectedTruckIndex];
   
