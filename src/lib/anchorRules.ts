@@ -68,15 +68,17 @@ export interface TerritoryRule {
  * Valor: lista de bairros vizinhos.
  */
 export const NEIGHBORHOOD_NEIGHBORS: Record<string, string[]> = {
-  // ── Osasco — entrada (Leste, divisa SP) ──
-  'km 18': ['quitauna', 'bonfim', 'rochdale', 'jardim das flores', 'bussocaba'],
+  // ── Osasco — entrada (Castelo Branco, Norte/Oeste) ──
+  'portal d\'oeste': ['vila menk', 'rochdale', 'km 18'],
+  'vila menk': ['portal d\'oeste', 'rochdale', 'bonfim'],
+  'km 18': ['portal d\'oeste', 'quitauna', 'bonfim', 'rochdale', 'jardim das flores', 'bussocaba'],
   'quitauna': ['km 18', 'bonfim', 'rochdale', 'cidade das flores', 'munhoz junior', 'umuarama'],
-  'bonfim': ['km 18', 'quitauna', 'i.a.p.i.', 'rochdale'],
+  'bonfim': ['km 18', 'quitauna', 'i.a.p.i.', 'rochdale', 'vila menk'],
   'iapi': ['bonfim', 'rochdale', 'umuarama'],
   'i.a.p.i.': ['bonfim', 'rochdale', 'umuarama'],
   'cidade das flores': ['quitauna', 'km 18', 'jardim das flores'],
   'jardim das flores': ['km 18', 'rochdale', 'cidade das flores'],
-  'rochdale': ['km 18', 'quitauna', 'bonfim', 'i.a.p.i.', 'bela vista', 'helena maria', 'jaguare'],
+  'rochdale': ['km 18', 'quitauna', 'bonfim', 'i.a.p.i.', 'bela vista', 'helena maria', 'jaguare', 'portal d\'oeste', 'vila menk'],
   // ── Osasco — centro ──
   'umuarama': ['quitauna', 'i.a.p.i.', 'veloso', 'centro'],
   'centro': ['umuarama', 'presidente altino', 'bussocaba', 'vila osasco', 'munhoz junior', 'vila yara'],
@@ -224,10 +226,12 @@ export const TERRITORY_RULES: TerritoryRule[] = [
     lateNeighborhoods: [
       { neighborhood: 'vila yara', city: 'osasco' },
     ],
-    // KM 18 e Quitaúna são a "entrada" de Osasco — sequenciados primeiro
+    // Entrada pela Castelo Branco — fluxo circular
     earlyNeighborhoods: [
-      { neighborhood: 'km 18', city: 'osasco' },
-      { neighborhood: 'quitauna', city: 'osasco' },
+      { neighborhood: 'portal d\'oeste', city: 'osasco' },
+      { neighborhood: 'vila menk', city: 'osasco' },
+      { neighborhood: 'rochdale', city: 'osasco' },
+      { neighborhood: 'presidente altino', city: 'osasco' },
     ],
     isSupport: false,
     priority: 3,
