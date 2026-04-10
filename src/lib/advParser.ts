@@ -1275,14 +1275,14 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
     
     // Detectar linha de Cliente
     const normalizedRowText = normalizeForMatch(rowText);
+    
+    // Detectar linha de Cliente
     const clientMatch = normalizedRowText.match(/cliente\s*:\s*([a-z\s\-\.]+?)(?:\s+\d{11,14})?$/i);
     if (clientMatch) {
+      flushCurrentOrder();
       // Re-extract from original rowText to preserve proper casing
       const origMatch = rowText.match(/[Cc]liente\s*:\s*(.+?)(?:\s+\d{11,14})?$/);
       const clientName = origMatch ? origMatch[1].trim() : clientMatch[1].trim();
-    if (clientMatch) {
-      flushCurrentOrder();
-      
       currentClient = normalizeText(clientName);
       currentVendaId = '';
       currentItems = [];
