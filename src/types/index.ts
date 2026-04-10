@@ -120,6 +120,7 @@ export interface Order {
   longitude?: number | null;
   geocoding_status?: string | null;
   city?: string | null;
+  pedido_id?: string | null;
   items?: OrderItem[]; // Multiple items per order
 }
 
