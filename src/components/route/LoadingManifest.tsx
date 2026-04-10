@@ -480,10 +480,31 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
             
             {/* Warning for missing details */}
             {selectedTruck && ordersLackDetails(selectedTruck.orders) && (
-              <Alert variant="default" className="mx-4 mt-4 border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
-                <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                <AlertDescription className="text-yellow-800 dark:text-yellow-200">
-                  Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.
+              <Alert variant="default" className="mx-4 mt-4 border-warning/50 bg-warning/10">
+                <AlertTriangle className="h-4 w-4 text-warning" />
+                <AlertDescription className="flex items-center justify-between gap-4">
+                  <span>Detalhamento de produtos não importado. Listando pedidos individuais por cliente e peso.</span>
+                  {onReimportItems && (
+                    <>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv,.xlsx,.xls,.txt"
+                        className="hidden"
+                        onChange={handleReimportFile}
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 gap-2"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isReimporting}
+                      >
+                        <Upload className="h-4 w-4" />
+                        {isReimporting ? 'Importando...' : 'Reimportar Detalhamento'}
+                      </Button>
+                    </>
+                  )}
                 </AlertDescription>
               </Alert>
             )}
