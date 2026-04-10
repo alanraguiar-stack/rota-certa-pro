@@ -1198,6 +1198,117 @@ export function useRouteDetails(routeId: string | undefined) {
     },
   });
 
+  // Reimport items for an existing route from ADV file
+  const reimportItems = useMutation({
+    mutationFn: async (advOrders: ParsedOrder[]) => {
+      if (!routeId) throw new Error('Route ID missing');
+      
+      const route = routeQuery.data;
+      if (!route || route.orders.length === 0) throw new Error('Rota sem pedidos');
+
+      // Normalize helper
+      const normalize = (s: string) =>
+        s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').replace(/[^\w\s]/g, '').trim();
+
+      // Build ADV lookup maps
+      const advByIdMap = new Map<string, ParsedOrder>();
+      const advByClientMap = new Map<string, ParsedOrder[]>();
+      for (const adv of advOrders) {
+        const nid = (adv.pedido_id || '').replace(/\D/g, '').replace(/^0+/, '');
+        if (nid) advByIdMap.set(nid, adv);
+        const nc = normalize(adv.client_name || '');
+        if (nc) {
+          const list = advByClientMap.get(nc) || [];
+          list.push(adv);
+          advByClientMap.set(nc, list);
+        }
+      }
+
+      // Delete existing order_items for this route
+      const orderIds = route.orders.map(o => o.id);
+      if (orderIds.length > 0) {
+        await supabase.from('order_items').delete().in('order_id', orderIds);
+      }
+
+      const itemsToInsert: Array<{ order_id: string; product_name: string; weight_kg: number; quantity: number }> = [];
+      const orderUpdates: Array<{ id: string; product_description: string }> = [];
+      let matched = 0;
+
+      for (const order of route.orders) {
+        // Try matching by normalized client name + closest weight
+        const nc = normalize(order.client_name);
+        const candidates = advByClientMap.get(nc) || [];
+        
+        let bestMatch: ParsedOrder | undefined;
+        if (candidates.length === 1) {
+          bestMatch = candidates[0];
+        } else if (candidates.length > 1) {
+          // Pick closest weight
+          bestMatch = candidates.reduce((best, c) => {
+            const diffBest = Math.abs(Number(order.weight_kg) - (best?.weight_kg || 0));
+            const diffC = Math.abs(Number(order.weight_kg) - c.weight_kg);
+            return diffC < diffBest ? c : best;
+          });
+        }
+
+        if (bestMatch && bestMatch.items && bestMatch.items.length > 0) {
+          matched++;
+          // Remove used candidate
+          const remaining = candidates.filter(c => c !== bestMatch);
+          if (remaining.length > 0) advByClientMap.set(nc, remaining);
+          else advByClientMap.delete(nc);
+
+          for (const item of bestMatch.items) {
+            itemsToInsert.push({
+              order_id: order.id,
+              product_name: item.product_name,
+              weight_kg: item.weight_kg,
+              quantity: item.quantity,
+            });
+          }
+          orderUpdates.push({
+            id: order.id,
+            product_description: bestMatch.items.map(i => i.product_name).join(', '),
+          });
+        }
+      }
+
+      // Batch insert items (500 at a time)
+      for (let i = 0; i < itemsToInsert.length; i += 500) {
+        const batch = itemsToInsert.slice(i, i + 500);
+        const { error } = await supabase.from('order_items').insert(batch);
+        if (error) {
+          console.error('[reimportItems] Batch insert error:', error);
+          throw new Error(`Erro ao inserir itens: ${error.message}`);
+        }
+      }
+
+      // Update product_description on orders
+      await Promise.all(
+        orderUpdates.map(u =>
+          supabase.from('orders').update({ product_description: u.product_description }).eq('id', u.id)
+        )
+      );
+
+      console.log(`[reimportItems] Matched ${matched}/${route.orders.length} orders, inserted ${itemsToInsert.length} items`);
+      return { matched, total: route.orders.length, itemsInserted: itemsToInsert.length };
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['route', routeId] });
+      toast({
+        title: 'Detalhamento reimportado!',
+        description: `${result.matched} de ${result.total} pedidos cruzados, ${result.itemsInserted} itens inseridos.`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: 'Erro ao reimportar detalhamento',
+        description: error.message,
+        variant: 'destructive',
+      });
+    },
+  });
+
   return {
     route: routeQuery.data,
     isLoading: routeQuery.isLoading,
@@ -1217,6 +1328,7 @@ export function useRouteDetails(routeId: string | undefined) {
     reorderSingleDelivery,
     lockTruckRoute,
     unlockTruckRoute,
+    reimportItems,
     refetch: routeQuery.refetch,
   };
 }

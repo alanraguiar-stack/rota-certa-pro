@@ -1,13 +1,16 @@
-import { useState } from 'react';
-import { FileDown, Printer, Truck, Package, ClipboardCheck, Scale, AlertTriangle } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { FileDown, Printer, Truck, Package, ClipboardCheck, Scale, AlertTriangle, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
+import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER, ParsedOrder } from '@/types';
 import { cn } from '@/lib/utils';
 import { useProductUnits } from '@/hooks/useProductUnits';
+import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
+import { decodeFileContent } from '@/lib/encoding';
+import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
