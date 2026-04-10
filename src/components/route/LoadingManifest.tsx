@@ -521,28 +521,33 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
           <CardHeader className="border-b bg-muted/30">
             <div className="flex items-center justify-between">
               <div>
-                <CardTitle className="text-xl">Romaneio de Carga</CardTitle>
-                <CardDescription>
-                  {routeName} • {date} • {selectedTruck.truck.plate} - {selectedTruck.truck.model}
-                </CardDescription>
+                <CardTitle className="text-xl">ROMANEIO DE CARGA</CardTitle>
+                <CardDescription>{routeName}</CardDescription>
               </div>
-              <div className="text-right">
-                <Badge variant="outline" className="text-lg font-bold">
-                  {selectedTruck.truck.plate}
-                </Badge>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {selectedTruck.orders.length} entregas • {formatWeight(selectedTruck.totalWeight)} ({selectedTruck.occupancyPercent}%)
-                </p>
-              </div>
+              <Badge variant="outline" className="text-lg font-bold">
+                {selectedTruck.truck.plate}
+              </Badge>
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            {/* Clientes */}
-            <div className="border-b px-4 py-3 bg-primary/5">
-              <p className="text-xs text-muted-foreground mb-1">Clientes neste caminhão</p>
-              <p className="text-sm">
-                {getClientList(selectedTruck.orders).join(' • ')}
-              </p>
+            {/* Header info grid */}
+            <div className="grid grid-cols-2 border-b text-sm">
+              <div className="border-r px-4 py-2">
+                <span className="font-bold text-muted-foreground">VEICULO: </span>
+                {selectedTruck.truck.plate} - {selectedTruck.truck.model}
+              </div>
+              <div className="px-4 py-2">
+                <span className="font-bold text-muted-foreground">DATA: </span>
+                {date}
+              </div>
+              <div className="border-r border-t px-4 py-2">
+                <span className="font-bold text-muted-foreground">CARGA TOTAL: </span>
+                {formatWeight(selectedTruck.totalWeight)}
+              </div>
+              <div className="border-t px-4 py-2">
+                <span className="font-bold text-muted-foreground">CAPACIDADE: </span>
+                {formatWeight(selectedTruck.truck.capacity_kg)} ({selectedTruck.occupancyPercent}%)
+              </div>
             </div>
             
             {/* Warning for missing details */}
@@ -585,15 +590,19 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
               );
             })()}
             
-            {/* Consolidated Products Table */}
-            <div className="p-4">
+            {/* Section title */}
+            <div className="px-4 pt-4 pb-2">
+              <h3 className="text-center font-bold text-sm">PRODUTOS PARA SEPARAÇÃO</h3>
+            </div>
+
+            {/* Consolidated Products Table — 3 columns */}
+            <div className="px-4 pb-2">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-12 text-center">#</TableHead>
-                    <TableHead>Descrição</TableHead>
-                    <TableHead className="w-16 text-center">UN</TableHead>
-                    <TableHead className="w-20 text-right">Qtde</TableHead>
+                    <TableHead>Produto</TableHead>
+                    <TableHead className="w-28 text-right">Peso Total</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -601,42 +610,38 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                     <TableRow key={idx}>
                       <TableCell className="text-center text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell className="font-medium">{product.product}</TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant="outline" className="text-xs">
-                          {product.unitAbbrev}
-                        </Badge>
-                      </TableCell>
                       <TableCell className="text-right font-bold">
-                        {formatQty(product.qty, product.unitType)}
+                        {formatQtyWithUnit(product.qty, product.unitType)}
                       </TableCell>
                     </TableRow>
                   ))}
+                  {/* TOTAL row */}
+                  <TableRow className="border-t-2 font-bold">
+                    <TableCell />
+                    <TableCell className="font-bold">TOTAL</TableCell>
+                    <TableCell className="text-right font-bold">{formatWeight(selectedTruck.totalWeight)}</TableCell>
+                  </TableRow>
                 </TableBody>
               </Table>
-              
-              <Separator className="my-3" />
-              <div className="flex items-center justify-between font-bold text-sm">
-                <span>{consolidatedProducts.length} produtos</span>
-                <span>Peso total: {formatWeight(selectedTruck.totalWeight)}</span>
-              </div>
             </div>
             
-            {/* Signature fields */}
+            {/* Conferência de Carga */}
             <div className="border-t bg-muted/20 p-4">
+              <h3 className="text-center font-bold text-sm mb-4">CONFERÊNCIA DE CARGA</h3>
               <div className="grid grid-cols-2 gap-4">
                 <div className="border rounded-lg p-3 bg-background">
-                  <p className="text-xs text-muted-foreground mb-2">Separador</p>
+                  <p className="text-xs font-bold text-muted-foreground mb-2">Separador:</p>
                   <div className="border-b border-dashed h-8" />
                   <p className="text-xs text-muted-foreground mt-1 text-center">Assinatura</p>
                 </div>
                 <div className="border rounded-lg p-3 bg-background">
-                  <p className="text-xs text-muted-foreground mb-2">Conferente</p>
+                  <p className="text-xs font-bold text-muted-foreground mb-2">Conferente:</p>
                   <div className="border-b border-dashed h-8" />
                   <p className="text-xs text-muted-foreground mt-1 text-center">Assinatura</p>
                 </div>
               </div>
               <div className="mt-3 text-sm text-muted-foreground">
-                Data: ____/____/______ Hora: ____:____
+                Data da conferência: ____/____/______ Hora: ____:____
               </div>
             </div>
           </CardContent>
