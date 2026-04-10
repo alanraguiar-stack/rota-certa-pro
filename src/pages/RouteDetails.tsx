@@ -5,6 +5,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useRouteDetails } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
@@ -773,11 +774,22 @@ export default function RouteDetails() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-6 gap-y-1 text-sm">
-                      {sorted.map(([city, count]) => (
-                        <div key={city} className="flex justify-between">
-                          <span className="capitalize text-muted-foreground">{city}</span>
-                          <span className="font-medium">{count}</span>
+                    <div className="flex flex-wrap gap-2">
+                      {sorted.map(([city, count], index) => (
+                        <div
+                          key={city}
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg border px-3 py-1.5",
+                            index < 3 ? "bg-primary/5 border-primary/20" : "bg-muted/50 border-border"
+                          )}
+                        >
+                          <span className="text-sm capitalize">{city}</span>
+                          <Badge
+                            variant={index < 3 ? "default" : "outline"}
+                            className="min-w-[1.5rem] justify-center text-xs font-bold"
+                          >
+                            {count}
+                          </Badge>
                         </div>
                       ))}
                     </div>
