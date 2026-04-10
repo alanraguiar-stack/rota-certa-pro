@@ -34,7 +34,8 @@ interface TruckManifestCardsProps {
 interface ConsolidatedProduct {
   product: string;
   totalWeight: number;
-  orderCount: number;
+  qty: number;
+  unitType: string;
 }
 
 function formatWeight(weight: number): string {
