@@ -7,7 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER, ParsedOrder } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit } from '@/hooks/useProductUnits';
 import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
 import { decodeFileContent } from '@/lib/encoding';
 import { useToast } from '@/hooks/use-toast';
@@ -30,18 +30,11 @@ interface LoadingManifestProps {
 
 interface ConsolidatedProduct {
   product: string;
-  totalWeight: number;
-  totalQuantity: number;
+  qty: number;
+  unitAbbrev: string;
   unitType: string;
-  orderCount: number;
 }
 
-/**
- * Consolidate products from orders with unit type awareness
- */
-/**
- * Check if orders lack detailed item data
- */
 function ordersLackDetails(orders: Order[]): boolean {
   return orders.every(order => 
     (!order.items || order.items.length === 0) && 
@@ -50,9 +43,8 @@ function ordersLackDetails(orders: Order[]): boolean {
 }
 
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
-  const productMap = new Map<string, { weight: number; quantity: number; count: number; unitType: string }>();
+  const productMap = new Map<string, { qty: number; unitType: string }>();
   
-  // If no orders have detailed items, list each order individually by client
   const noDetails = ordersLackDetails(orders);
   
   orders.forEach(order => {
@@ -60,45 +52,47 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
         const unitType = getUnitForProduct(productName);
-        const existing = productMap.get(productName) || { weight: 0, quantity: 0, count: 0, unitType };
-        productMap.set(productName, {
-          weight: existing.weight + Number(item.weight_kg),
-          quantity: existing.quantity + (item.quantity || 1),
-          count: existing.count + 1,
-          unitType,
-        });
+        const existing = productMap.get(productName) || { qty: 0, unitType };
+        
+        if (isWeightUnit(unitType)) {
+          existing.qty += Number(item.weight_kg);
+        } else {
+          existing.qty += (item.quantity || 1);
+        }
+        
+        productMap.set(productName, existing);
       });
     } else if (noDetails) {
-      // Fallback: list each order individually by client name
       const label = `Pedido - ${order.client_name}`;
-      productMap.set(label, {
-        weight: Number(order.weight_kg),
-        quantity: 1,
-        count: 1,
-        unitType: 'kg',
-      });
+      productMap.set(label, { qty: Number(order.weight_kg), unitType: 'kg' });
     } else {
       const label = order.product_description || `Pedido ${order.client_name}`;
       const unitType = getUnitForProduct(label);
-      const existing = productMap.get(label) || { weight: 0, quantity: 0, count: 0, unitType };
-      productMap.set(label, {
-        weight: existing.weight + Number(order.weight_kg),
-        quantity: existing.quantity + 1,
-        count: existing.count + 1,
-        unitType,
-      });
+      const existing = productMap.get(label) || { qty: 0, unitType };
+      if (isWeightUnit(unitType)) {
+        existing.qty += Number(order.weight_kg);
+      } else {
+        existing.qty += 1;
+      }
+      productMap.set(label, existing);
     }
   });
   
   return Array.from(productMap.entries())
     .map(([product, data]) => ({
       product,
-      totalWeight: data.weight,
-      totalQuantity: data.quantity,
+      qty: data.qty,
+      unitAbbrev: getUnitAbbrev(data.unitType),
       unitType: data.unitType,
-      orderCount: data.count,
     }))
     .sort((a, b) => a.product.localeCompare(b.product));
+}
+
+function formatQty(qty: number, unitType: string): string {
+  if (isWeightUnit(unitType)) {
+    return qty % 1 === 0 ? String(qty) : qty.toFixed(2).replace('.', ',');
+  }
+  return String(Math.round(qty));
 }
 
 function formatWeight(weight: number): string {
@@ -179,29 +173,24 @@ function generateLoadingManifestPDF(
   doc.text(noDetails ? 'PEDIDOS PARA SEPARACAO' : 'PRODUTOS PARA SEPARACAO', 20, tableStartY);
   
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
-  const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
   
   autoTable(doc, {
     startY: tableStartY + 5,
-    head: [['#', 'Produto', 'Qtde', 'Unidade', 'Peso Total']],
+    head: [['#', 'Descricao', 'UN', 'Qtde']],
     body: consolidatedProducts.map((p, idx) => [
       String(idx + 1),
       p.product,
-      isWeightUnit(p.unitType) ? '-' : String(p.totalQuantity),
-      p.unitType,
-      isWeightUnit(p.unitType) ? formatWeight(p.totalWeight) : '-',
+      p.unitAbbrev,
+      formatQty(p.qty, p.unitType),
     ]),
-    foot: [['', 'TOTAL', '', '', formatWeight(totalWeight)]],
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 11 },
-    footStyles: { fillColor: [60, 60, 60], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 11 },
     styles: { fontSize: 10 },
     columnStyles: {
       0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 20, halign: 'center' },
-      3: { cellWidth: 25, halign: 'center' },
-      4: { cellWidth: 30, halign: 'right' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 25, halign: 'right' },
     },
   });
   
@@ -378,7 +367,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
     );
   }
   
-  const isWeightUnit = (u: string) => u === 'kg' || u === 'g';
+  
   
   const consolidatedProducts = selectedTruck 
     ? consolidateProducts(selectedTruck.orders, getUnitForProduct) 
@@ -525,19 +514,12 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                       <Package className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium">{product.product}</span>
                       <Badge variant="outline" className="text-xs">
-                        {product.unitType}
+                        {product.unitAbbrev}
                       </Badge>
                     </div>
-                    <div className="flex items-center gap-4">
-                      {!isWeightUnit(product.unitType) && (
-                        <span className="text-sm font-medium">
-                          {product.totalQuantity} {product.unitType}
-                        </span>
-                      )}
-                      {isWeightUnit(product.unitType) && (
-                        <span className="font-bold">{formatWeight(product.totalWeight)}</span>
-                      )}
-                    </div>
+                    <span className="font-bold">
+                      {formatQty(product.qty, product.unitType)} {product.unitAbbrev}
+                    </span>
                   </div>
                 ))}
               </div>
