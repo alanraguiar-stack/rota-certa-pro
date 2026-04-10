@@ -13,6 +13,7 @@ import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { ParseResult, ValidationError } from './orderParser';
 import { extractRawTextFromPDF, parsePDFFile } from './pdfParser';
 import { normalizeText, removeAccents } from './encoding';
+import { inferUnitFromName } from '@/hooks/useProductUnits';
 
 /** Strip accents, replacement chars, and lowercase for robust matching */
 function normalizeForMatch(s: string): string {
@@ -1442,14 +1443,19 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       }
       
       // Determine if this is weight or unit-count based
-      // If we have a unidade column, use it to decide
+      // If we have a unidade column, use it to decide; otherwise infer from product name
       let unitType = '';
       if (itemColumnMap.unidade !== -1) {
         unitType = String(row[itemColumnMap.unidade] ?? '').trim().toLowerCase();
       }
       
+      // If no unit column or empty, infer from product name
+      if (!unitType) {
+        unitType = inferUnitFromName(descricao);
+      }
+      
       // Decide weight_kg vs quantity based on unit
-      const isWeightBased = !unitType || /^(kg|g|kilo|quilo)s?$/i.test(unitType);
+      const isWeightBased = /^(kg|g|kilo|quilo)s?$/i.test(unitType);
       const itemWeightKg = isWeightBased ? qty : 0;
       const itemQuantity = isWeightBased ? 1 : qty;
       
