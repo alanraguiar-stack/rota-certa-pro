@@ -83,6 +83,7 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
           weight_kg: data.items.reduce((s: number, i: any) => s + i.weight_kg, 0),
           address: '',
           items: data.items,
+          isValid: true,
         }));
 
         await reimportItems.mutateAsync(advOrders);
