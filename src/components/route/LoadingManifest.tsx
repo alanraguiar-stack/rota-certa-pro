@@ -84,7 +84,10 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
         const key = normalizeProductKey(productName);
-        const unitType = resolveUnit(productName, getUnitForProduct);
+        // Use unit from DB if available, otherwise resolve via inference
+        const unitType = (item as any).unit && (item as any).unit !== 'kg' 
+          ? (item as any).unit 
+          : resolveUnit(productName, getUnitForProduct);
         const existing = productMap.get(key) || { product: productName, qty: 0, unitType };
         
         if (isWeightUnit(unitType)) {
