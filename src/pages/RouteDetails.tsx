@@ -30,7 +30,6 @@ import { DriverAssignment } from '@/components/route/DriverAssignment';
 import { ExecutionTracker } from '@/components/route/ExecutionTracker';
 import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
 import { decodeFileContent } from '@/lib/encoding';
-import { ParsedOrder } from '@/types';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
 // ADV Upload section for Step 2
