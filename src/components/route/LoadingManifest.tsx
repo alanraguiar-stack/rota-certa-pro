@@ -121,37 +121,40 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
 function formatQtyWithUnit(qty: number, unitType: string): string {
   const u = unitType.toLowerCase().trim();
 
-  // Unidades de peso: sem espaço, ex "120.5kg"
+  // KG → always 2 decimal places (ex: 59,67)
   if (u === 'kg') {
-    const formatted = qty % 1 === 0 ? String(qty) : qty.toFixed(1);
-    return `${formatted}kg`;
+    return qty.toFixed(2).replace('.', ',');
   }
   if (u === 'g') {
-    const formatted = qty % 1 === 0 ? String(qty) : qty.toFixed(0);
-    return `${formatted}g`;
+    return String(Math.round(qty));
   }
 
-  const rounded = Math.round(qty);
-  const plural = rounded !== 1;
+  // UN, FD, CX, SC, PC → integer, no decimal
+  return String(Math.round(qty));
+}
 
-  const nameMap: Record<string, [string, string]> = {
-    fardo: ['fardo', 'fardos'],
-    caixa: ['caixa', 'caixas'],
-    pacote: ['pacote', 'pacotes'],
-    unidade: ['unidade', 'unidades'],
-    litro: ['litro', 'litros'],
-    garrafa: ['garrafa', 'garrafas'],
-    peca: ['peca', 'pecas'],
-    saco: ['saco', 'sacos'],
-    display: ['display', 'displays'],
+function formatUnitLabel(unitType: string): string {
+  const u = unitType.toUpperCase().trim();
+  const map: Record<string, string> = {
+    'KG': 'KG',
+    'FARDO': 'FD',
+    'FD': 'FD',
+    'CAIXA': 'CX',
+    'CX': 'CX',
+    'UNIDADE': 'UN',
+    'UN': 'UN',
+    'SACO': 'SC',
+    'SC': 'SC',
+    'PECA': 'PC',
+    'PC': 'PC',
+    'PACOTE': 'PCT',
+    'PCT': 'PCT',
+    'LITRO': 'LT',
+    'LT': 'LT',
+    'GARRAFA': 'GF',
+    'DISPLAY': 'DSP',
   };
-
-  const names = nameMap[u];
-  if (names) {
-    return `${rounded} ${plural ? names[1] : names[0]}`;
-  }
-
-  return `${rounded} ${unitType}`;
+  return map[u] || u;
 }
 
 function formatWeight(weight: number): string {
