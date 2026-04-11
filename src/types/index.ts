@@ -193,6 +193,7 @@ export interface ParsedOrderItem {
   product_name: string;
   weight_kg: number;
   quantity: number;
+  unit?: string;
 }
 
 export interface ParsedOrder {

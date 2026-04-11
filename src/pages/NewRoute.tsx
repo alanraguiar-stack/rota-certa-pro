@@ -261,9 +261,15 @@ export default function NewRoute() {
       const ordersWithItems = validOrders.filter(o => o.items && o.items.length > 0);
       console.log(`[NewRoute] Navigating with ${validOrders.length} orders, ${ordersWithItems.length} have items (${ordersWithItems.reduce((s, o) => s + (o.items?.length || 0), 0)} total items)`);
 
+      // Deep-clone orders to prevent serialization loss of items array
+      const ordersForState = validOrders.map(o => ({
+        ...o,
+        items: (o.items || []).map(item => ({ ...item })),
+      }));
+
       navigate(`/rota/${route.id}`, {
         state: { 
-          pendingOrders: validOrders,
+          pendingOrders: ordersForState,
           selectedTruckIds,
           routingStrategy,
           fleetAlreadyConfigured: true,

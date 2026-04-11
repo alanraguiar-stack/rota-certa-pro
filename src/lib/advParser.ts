@@ -1463,6 +1463,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
         product_name: normalizeText(descricao),
         weight_kg: itemWeightKg,
         quantity: isWeightBased ? 1 : (itemQuantity > 0 ? itemQuantity : 1),
+        unit: unitType || 'kg',
       });
       console.log('[ADV Excel] ✅ Item:', descricao.substring(0, 35), '| qty:', qty, '| source:', extractionSource, '| unit:', unitType || 'N/A');
       continue;
