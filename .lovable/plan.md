@@ -1,42 +1,49 @@
 
 
-# Mover upload do ADV para a Etapa 2 (Distribuir Carga)
+# Fix: Orders lost due to premature sessionStorage clear + ADV upload error
 
-## Situação atual
+## Root cause
 
-O upload do ADV está escondido dentro do componente `LoadingManifest` na Etapa 3, atrás de um `<details>` colapsável. O usuário quer que o upload aconteça na **Etapa 2**, logo após (ou junto com) a distribuição de carga, antes de avançar para o romaneio.
+There are **two bugs**:
 
-## Mudança proposta
+### Bug 1: Orders never persisted (root cause of "Rota sem pedidos")
+In `RouteDetails.tsx` lines 298-311, `sessionStorage.removeItem('pendingOrders')` is called immediately after parsing, **before** checking if `route` is loaded. On first render, `route` is null (still fetching), so:
+1. sessionStorage is read and cleared
+2. `route` is null → the `addOrders.mutate` block is skipped
+3. When `route` loads and the effect re-runs, sessionStorage is already empty
+4. Orders are permanently lost
 
-### Arquivo: `src/pages/RouteDetails.tsx`
+### Bug 2: Unhelpful error when ADV uploaded without orders
+The `reimportItems` mutation throws "Rota sem pedidos" which is cryptic. The ADV upload section should detect this state and guide the user.
 
-Na seção `activeStep === 'distribute_load'` (linha ~726), após o botão "Distribuir Cargas nos Caminhões" e após a distribuição ter sido feita (quando já existem assignments nos trucks):
+## Fix
 
-1. Adicionar uma seção de upload do ADV com:
-   - Título: "Importar Detalhe das Vendas (ADV)"
-   - Instrução: "Carregue o relatório de detalhe das vendas para gerar o romaneio de carga"
-   - Botão de upload de arquivo (aceita .csv, .xls, .xlsx)
-   - Indicador de status: quantos pedidos foram vinculados
+### File: `src/pages/RouteDetails.tsx`
 
-2. Ao fazer upload:
-   - Chamar o parser existente (`parseADVDetailExcel` / `parseVendasCSV`)
-   - Chamar `reimportItems.mutateAsync(advOrders)` para persistir os itens no banco
-   - Exibir toast de sucesso com contagem de itens vinculados
+1. **Move `sessionStorage.removeItem` to AFTER successful `addOrders`** — only clear once orders are confirmed persisted in the database. Read from sessionStorage on every effect run until `addOrders` succeeds.
 
-3. Após os itens estarem carregados, o romaneio na Etapa 3 já terá dados para consolidar
+2. **Improve ADV upload error handling** — when `route.orders.length === 0`, show a clear message: "Esta rota ainda não tem pedidos. Primeiro adicione os pedidos do Vendas do Dia antes de importar o detalhamento." instead of the generic error toast.
 
-### Arquivo: `src/pages/RouteDetails.tsx` (lógica)
+### File: `src/hooks/useRoutes.ts`
 
-- Reutilizar a lógica de importação que já existe no `LoadingManifest` (ler arquivo, detectar formato, parsear, chamar reimportItems)
-- Extrair essa lógica para ser usável em ambos os contextos, ou simplesmente duplicar no RouteDetails (são ~30 linhas)
+3. **Improve `reimportItems` error message** — change "Rota sem pedidos" to "Esta rota não possui pedidos cadastrados. Importe primeiro o relatório 'Vendas do Dia'."
 
-### Sem mudanças em outros arquivos
+## Changes summary
 
-A lógica de persistência (`reimportItems`) e o parser já existem e funcionam. Apenas a localização do upload muda.
+```text
+RouteDetails.tsx useEffect:
+  BEFORE: parse → clear sessionStorage → check route → mutate
+  AFTER:  parse (keep in sessionStorage) → check route → mutate → clear sessionStorage on success
 
-## Resultado
+ADVUploadSection:
+  Add check: if route has 0 orders, show info message instead of upload button
 
-- Etapa 2 mostra os caminhões + botão distribuir + upload do ADV
-- Usuário distribui a carga, importa o ADV, e ao avançar para Etapa 3 o romaneio já está pronto
-- O LoadingManifest continua funcionando como fallback caso o usuário não tenha importado na Etapa 2
+useRoutes.ts reimportItems:
+  Better error message
+```
+
+## Result
+- Orders will reliably persist even if `route` takes time to load
+- ADV upload section shows clear guidance when orders are missing
+- Existing routes with 0 orders get actionable error messages
 
