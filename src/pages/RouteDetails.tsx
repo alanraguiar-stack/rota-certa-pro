@@ -181,16 +181,14 @@ export default function RouteDetails() {
       }
     }
 
-    // Read pending orders from sessionStorage (reliable transfer for large payloads)
-    const raw = sessionStorage.getItem('pendingOrdersWithItems');
-    let pendingOrders: ParsedOrder[] | undefined;
+    // Read pending orders from sessionStorage (simple transfer — no items)
+    const raw = sessionStorage.getItem('pendingOrders');
+    let pendingOrders: Array<{ client_name: string; address: string; weight_kg: number; product_description?: string; city?: string; pedido_id?: string }> | undefined;
     if (raw) {
       try {
-        pendingOrders = JSON.parse(raw) as ParsedOrder[];
-        sessionStorage.removeItem('pendingOrdersWithItems');
-        const withItems = pendingOrders.filter(o => o.items && o.items.length > 0);
-        const totalItems = pendingOrders.reduce((s, o) => s + (o.items?.length || 0), 0);
-        console.log(`[RouteDetails] Recovered ${pendingOrders.length} orders from sessionStorage, ${withItems.length} have items (${totalItems} total items)`);
+        pendingOrders = JSON.parse(raw);
+        sessionStorage.removeItem('pendingOrders');
+        console.log(`[RouteDetails] Recovered ${pendingOrders?.length} orders from sessionStorage (no items — ADV imported at Romaneio step)`);
       } catch (e) {
         console.error('[RouteDetails] Failed to parse sessionStorage pendingOrders:', e);
         pendingOrders = undefined;
@@ -198,20 +196,14 @@ export default function RouteDetails() {
     }
     
     if (pendingOrders && pendingOrders.length > 0 && !hasAddedPendingOrders && route) {
-      const withItems = pendingOrders.filter((o: ParsedOrder) => o.items && o.items.length > 0);
-      const totalItems = pendingOrders.reduce((s: number, o: ParsedOrder) => s + (o.items?.length || 0), 0);
-      console.log(`[RouteDetails] Processing ${pendingOrders.length} pendingOrders, ${withItems.length} have items (${totalItems} total items)`);
-      if (withItems.length === 0 && pendingOrders.some((o: ParsedOrder) => o.pedido_id)) {
-        console.warn('[RouteDetails] WARNING: All orders have pedido_id but zero items');
-      }
+      console.log(`[RouteDetails] Processing ${pendingOrders.length} pendingOrders (without items)`);
       setHasAddedPendingOrders(true);
       addOrders.mutate(
-        pendingOrders.map((o: ParsedOrder) => ({
+        pendingOrders.map(o => ({
           client_name: o.client_name,
           address: o.address,
           weight_kg: o.weight_kg,
           product_description: o.product_description,
-          items: o.items,
           city: o.city,
           pedido_id: o.pedido_id,
         })),

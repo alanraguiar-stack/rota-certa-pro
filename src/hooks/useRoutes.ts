@@ -252,7 +252,6 @@ export function useRouteDetails(routeId: string | undefined) {
       address: string; 
       weight_kg: number; 
       product_description?: string;
-      items?: ParsedOrderItem[];
       city?: string;
       pedido_id?: string;
     }>) => {
@@ -275,104 +274,7 @@ export function useRouteDetails(routeId: string | undefined) {
       if (error) throw error;
       if (!insertedOrders) throw new Error('Falha ao inserir pedidos');
 
-      // Map inserted orders back to originals using pedido_id (deterministic) or name+weight (fallback)
-      const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-      const normalizePedidoId = (id: string | null | undefined): string => {
-        if (!id) return '';
-        return id.replace(/\D/g, '').replace(/^0+/, '');
-      };
-      
-      const itemsToInsert: Array<{
-        order_id: string;
-        product_name: string;
-        product_code?: string;
-        weight_kg: number;
-        quantity: number;
-        unit: string;
-      }> = [];
-
-      const originalsWithItems = orders.filter(o => o.items && o.items.length > 0);
-      console.log(`[addOrders] Total: ${orders.length} orders, ${originalsWithItems.length} with items, ${orders.length - originalsWithItems.length} without items`);
-      // Debug: log first 3 orders' items detail
-      orders.slice(0, 3).forEach((o, i) => {
-        console.log(`[addOrders] Order[${i}] pedido_id=${o.pedido_id} items=${o.items?.length || 0} client=${o.client_name?.substring(0, 20)}`);
-      });
-      const usedInsertedIds = new Set<string>();
-      let matchById = 0, matchByName = 0, noMatch = 0;
-
-      for (const original of originalsWithItems) {
-        const normOrigId = normalizePedidoId(original.pedido_id);
-        
-        // Priority 1: match by normalized pedido_id (deterministic)
-        let match = normOrigId
-          ? insertedOrders.find(io => !usedInsertedIds.has(io.id) && normalizePedidoId(io.pedido_id) === normOrigId)
-          : undefined;
-        
-        if (match) {
-          matchById++;
-        } else {
-          // Priority 2: fallback to name + weight
-          const normName = normalize(original.client_name);
-          match = insertedOrders.find(io => 
-            !usedInsertedIds.has(io.id) &&
-            normalize(io.client_name) === normName &&
-            Math.abs(Number(io.weight_kg) - original.weight_kg) < 0.1
-          );
-          if (match) matchByName++;
-        }
-        
-        if (match) {
-          usedInsertedIds.add(match.id);
-          for (const item of original.items!) {
-            itemsToInsert.push({
-              order_id: match.id,
-              product_name: item.product_name,
-              product_code: item.product_code || undefined,
-              weight_kg: item.weight_kg,
-              quantity: item.quantity,
-              unit: item.unit || 'kg',
-            });
-          }
-        } else {
-          noMatch++;
-          console.warn('[addOrders] No match for items of:', original.pedido_id, original.client_name, original.weight_kg);
-        }
-      }
-
-      console.log(`[addOrders] Match stats: byId=${matchById}, byName=${matchByName}, noMatch=${noMatch}`);
-      console.log(`[addOrders] ${itemsToInsert.length} items prepared for ${originalsWithItems.length} orders with details`);
-
-      if (itemsToInsert.length > 0) {
-        // Batch insert in chunks of 500
-        let totalInserted = 0;
-        for (let i = 0; i < itemsToInsert.length; i += 500) {
-          const batch = itemsToInsert.slice(i, i + 500);
-          const { data: insertedItems, error: itemsError } = await supabase
-            .from('order_items')
-            .insert(batch)
-            .select('id');
-
-          if (itemsError) {
-            console.error('[addOrders] Failed to insert order items batch:', itemsError);
-            toast({
-              title: 'Aviso: falha ao salvar detalhes dos produtos',
-              description: itemsError.message,
-              variant: 'destructive',
-            });
-          } else {
-            totalInserted += insertedItems?.length ?? 0;
-          }
-        }
-        console.log(`[addOrders] Successfully persisted ${totalInserted}/${itemsToInsert.length} order_items`);
-      } else if (originalsWithItems.length > 0) {
-        // Had items but none matched — alert user
-        console.error(`[addOrders] WARNING: ${originalsWithItems.length} orders had items but 0 were persisted (no match)`);
-        toast({
-          title: 'Atenção: detalhamento não vinculado',
-          description: `${originalsWithItems.length} pedido(s) tinham itens mas não foi possível vincular ao banco. Use o botão "Reimportar Detalhamento" no romaneio.`,
-          variant: 'destructive',
-        });
-      }
+      console.log(`[addOrders] Inserted ${insertedOrders.length} orders (no items — ADV imported at Romaneio step)`);
 
       // Update route totals
       const totalWeight = orders.reduce((sum, o) => sum + o.weight_kg, 0);
