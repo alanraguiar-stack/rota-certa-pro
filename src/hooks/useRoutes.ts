@@ -1254,13 +1254,15 @@ export function useRouteDetails(routeId: string | undefined) {
           matched++;
 
           for (const item of bestMatch.items) {
+            const normalizedUnit = (item.unit || 'kg').toUpperCase();
+            const isWeight = /^(KG|G|KILO|QUILO)S?$/i.test(normalizedUnit);
             itemsToInsert.push({
               order_id: order.id,
               product_name: item.product_name,
               product_code: item.product_code || undefined,
-              weight_kg: item.weight_kg,
-              quantity: Math.round(item.quantity),
-              unit: item.unit || 'kg',
+              weight_kg: Math.max(0, Number(item.weight_kg) || 0),
+              quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
+              unit: normalizedUnit,
             });
           }
           orderUpdates.push({
