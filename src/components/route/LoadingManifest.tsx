@@ -482,11 +482,76 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
       </Card>
     );
   }
+
+  // Check if ANY truck has items
+  const anyTruckHasItems = trucks.some(t => t.orders.some(o => o.items && o.items.length > 0));
+  
+  // If no items at all, show prominent ADV upload as primary action
+  if (!anyTruckHasItems && onReimportItems) {
+    return (
+      <div className="space-y-4">
+        {/* Truck selector tabs */}
+        <div className="flex flex-wrap gap-2">
+          {trucks.map((t, index) => (
+            <Button
+              key={t.truck.id}
+              variant={selectedTruckIndex === index ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setSelectedTruckIndex(index)}
+              className="gap-2"
+            >
+              <Truck className="h-4 w-4" />
+              {t.truck.plate}
+              <Badge variant="secondary" className="ml-1">
+                {t.orders.length} entregas
+              </Badge>
+            </Button>
+          ))}
+        </div>
+
+        <Card className="border-2 border-dashed border-warning/50 bg-warning/5">
+          <CardContent className="py-10 text-center space-y-5">
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-warning/20">
+              <Upload className="h-8 w-8 text-warning" />
+            </div>
+            <div>
+              <h3 className="text-xl font-bold mb-2">Importar Detalhe das Vendas</h3>
+              <p className="text-muted-foreground max-w-md mx-auto">
+                Para gerar o romaneio de carga, importe o arquivo <strong>Detalhe das Vendas (ADV)</strong>. 
+                O sistema irá vincular os itens aos pedidos de cada caminhão automaticamente.
+              </p>
+            </div>
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls,.txt"
+                className="hidden"
+                onChange={handleReimportFile}
+              />
+              <Button
+                size="lg"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isReimporting}
+                className="gap-2 h-12 px-8 text-base"
+              >
+                <Upload className="h-5 w-5" />
+                {isReimporting ? 'Importando...' : 'Carregar Arquivo ADV'}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Formatos aceitos: CSV, Excel (.xlsx, .xls), TXT
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
   
   const consolidatedProducts = selectedTruck 
     ? consolidateProducts(selectedTruck.orders, getUnitForProduct) 
     : [];
-  
+
   return (
     <div className="space-y-4">
       {/* Truck selector tabs */}
