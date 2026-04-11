@@ -62,7 +62,7 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
         }
 
         // Group CSV items by venda_id to create ParsedOrder[]
-        const vendaMap: Map<string, { client_name: string; items: any[] }> = new Map();
+        const vendaMap = new Map() as Map<string, { client_name: string; items: any[] }>;
         for (const item of csvItems) {
           if (!vendaMap.has(item.venda_id)) {
             vendaMap.set(item.venda_id, { client_name: item.client_name, items: [] });
