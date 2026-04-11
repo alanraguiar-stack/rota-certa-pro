@@ -164,7 +164,6 @@ export default function RouteDetails() {
 
   // Add pending orders, trucks, and routing strategy from navigation state (from wizard)
   useEffect(() => {
-    const pendingOrders = location.state?.pendingOrders as ParsedOrder[] | undefined;
     const stateStrategy = location.state?.routingStrategy as RoutingStrategy | undefined;
     const selectedTruckIdsFromWizard = location.state?.selectedTruckIds as string[] | undefined;
     const fleetAlreadyConfigured = location.state?.fleetAlreadyConfigured as boolean | undefined;
@@ -181,13 +180,29 @@ export default function RouteDetails() {
         setFleetFromWizard(true);
       }
     }
+
+    // Read pending orders from sessionStorage (reliable transfer for large payloads)
+    const raw = sessionStorage.getItem('pendingOrdersWithItems');
+    let pendingOrders: ParsedOrder[] | undefined;
+    if (raw) {
+      try {
+        pendingOrders = JSON.parse(raw) as ParsedOrder[];
+        sessionStorage.removeItem('pendingOrdersWithItems');
+        const withItems = pendingOrders.filter(o => o.items && o.items.length > 0);
+        const totalItems = pendingOrders.reduce((s, o) => s + (o.items?.length || 0), 0);
+        console.log(`[RouteDetails] Recovered ${pendingOrders.length} orders from sessionStorage, ${withItems.length} have items (${totalItems} total items)`);
+      } catch (e) {
+        console.error('[RouteDetails] Failed to parse sessionStorage pendingOrders:', e);
+        pendingOrders = undefined;
+      }
+    }
     
     if (pendingOrders && pendingOrders.length > 0 && !hasAddedPendingOrders && route) {
       const withItems = pendingOrders.filter((o: ParsedOrder) => o.items && o.items.length > 0);
       const totalItems = pendingOrders.reduce((s: number, o: ParsedOrder) => s + (o.items?.length || 0), 0);
-      console.log(`[RouteDetails] Received ${pendingOrders.length} pendingOrders from state, ${withItems.length} have items (${totalItems} total items)`);
+      console.log(`[RouteDetails] Processing ${pendingOrders.length} pendingOrders, ${withItems.length} have items (${totalItems} total items)`);
       if (withItems.length === 0 && pendingOrders.some((o: ParsedOrder) => o.pedido_id)) {
-        console.warn('[RouteDetails] WARNING: All orders have pedido_id but zero items — serialization may have failed');
+        console.warn('[RouteDetails] WARNING: All orders have pedido_id but zero items');
       }
       setHasAddedPendingOrders(true);
       addOrders.mutate(

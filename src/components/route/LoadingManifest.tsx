@@ -30,6 +30,7 @@ interface LoadingManifestProps {
 
 interface ConsolidatedProduct {
   product: string;
+  productCode?: string;
   qty: number;
   unitAbbrev: string;
   unitType: string;
@@ -75,20 +76,20 @@ function normalizeProductKey(name: string): string {
 }
 
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
-  const productMap = new Map<string, { product: string; qty: number; unitType: string }>();
-  
-  const allLackDetails = ordersLackDetails(orders);
+  const productMap = new Map<string, { product: string; productCode?: string; qty: number; unitType: string }>();
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
-        const key = normalizeProductKey(productName);
+        const productCode = (item as any).product_code || undefined;
+        // Use product_code as key if available, otherwise normalized name
+        const key = productCode || normalizeProductKey(productName);
         // Use unit from DB if available, otherwise resolve via inference
-        const unitType = (item as any).unit && (item as any).unit !== 'kg' 
-          ? (item as any).unit 
+        const unitType = item.unit && item.unit !== 'kg' 
+          ? item.unit 
           : resolveUnit(productName, getUnitForProduct);
-        const existing = productMap.get(key) || { product: productName, qty: 0, unitType };
+        const existing = productMap.get(key) || { product: productName, productCode, qty: 0, unitType };
         
         if (isWeightUnit(unitType)) {
           existing.qty += Number(item.weight_kg);
@@ -99,12 +100,12 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
         productMap.set(key, existing);
       });
     }
-    // Pedidos sem items são ignorados — aviso exibido separadamente
   });
   
   return Array.from(productMap.values())
     .map(data => ({
       product: data.product,
+      productCode: data.productCode,
       qty: data.qty,
       unitAbbrev: getUnitAbbrev(data.unitType),
       unitType: data.unitType,
@@ -120,37 +121,40 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
 function formatQtyWithUnit(qty: number, unitType: string): string {
   const u = unitType.toLowerCase().trim();
 
-  // Unidades de peso: sem espaço, ex "120.5kg"
+  // KG → always 2 decimal places (ex: 59,67)
   if (u === 'kg') {
-    const formatted = qty % 1 === 0 ? String(qty) : qty.toFixed(1);
-    return `${formatted}kg`;
+    return qty.toFixed(2).replace('.', ',');
   }
   if (u === 'g') {
-    const formatted = qty % 1 === 0 ? String(qty) : qty.toFixed(0);
-    return `${formatted}g`;
+    return String(Math.round(qty));
   }
 
-  const rounded = Math.round(qty);
-  const plural = rounded !== 1;
+  // UN, FD, CX, SC, PC → integer, no decimal
+  return String(Math.round(qty));
+}
 
-  const nameMap: Record<string, [string, string]> = {
-    fardo: ['fardo', 'fardos'],
-    caixa: ['caixa', 'caixas'],
-    pacote: ['pacote', 'pacotes'],
-    unidade: ['unidade', 'unidades'],
-    litro: ['litro', 'litros'],
-    garrafa: ['garrafa', 'garrafas'],
-    peca: ['peca', 'pecas'],
-    saco: ['saco', 'sacos'],
-    display: ['display', 'displays'],
+function formatUnitLabel(unitType: string): string {
+  const u = unitType.toUpperCase().trim();
+  const map: Record<string, string> = {
+    'KG': 'KG',
+    'FARDO': 'FD',
+    'FD': 'FD',
+    'CAIXA': 'CX',
+    'CX': 'CX',
+    'UNIDADE': 'UN',
+    'UN': 'UN',
+    'SACO': 'SC',
+    'SC': 'SC',
+    'PECA': 'PC',
+    'PC': 'PC',
+    'PACOTE': 'PCT',
+    'PCT': 'PCT',
+    'LITRO': 'LT',
+    'LT': 'LT',
+    'GARRAFA': 'GF',
+    'DISPLAY': 'DSP',
   };
-
-  const names = nameMap[u];
-  if (names) {
-    return `${rounded} ${plural ? names[1] : names[0]}`;
-  }
-
-  return `${rounded} ${unitType}`;
+  return map[u] || u;
 }
 
 function formatWeight(weight: number): string {
@@ -209,7 +213,7 @@ function generateLoadingManifestPDF(
   doc.text(pdfSafe(routeName), pageWidth / 2, y, { align: 'center' });
   y += 10;
 
-  // ── Header info box using autoTable (2 rows: VEICULO/DATA, CARGA TOTAL/CAPACIDADE) ──
+  // ── Header info box ──
   autoTable(doc, {
     startY: y,
     body: [
@@ -237,7 +241,23 @@ function generateLoadingManifestPDF(
     margin: { left: margin, right: margin },
   });
 
-  y = (doc as any).lastAutoTable.finalY + 10;
+  y = (doc as any).lastAutoTable.finalY + 4;
+
+  // ── Pedidos list ──
+  const pedidoIds = orders
+    .map(o => o.pedido_id)
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i);
+  if (pedidoIds.length > 0) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    const pedidosText = `Pedidos: ${pedidoIds.join(', ')}`;
+    const splitPedidos = doc.splitTextToSize(pdfSafe(pedidosText), pageWidth - 2 * margin);
+    doc.text(splitPedidos, margin, y);
+    y += splitPedidos.length * 4 + 4;
+  } else {
+    y += 6;
+  }
 
   // ── Section title ──
   doc.setFontSize(12);
@@ -256,12 +276,13 @@ function generateLoadingManifestPDF(
     y += 6;
   }
 
-  // ── Consolidated Products Table (3 columns: #, Produto, Peso Total) ──
+  // ── Consolidated Products Table (4 columns: #, Produto, UN, Qtde) ──
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
 
   const tableBody = consolidatedProducts.map((p, idx) => [
     String(idx + 1),
     pdfSafe(p.product),
+    formatUnitLabel(p.unitType),
     formatQtyWithUnit(p.qty, p.unitType),
   ]);
 
@@ -269,12 +290,13 @@ function generateLoadingManifestPDF(
   tableBody.push([
     '',
     'TOTAL',
+    '',
     formatWeight(totalWeight),
   ]);
 
   autoTable(doc, {
     startY: y,
-    head: [['#', 'Produto', 'Peso Total']],
+    head: [['#', 'Produto', 'UN', 'Qtde']],
     body: tableBody,
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 10, fontStyle: 'bold' },
@@ -282,11 +304,11 @@ function generateLoadingManifestPDF(
     columnStyles: {
       0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 35, halign: 'right' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 30, halign: 'right' },
     },
     margin: { left: margin, right: margin },
     didParseCell: (data) => {
-      // Style the TOTAL row (last body row)
       if (data.section === 'body' && data.row.index === tableBody.length - 1) {
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fontSize = 10;
@@ -563,6 +585,20 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                 {formatWeight(selectedTruck.truck.capacity_kg)} ({selectedTruck.occupancyPercent}%)
               </div>
             </div>
+            {/* Pedidos list */}
+            {(() => {
+              const pedidoIds = selectedTruck.orders
+                .map(o => o.pedido_id)
+                .filter(Boolean)
+                .filter((v, i, a) => a.indexOf(v) === i);
+              if (pedidoIds.length === 0) return null;
+              return (
+                <div className="px-4 py-2 border-b text-xs text-muted-foreground">
+                  <span className="font-bold">Pedidos: </span>
+                  {pedidoIds.join(', ')}
+                </div>
+              );
+            })()}
             
             {/* Warning for missing details */}
             {(() => {
@@ -609,14 +645,15 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
               <h3 className="text-center font-bold text-sm">PRODUTOS PARA SEPARAÇÃO</h3>
             </div>
 
-            {/* Consolidated Products Table — 3 columns */}
+            {/* Consolidated Products Table — 4 columns */}
             <div className="px-4 pb-2">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-12 text-center">#</TableHead>
                     <TableHead>Produto</TableHead>
-                    <TableHead className="w-28 text-right">Peso Total</TableHead>
+                    <TableHead className="w-16 text-center">UN</TableHead>
+                    <TableHead className="w-24 text-right">Qtde</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -624,6 +661,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                     <TableRow key={idx}>
                       <TableCell className="text-center text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell className="font-medium">{product.product}</TableCell>
+                      <TableCell className="text-center">{formatUnitLabel(product.unitType)}</TableCell>
                       <TableCell className="text-right font-bold">
                         {formatQtyWithUnit(product.qty, product.unitType)}
                       </TableCell>
@@ -633,6 +671,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                   <TableRow className="border-t-2 font-bold">
                     <TableCell />
                     <TableCell className="font-bold">TOTAL</TableCell>
+                    <TableCell />
                     <TableCell className="text-right font-bold">{formatWeight(selectedTruck.totalWeight)}</TableCell>
                   </TableRow>
                 </TableBody>

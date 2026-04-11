@@ -128,6 +128,7 @@ export interface OrderItem {
   id: string;
   order_id: string;
   product_name: string;
+  product_code?: string | null;
   weight_kg: number;
   quantity: number;
   unit: string;
@@ -191,6 +192,7 @@ export interface OrderFormData {
 
 export interface ParsedOrderItem {
   product_name: string;
+  product_code?: string;
   weight_kg: number;
   quantity: number;
   unit?: string;
