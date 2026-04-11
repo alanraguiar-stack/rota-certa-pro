@@ -1,88 +1,50 @@
 
 
-# Implementar Romaneio de Carga conforme especificação do documento
+# Novo fluxo: Upload único na criação + ADV no Romaneio
 
-## Resumo
+## Conceito
 
-O documento define regras precisas para parsing do CSV de vendas detalhadas e compilação do romaneio. Vou implementar essas regras exatamente como especificadas, e resolver definitivamente o problema de perda de itens usando `sessionStorage` em vez de `navigate(state)`.
+Simplificar o wizard de criação para aceitar **apenas o "Vendas do Dia"** (itinerário). O "Detalhe das Vendas" (ADV) será carregado **depois**, diretamente na tela do Romaneio de Carga, quando o usuário precisar gerar o documento de separação.
 
-## Problema atual
+Isso elimina completamente o problema de perda de itens no `navigate(state)` / `sessionStorage`, porque os itens nunca mais precisam ser transferidos entre páginas — eles são importados diretamente no contexto onde serão usados.
 
-Os itens são perdidos durante a navegação entre NewRoute e RouteDetails porque o React Router serializa o state via `structuredClone`, que falha silenciosamente com payloads grandes. Resultado: `order_items` sempre vazio no banco, romaneio sempre vazio.
+## Mudanças
 
-## Mudanças planejadas
+### 1. Simplificar `DualFileUpload` → upload único
+- Remover o slot do lado direito (ADV/Detalhe das Vendas)
+- Manter apenas o upload do "Vendas do Dia" (itinerário/relatório geral)
+- Remover toda a lógica de merge entre itinerário e ADV no wizard
+- O componente passa a gerar `ParsedOrder[]` sem itens (apenas cliente, endereço, peso, pedido_id)
 
-### 1. Novo parser CSV conforme especificação exata do documento
-**Arquivo:** `src/lib/advParser.ts`
+### 2. Simplificar `NewRoute.tsx` → sem itens
+- Remover lógica de serialização de itens no `sessionStorage`
+- O `navigate()` volta a usar apenas o state simples (sem payload grande)
+- Os pedidos salvos no banco terão `order_items` vazio na criação — isso é esperado
 
-Adicionar função `parseVendasCSV(text: string)` que segue as regras do documento:
-- Separador `;`, encoding latin1
-- `partes[0] === "Cliente :"` → captura `partes[2]` como cliente
-- `partes[0] === "Venda Nº:"` → captura `partes[4]` como número da venda  
-- `partes[0]` numérico → extrai item com:
-  - `partes[0]` = código do produto
-  - `partes[4]` = descrição
-  - `partes[13]` = unidade (KG, FD, CX, UN, SC, PC)
-  - `partes[16]` = quantidade (formato BR: `1.234,56`)
+### 3. Simplificar `RouteDetails.tsx` → sem leitura de sessionStorage para itens
+- Remover a lógica de `sessionStorage.getItem('pendingOrdersWithItems')`
+- O `addOrders` salva pedidos sem itens (apenas dados de roteamento)
 
-Adicionar função `compilarRomaneio(items, vendasSelecionadas)` que:
-- Agrupa por **código do produto** (não descrição)
-- Soma quantidades
-- Ordena alfabeticamente pela descrição
+### 4. Romaneio de Carga: upload obrigatório do ADV
+- Na tela do Romaneio (`LoadingManifest.tsx`), quando `order_items` está vazio, mostrar um upload proeminente do ADV (já existe o reimport, mas torná-lo o fluxo principal)
+- Ao carregar o ADV: o sistema cruza os `pedido_id` dos pedidos de cada caminhão com os itens do arquivo, persiste no `order_items`, e renderiza o romaneio consolidado
+- Fluxo: Upload ADV → match por pedido_id → insert order_items → exibir romaneio
 
-### 2. Transferência de dados via sessionStorage (corrige perda de itens)
-**Arquivos:** `src/pages/NewRoute.tsx`, `src/pages/RouteDetails.tsx`
-
-- **NewRoute.tsx**: Antes de `navigate()`, salvar os pedidos com itens em `sessionStorage.setItem('pendingOrdersWithItems', JSON.stringify(ordersForState))`. Remover `pendingOrders` do state do navigate.
-- **RouteDetails.tsx**: Ler de `sessionStorage` em vez de `location.state`. Após leitura, limpar o sessionStorage.
-
-### 3. Consolidação do romaneio por código do produto
-**Arquivo:** `src/components/route/LoadingManifest.tsx`
-
-Alterar `consolidateProducts` para agrupar por código do produto (quando disponível via `order_items`) em vez de por nome normalizado. Adicionar colunas UN e Qtde separadas no layout do PDF conforme o documento:
-
-```
-# | Produto | UN | Qtde
-```
-
-### 4. Regras de exibição de quantidade
-**Arquivo:** `src/components/route/LoadingManifest.tsx`
-
-- KG → 2 casas decimais sempre (ex: `59,67 KG`)
-- UN, FD, CX, SC, PC → inteiro sem decimal
-
-### 5. Adicionar código do produto ao order_items
-**Migration SQL:**
-```sql
-ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS product_code text;
-```
-
-**Arquivo:** `src/hooks/useRoutes.ts` — salvar `product_code` no insert de items.
-
-### 6. Cabeçalho do PDF com lista de pedidos
-**Arquivo:** `src/components/route/LoadingManifest.tsx`
-
-Adicionar ao cabeçalho do PDF: `Pedidos: [lista dos pedido_ids incluídos naquele caminhão]`
-
-### 7. Seção de conferência no PDF
-Já existe, mas ajustar layout para corresponder exatamente ao documento:
-- Separador + Assinatura
-- Conferente + Assinatura  
-- Data + Hora
+### 5. Ajustar stepper/workflow
+- O passo "Romaneio de Carga" passa a ter dois estados visuais claros:
+  - **Sem detalhamento**: mostra upload do ADV com instrução clara
+  - **Com detalhamento**: mostra a tabela consolidada e botão de PDF
 
 ## Arquivos a editar
-- Nova migration SQL (coluna `product_code`)
-- `src/lib/advParser.ts` — novo parser CSV com índices fixos
-- `src/pages/NewRoute.tsx` — sessionStorage
-- `src/pages/RouteDetails.tsx` — ler de sessionStorage
-- `src/hooks/useRoutes.ts` — salvar `product_code`
-- `src/components/route/LoadingManifest.tsx` — consolidação por código, formato do PDF, regras de exibição
+- `src/components/route/DualFileUpload.tsx` — simplificar para upload único
+- `src/pages/NewRoute.tsx` — remover serialização de itens
+- `src/pages/RouteDetails.tsx` — remover leitura de sessionStorage para itens
+- `src/components/route/LoadingManifest.tsx` — tornar o upload do ADV o fluxo principal (não fallback)
+- `src/hooks/useRoutes.ts` — simplificar addOrders (sem itens na criação)
 
 ## Resultado esperado
-- Parser CSV segue exatamente a especificação (índices fixos, encoding latin1)
-- Itens nunca mais perdidos na transferência entre páginas (sessionStorage = 5MB)
-- Romaneio agrupa por código do produto, soma quantidades, exibe unidade correta
-- PDF com layout: `# | Produto | UN | Qtde`
-- Cabeçalho com lista de pedidos incluídos
-- Conferência de carga com campos de assinatura
+- Wizard de criação rápido: 1 arquivo → frota → composição → rota criada
+- Zero risco de perda de itens (não há transferência de itens entre páginas)
+- Romaneio gerado sob demanda com upload do ADV direto na tela de detalhe
+- Match confiável por `pedido_id` entre pedidos do caminhão e itens do ADV
 
