@@ -285,6 +285,7 @@ export function useRouteDetails(routeId: string | undefined) {
       const itemsToInsert: Array<{
         order_id: string;
         product_name: string;
+        product_code?: string;
         weight_kg: number;
         quantity: number;
         unit: string;
@@ -326,6 +327,7 @@ export function useRouteDetails(routeId: string | undefined) {
             itemsToInsert.push({
               order_id: match.id,
               product_name: item.product_name,
+              product_code: item.product_code || undefined,
               weight_kg: item.weight_kg,
               quantity: item.quantity,
               unit: item.unit || 'kg',
