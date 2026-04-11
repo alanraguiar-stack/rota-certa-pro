@@ -30,6 +30,7 @@ interface LoadingManifestProps {
 
 interface ConsolidatedProduct {
   product: string;
+  productCode?: string;
   qty: number;
   unitAbbrev: string;
   unitType: string;
@@ -75,20 +76,20 @@ function normalizeProductKey(name: string): string {
 }
 
 function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) => string): ConsolidatedProduct[] {
-  const productMap = new Map<string, { product: string; qty: number; unitType: string }>();
-  
-  const allLackDetails = ordersLackDetails(orders);
+  const productMap = new Map<string, { product: string; productCode?: string; qty: number; unitType: string }>();
   
   orders.forEach(order => {
     if (order.items && order.items.length > 0) {
       order.items.forEach((item: OrderItem) => {
         const productName = item.product_name || 'Produto não especificado';
-        const key = normalizeProductKey(productName);
+        const productCode = (item as any).product_code || undefined;
+        // Use product_code as key if available, otherwise normalized name
+        const key = productCode || normalizeProductKey(productName);
         // Use unit from DB if available, otherwise resolve via inference
-        const unitType = (item as any).unit && (item as any).unit !== 'kg' 
-          ? (item as any).unit 
+        const unitType = item.unit && item.unit !== 'kg' 
+          ? item.unit 
           : resolveUnit(productName, getUnitForProduct);
-        const existing = productMap.get(key) || { product: productName, qty: 0, unitType };
+        const existing = productMap.get(key) || { product: productName, productCode, qty: 0, unitType };
         
         if (isWeightUnit(unitType)) {
           existing.qty += Number(item.weight_kg);
@@ -99,12 +100,12 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
         productMap.set(key, existing);
       });
     }
-    // Pedidos sem items são ignorados — aviso exibido separadamente
   });
   
   return Array.from(productMap.values())
     .map(data => ({
       product: data.product,
+      productCode: data.productCode,
       qty: data.qty,
       unitAbbrev: getUnitAbbrev(data.unitType),
       unitType: data.unitType,
