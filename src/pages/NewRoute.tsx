@@ -267,9 +267,13 @@ export default function NewRoute() {
         items: (o.items || []).map(item => ({ ...item })),
       }));
 
+      // Use sessionStorage to transfer large payload reliably (avoids structuredClone limits)
+      const json = JSON.stringify(ordersForState);
+      console.log(`[NewRoute] Saving ${ordersForState.length} orders to sessionStorage (${json.length} chars, ${ordersForState.reduce((s, o) => s + (o.items?.length || 0), 0)} total items)`);
+      sessionStorage.setItem('pendingOrdersWithItems', json);
+
       navigate(`/rota/${route.id}`, {
         state: { 
-          pendingOrders: ordersForState,
           selectedTruckIds,
           routingStrategy,
           fleetAlreadyConfigured: true,
