@@ -474,26 +474,6 @@ export function LoadingManifest({ routeName, date, trucks, routeId }: LoadingMan
         const noItems = selectedTruck ? (ordersLackDetails(selectedTruck.orders) || consolidatedProducts.length === 0) : true;
         return (
           <div className="flex gap-2 flex-wrap">
-            {noItems && onReimportItems && (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv,.xlsx,.xls,.txt"
-                  className="hidden"
-                  onChange={handleReimportFile}
-                />
-                <Button
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isReimporting}
-                  className="gap-2"
-                  variant="destructive"
-                >
-                  <Upload className="h-4 w-4" />
-                  {isReimporting ? 'Importando...' : 'Reimportar Detalhamento ADV'}
-                </Button>
-              </>
-            )}
             <Button onClick={handleDownloadPDF} className="gap-2" disabled={noItems} title={noItems ? 'Reimporte o ADV antes de gerar o PDF' : ''}>
               <FileDown className="h-4 w-4" />
               Baixar PDF
