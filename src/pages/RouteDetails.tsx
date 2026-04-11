@@ -44,46 +44,89 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
     if (!file) return;
 
     try {
-      let rows: unknown[][] = [];
-
-      if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
+      const isCSVorTXT = file.name.endsWith('.csv') || file.name.endsWith('.txt');
+      
+      if (isCSVorTXT) {
+        // Use dedicated CSV parser for CSV/TXT files
+        const { parseVendasCSV } = await import('@/lib/advParser');
         const text = await decodeFileContent(file);
-        const delimiter = text.includes(';') ? ';' : ',';
-        rows = text.split('\n').map(line => line.split(delimiter));
+        const csvItems = parseVendasCSV(text);
+        
+        if (csvItems.length === 0) {
+          toast({
+            title: 'Nenhum item encontrado',
+            description: 'O arquivo CSV não contém itens de vendas detalhadas.',
+            variant: 'destructive',
+          });
+          return;
+        }
+
+        // Group CSV items by venda_id to create ParsedOrder[]
+        const vendaMap = new Map<string, { client_name: string; items: any[] }>();
+        for (const item of csvItems) {
+          if (!vendaMap.has(item.venda_id)) {
+            vendaMap.set(item.venda_id, { client_name: item.client_name, items: [] });
+          }
+          const isWeight = /^(KG|G|KILO|QUILO)S?$/i.test(item.unit);
+          vendaMap.get(item.venda_id)!.items.push({
+            product_name: item.product_name,
+            product_code: item.product_code,
+            weight_kg: isWeight ? item.quantity : 0,
+            quantity: isWeight ? 1 : Math.max(1, Math.round(item.quantity)),
+            unit: item.unit,
+          });
+        }
+
+        const advOrders: ParsedOrder[] = Array.from(vendaMap.entries()).map(([vendaId, data]) => ({
+          pedido_id: vendaId,
+          client_name: data.client_name,
+          weight_kg: data.items.reduce((s: number, i: any) => s + i.weight_kg, 0),
+          address: '',
+          items: data.items,
+        }));
+
+        await reimportItems.mutateAsync(advOrders);
+        setAdvImported(true);
+        setImportedCount(csvItems.length);
+        toast({
+          title: 'Detalhamento importado!',
+          description: `${advOrders.length} vendas com ${csvItems.length} itens vinculados.`,
+        });
       } else {
+        // Excel path — use generic parser
         const XLSX = await import('xlsx');
         const buffer = await file.arrayBuffer();
         const wb = XLSX.read(buffer, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][];
-      }
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][];
 
-      if (!isADVExcelFormat(rows)) {
+        if (!isADVExcelFormat(rows)) {
+          toast({
+            title: 'Formato não reconhecido',
+            description: 'O arquivo não parece ser um relatório de Detalhe das Vendas (ADV).',
+            variant: 'destructive',
+          });
+          return;
+        }
+
+        const advOrders = parseADVDetailExcel(rows);
+        if (advOrders.length === 0) {
+          toast({
+            title: 'Nenhum item encontrado',
+            description: 'O arquivo não contém itens detalhados de produtos.',
+            variant: 'destructive',
+          });
+          return;
+        }
+
+        await reimportItems.mutateAsync(advOrders);
+        setAdvImported(true);
+        setImportedCount(advOrders.reduce((sum: number, o: ParsedOrder) => sum + (o.items?.length || 0), 0));
         toast({
-          title: 'Formato não reconhecido',
-          description: 'O arquivo não parece ser um relatório de Detalhe das Vendas (ADV).',
-          variant: 'destructive',
+          title: 'Detalhamento importado!',
+          description: `${advOrders.length} pedidos com itens vinculados à rota.`,
         });
-        return;
       }
-
-      const advOrders = parseADVDetailExcel(rows);
-      if (advOrders.length === 0) {
-        toast({
-          title: 'Nenhum item encontrado',
-          description: 'O arquivo não contém itens detalhados de produtos.',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      await reimportItems.mutateAsync(advOrders);
-      setAdvImported(true);
-      setImportedCount(advOrders.reduce((sum: number, o: ParsedOrder) => sum + (o.items?.length || 0), 0));
-      toast({
-        title: 'Detalhamento importado!',
-        description: `${advOrders.length} pedidos com itens vinculados à rota.`,
-      });
     } catch (err: any) {
       toast({
         title: 'Erro ao processar arquivo',
