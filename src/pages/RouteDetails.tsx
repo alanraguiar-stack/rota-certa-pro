@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock, Upload, CheckCircle2 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -762,6 +762,13 @@ export default function RouteDetails() {
               </Button>
             </CardContent>
           </Card>
+
+          {/* ADV Upload section — shown after trucks are assigned */}
+          <ADVUploadSection
+            route={route}
+            reimportItems={reimportItems}
+          />
+        </div>
         )}
 
         {/* ============================================ */}
