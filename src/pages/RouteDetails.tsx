@@ -111,6 +111,24 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
     );
   }
 
+  const hasOrders = route?.orders?.length > 0;
+
+  if (!hasOrders) {
+    return (
+      <Card className="border-dashed border-muted-foreground/30 bg-muted/5">
+        <CardContent className="py-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="font-medium text-muted-foreground">Aguardando pedidos</p>
+              <p className="text-sm text-muted-foreground">Esta rota ainda não tem pedidos cadastrados. Aguarde o carregamento ou volte e importe o relatório "Vendas do Dia".</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-dashed border-warning/50 bg-warning/5">
       <CardHeader className="pb-2">
@@ -295,15 +313,16 @@ export default function RouteDetails() {
     }
 
     // Read pending orders from sessionStorage (simple transfer — no items)
+    // IMPORTANT: Do NOT clear sessionStorage until addOrders succeeds
     const raw = sessionStorage.getItem('pendingOrders');
     let pendingOrders: Array<{ client_name: string; address: string; weight_kg: number; product_description?: string; city?: string; pedido_id?: string }> | undefined;
     if (raw) {
       try {
         pendingOrders = JSON.parse(raw);
-        sessionStorage.removeItem('pendingOrders');
-        console.log(`[RouteDetails] Recovered ${pendingOrders?.length} orders from sessionStorage (no items — ADV imported at Romaneio step)`);
+        console.log(`[RouteDetails] Read ${pendingOrders?.length} orders from sessionStorage (keeping until persisted)`);
       } catch (e) {
         console.error('[RouteDetails] Failed to parse sessionStorage pendingOrders:', e);
+        sessionStorage.removeItem('pendingOrders');
         pendingOrders = undefined;
       }
     }
@@ -322,6 +341,9 @@ export default function RouteDetails() {
         })),
         {
           onSuccess: () => {
+            // Only clear sessionStorage after successful persistence
+            sessionStorage.removeItem('pendingOrders');
+            console.log('[RouteDetails] Orders persisted — sessionStorage cleared');
             // Auto-assign trucks if fleet was configured in wizard
             if (selectedTruckIdsFromWizard && selectedTruckIdsFromWizard.length > 0 && fleetAlreadyConfigured) {
               setTimeout(async () => {

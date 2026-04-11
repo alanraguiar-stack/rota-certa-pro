@@ -1184,7 +1184,7 @@ export function useRouteDetails(routeId: string | undefined) {
       if (!routeId) throw new Error('Route ID missing');
       
       const route = routeQuery.data;
-      if (!route || route.orders.length === 0) throw new Error('Rota sem pedidos');
+      if (!route || route.orders.length === 0) throw new Error('Esta rota não possui pedidos cadastrados. Importe primeiro o relatório "Vendas do Dia".');
 
       // Normalize helper
       const normalize = (s: string) =>
