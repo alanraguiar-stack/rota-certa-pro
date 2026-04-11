@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map as MapIcon, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
