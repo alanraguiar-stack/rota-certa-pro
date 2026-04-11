@@ -1259,7 +1259,7 @@ export function useRouteDetails(routeId: string | undefined) {
               product_name: item.product_name,
               product_code: item.product_code || undefined,
               weight_kg: item.weight_kg,
-              quantity: item.quantity,
+              quantity: Math.round(item.quantity),
               unit: item.unit || 'kg',
             });
           }

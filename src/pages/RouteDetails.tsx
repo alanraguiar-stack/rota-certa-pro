@@ -1008,8 +1008,6 @@ export default function RouteDetails() {
               date={new Date(route.created_at).toLocaleDateString('pt-BR')}
               trucks={truckDataForComponents}
               routeId={route.id}
-              onReimportItems={(advOrders) => reimportItems.mutateAsync(advOrders)}
-              isReimporting={reimportItems.isPending}
             />
           </div>
         )}
