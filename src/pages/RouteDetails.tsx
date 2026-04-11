@@ -28,8 +28,122 @@ import { TruckManifestCards } from '@/components/route/TruckManifestCards';
 import { TruckRouteEditor } from '@/components/route/TruckRouteEditor';
 import { DriverAssignment } from '@/components/route/DriverAssignment';
 import { ExecutionTracker } from '@/components/route/ExecutionTracker';
+import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
+import { decodeFileContent } from '@/lib/encoding';
+import { ParsedOrder } from '@/types';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
-// Helper function to get strategy label
+// ADV Upload section for Step 2
+function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems: any }) {
+  const [advImported, setAdvImported] = useState(false);
+  const [importedCount, setImportedCount] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+
+  const handleADVFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      let rows: unknown[][] = [];
+
+      if (file.name.endsWith('.csv') || file.name.endsWith('.txt')) {
+        const text = await decodeFileContent(file);
+        const delimiter = text.includes(';') ? ';' : ',';
+        rows = text.split('\n').map(line => line.split(delimiter));
+      } else {
+        const XLSX = await import('xlsx');
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][];
+      }
+
+      if (!isADVExcelFormat(rows)) {
+        toast({
+          title: 'Formato não reconhecido',
+          description: 'O arquivo não parece ser um relatório de Detalhe das Vendas (ADV).',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const advOrders = parseADVDetailExcel(rows);
+      if (advOrders.length === 0) {
+        toast({
+          title: 'Nenhum item encontrado',
+          description: 'O arquivo não contém itens detalhados de produtos.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      await reimportItems.mutateAsync(advOrders);
+      setAdvImported(true);
+      setImportedCount(advOrders.reduce((sum: number, o: ParsedOrder) => sum + (o.items?.length || 0), 0));
+      toast({
+        title: 'Detalhamento importado!',
+        description: `${advOrders.length} pedidos com itens vinculados à rota.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Erro ao processar arquivo',
+        description: err.message || 'Erro desconhecido',
+        variant: 'destructive',
+      });
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  if (advImported) {
+    return (
+      <Card className="border-green-500/30 bg-green-500/5">
+        <CardContent className="py-4">
+          <div className="flex items-center gap-3">
+            <CheckCircle2 className="h-5 w-5 text-green-600" />
+            <div>
+              <p className="font-medium text-green-700 dark:text-green-400">Detalhamento importado com sucesso</p>
+              <p className="text-sm text-muted-foreground">{importedCount} itens vinculados. O romaneio de carga estará disponível na próxima etapa.</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-dashed border-warning/50 bg-warning/5">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Upload className="h-5 w-5 text-warning" />
+          Importar Detalhe das Vendas (ADV)
+        </CardTitle>
+        <CardDescription>
+          Carregue o relatório de detalhe das vendas para gerar o romaneio de carga com itens separados por caminhão.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.xls,.xlsx,.txt"
+          className="hidden"
+          onChange={handleADVFile}
+        />
+        <Button
+          variant="outline"
+          className="w-full border-warning/30 hover:bg-warning/10"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={reimportItems.isPending}
+        >
+          <Upload className="h-4 w-4 mr-2" />
+          {reimportItems.isPending ? 'Importando...' : 'Carregar Arquivo ADV'}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
 function getStrategyLabel(strategy: RoutingStrategy): string {
   const labels: Record<RoutingStrategy, string> = {
     padrao: 'Padrão',
