@@ -1582,3 +1582,123 @@ function parseExcelWeight(value: string | number | null | undefined): number {
   const num = parseFloat(str);
   return isNaN(num) ? 0 : num;
 }
+
+// ═══════════════════════════════════════════════════════════
+// Parser CSV de Vendas Detalhadas (conforme especificação)
+// Separador: ;  |  Encoding: latin1
+// ═══════════════════════════════════════════════════════════
+
+export interface VendaCSVItem {
+  product_code: string;
+  product_name: string;
+  unit: string;
+  quantity: number;
+  venda_id: string;
+  client_name: string;
+}
+
+/**
+ * Parse formato CSV de Vendas Detalhadas seguindo índices fixos:
+ * - partes[0] === "Cliente :" → captura partes[2] como cliente
+ * - partes[0] === "Venda Nº:" → captura partes[4] como número da venda
+ * - partes[0] numérico → item do produto:
+ *   - partes[0] = código do produto
+ *   - partes[4] = descrição
+ *   - partes[13] = unidade (KG, FD, CX, UN, SC, PC)
+ *   - partes[16] = quantidade (formato BR: 1.234,56)
+ */
+export function parseVendasCSV(text: string): VendaCSVItem[] {
+  const lines = text.split(/\r?\n/);
+  const items: VendaCSVItem[] = [];
+  let currentClient = '';
+  let currentVendaId = '';
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const partes = line.split(';');
+    const first = (partes[0] ?? '').trim();
+
+    // Detectar cliente
+    if (first === 'Cliente :' || first === 'Cliente:') {
+      currentClient = (partes[2] ?? partes[1] ?? '').trim();
+      continue;
+    }
+
+    // Detectar número da venda
+    if (first === 'Venda Nº:' || first === 'Venda No:' || /^Venda\s*N[º°]?\s*:?$/i.test(first)) {
+      currentVendaId = (partes[4] ?? partes[1] ?? '').trim().replace(/\D/g, '');
+      continue;
+    }
+
+    // Item: partes[0] é numérico (código do produto)
+    if (/^\d+$/.test(first) && currentVendaId) {
+      const productCode = first;
+      const productName = (partes[4] ?? '').trim();
+      const unit = (partes[13] ?? 'KG').trim().toUpperCase();
+      const qtyRaw = (partes[16] ?? '0').trim();
+      
+      // Parse quantidade formato BR (1.234,56)
+      const quantity = parseBRNumber(qtyRaw);
+      
+      if (productName && quantity > 0) {
+        items.push({
+          product_code: productCode,
+          product_name: productName,
+          unit: unit,
+          quantity: quantity,
+          venda_id: currentVendaId,
+          client_name: currentClient,
+        });
+      }
+    }
+  }
+
+  console.log(`[parseVendasCSV] Parsed ${items.length} items from ${lines.length} lines`);
+  return items;
+}
+
+/**
+ * Compila romaneio agrupando por código do produto
+ * Soma quantidades, ordena alfabeticamente pela descrição
+ */
+export function compilarRomaneio(
+  items: VendaCSVItem[],
+  vendasSelecionadas?: Set<string>
+): Array<{ product_code: string; product_name: string; unit: string; total_quantity: number }> {
+  const filtered = vendasSelecionadas
+    ? items.filter(i => vendasSelecionadas.has(i.venda_id))
+    : items;
+
+  const map = new Map<string, { product_code: string; product_name: string; unit: string; total_quantity: number }>();
+
+  for (const item of filtered) {
+    const existing = map.get(item.product_code);
+    if (existing) {
+      existing.total_quantity += item.quantity;
+    } else {
+      map.set(item.product_code, {
+        product_code: item.product_code,
+        product_name: item.product_name,
+        unit: item.unit,
+        total_quantity: item.quantity,
+      });
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => a.product_name.localeCompare(b.product_name));
+}
+
+/** Parse número no formato brasileiro: 1.234,56 → 1234.56 */
+function parseBRNumber(s: string): number {
+  if (!s) return 0;
+  let str = s.trim();
+  const hasComma = str.includes(',');
+  const hasDot = str.includes('.');
+  if (hasComma && hasDot) {
+    str = str.replace(/\./g, '').replace(',', '.');
+  } else if (hasComma) {
+    str = str.replace(',', '.');
+  }
+  const n = parseFloat(str);
+  return isNaN(n) ? 0 : n;
+}
