@@ -213,7 +213,7 @@ function generateLoadingManifestPDF(
   doc.text(pdfSafe(routeName), pageWidth / 2, y, { align: 'center' });
   y += 10;
 
-  // ── Header info box using autoTable (2 rows: VEICULO/DATA, CARGA TOTAL/CAPACIDADE) ──
+  // ── Header info box ──
   autoTable(doc, {
     startY: y,
     body: [
@@ -241,7 +241,23 @@ function generateLoadingManifestPDF(
     margin: { left: margin, right: margin },
   });
 
-  y = (doc as any).lastAutoTable.finalY + 10;
+  y = (doc as any).lastAutoTable.finalY + 4;
+
+  // ── Pedidos list ──
+  const pedidoIds = orders
+    .map(o => o.pedido_id)
+    .filter(Boolean)
+    .filter((v, i, a) => a.indexOf(v) === i);
+  if (pedidoIds.length > 0) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    const pedidosText = `Pedidos: ${pedidoIds.join(', ')}`;
+    const splitPedidos = doc.splitTextToSize(pdfSafe(pedidosText), pageWidth - 2 * margin);
+    doc.text(splitPedidos, margin, y);
+    y += splitPedidos.length * 4 + 4;
+  } else {
+    y += 6;
+  }
 
   // ── Section title ──
   doc.setFontSize(12);
@@ -260,12 +276,13 @@ function generateLoadingManifestPDF(
     y += 6;
   }
 
-  // ── Consolidated Products Table (3 columns: #, Produto, Peso Total) ──
+  // ── Consolidated Products Table (4 columns: #, Produto, UN, Qtde) ──
   const consolidatedProducts = consolidateProducts(orders, getUnitForProduct);
 
   const tableBody = consolidatedProducts.map((p, idx) => [
     String(idx + 1),
     pdfSafe(p.product),
+    formatUnitLabel(p.unitType),
     formatQtyWithUnit(p.qty, p.unitType),
   ]);
 
@@ -273,12 +290,13 @@ function generateLoadingManifestPDF(
   tableBody.push([
     '',
     'TOTAL',
+    '',
     formatWeight(totalWeight),
   ]);
 
   autoTable(doc, {
     startY: y,
-    head: [['#', 'Produto', 'Peso Total']],
+    head: [['#', 'Produto', 'UN', 'Qtde']],
     body: tableBody,
     theme: 'striped',
     headStyles: { fillColor: [80, 80, 80], fontSize: 10, fontStyle: 'bold' },
@@ -286,11 +304,11 @@ function generateLoadingManifestPDF(
     columnStyles: {
       0: { cellWidth: 12, halign: 'center' },
       1: { cellWidth: 'auto' },
-      2: { cellWidth: 35, halign: 'right' },
+      2: { cellWidth: 18, halign: 'center' },
+      3: { cellWidth: 30, halign: 'right' },
     },
     margin: { left: margin, right: margin },
     didParseCell: (data) => {
-      // Style the TOTAL row (last body row)
       if (data.section === 'body' && data.row.index === tableBody.length - 1) {
         data.cell.styles.fontStyle = 'bold';
         data.cell.styles.fontSize = 10;
