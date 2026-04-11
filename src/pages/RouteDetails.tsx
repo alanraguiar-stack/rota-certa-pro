@@ -588,9 +588,18 @@ export default function RouteDetails() {
       console.error('[PatternLearning] Error saving patterns:', err);
     }
 
+    // Advance status to loading_confirmed so stepper moves to import_adv
+    try {
+      const { supabase } = await import('@/integrations/supabase/client');
+      await supabase.from('routes').update({ status: 'loading_confirmed' }).eq('id', route!.id);
+      await refetch();
+    } catch (err) {
+      console.error('[RouteDetails] Error updating status to loading_confirmed:', err);
+    }
+
     toast({
-      title: 'Rotas confirmadas e otimizadas!',
-      description: 'Os romaneios estão prontos para geração.',
+      title: 'Rotas confirmadas!',
+      description: 'Agora importe o Detalhe das Vendas para gerar o romaneio de carga.',
     });
   }, [optimizeRoutes, routingStrategy, refetch, toast, route, lockedTruckIds, manuallyMovedOrderIds]);
 
