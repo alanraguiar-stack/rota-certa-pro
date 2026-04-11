@@ -277,6 +277,10 @@ export function useRouteDetails(routeId: string | undefined) {
 
       // Map inserted orders back to originals using pedido_id (deterministic) or name+weight (fallback)
       const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const normalizePedidoId = (id: string | null | undefined): string => {
+        if (!id) return '';
+        return id.replace(/\D/g, '').replace(/^0+/, '');
+      };
       
       const itemsToInsert: Array<{
         order_id: string;
@@ -288,21 +292,27 @@ export function useRouteDetails(routeId: string | undefined) {
       const originalsWithItems = orders.filter(o => o.items && o.items.length > 0);
       console.log(`[addOrders] Total: ${orders.length} orders, ${originalsWithItems.length} with items, ${orders.length - originalsWithItems.length} without items`);
       const usedInsertedIds = new Set<string>();
+      let matchById = 0, matchByName = 0, noMatch = 0;
 
       for (const original of originalsWithItems) {
-        // Priority 1: match by pedido_id (deterministic)
-        let match = original.pedido_id
-          ? insertedOrders.find(io => !usedInsertedIds.has(io.id) && io.pedido_id === original.pedido_id)
+        const normOrigId = normalizePedidoId(original.pedido_id);
+        
+        // Priority 1: match by normalized pedido_id (deterministic)
+        let match = normOrigId
+          ? insertedOrders.find(io => !usedInsertedIds.has(io.id) && normalizePedidoId(io.pedido_id) === normOrigId)
           : undefined;
-
-        // Priority 2: fallback to name + weight
-        if (!match) {
+        
+        if (match) {
+          matchById++;
+        } else {
+          // Priority 2: fallback to name + weight
           const normName = normalize(original.client_name);
           match = insertedOrders.find(io => 
             !usedInsertedIds.has(io.id) &&
             normalize(io.client_name) === normName &&
             Math.abs(Number(io.weight_kg) - original.weight_kg) < 0.1
           );
+          if (match) matchByName++;
         }
         
         if (match) {
@@ -316,10 +326,12 @@ export function useRouteDetails(routeId: string | undefined) {
             });
           }
         } else {
-          console.warn('[addOrders] No match for items of:', original.client_name, original.weight_kg);
+          noMatch++;
+          console.warn('[addOrders] No match for items of:', original.pedido_id, original.client_name, original.weight_kg);
         }
       }
 
+      console.log(`[addOrders] Match stats: byId=${matchById}, byName=${matchByName}, noMatch=${noMatch}`);
       console.log(`[addOrders] ${itemsToInsert.length} items prepared for ${originalsWithItems.length} orders with details`);
 
       if (itemsToInsert.length > 0) {
