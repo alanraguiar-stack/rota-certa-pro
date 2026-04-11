@@ -1309,7 +1309,7 @@ export function useRouteDetails(routeId: string | undefined) {
         await supabase.from('order_items').delete().in('order_id', chunk);
       }
 
-      const itemsToInsert: Array<{ order_id: string; product_name: string; weight_kg: number; quantity: number; unit: string }> = [];
+      const itemsToInsert: Array<{ order_id: string; product_name: string; product_code?: string; weight_kg: number; quantity: number; unit: string }> = [];
       const orderUpdates: Array<{ id: string; product_description: string }> = [];
       let matched = 0;
 
@@ -1355,6 +1355,7 @@ export function useRouteDetails(routeId: string | undefined) {
             itemsToInsert.push({
               order_id: order.id,
               product_name: item.product_name,
+              product_code: item.product_code || undefined,
               weight_kg: item.weight_kg,
               quantity: item.quantity,
               unit: item.unit || 'kg',
