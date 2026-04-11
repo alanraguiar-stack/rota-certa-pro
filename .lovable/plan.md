@@ -1,78 +1,88 @@
 
 
-# Corrigir pipeline completo: Romaneio de Carga com cruzamento obrigatório
+# Implementar Romaneio de Carga conforme especificação do documento
 
-## Problema raiz confirmado
-Consultei o banco de dados: **zero itens em `order_items`** em todas as rotas, apesar de todos os pedidos terem `pedido_id` preenchido. O romaneio sai com tabela de produtos vazia porque depende de `order_items` para consolidar — e esses itens nunca são persistidos.
+## Resumo
 
-## Causa raiz técnica
-Rastreei todo o fluxo de dados:
+O documento define regras precisas para parsing do CSV de vendas detalhadas e compilação do romaneio. Vou implementar essas regras exatamente como especificadas, e resolver definitivamente o problema de perda de itens usando `sessionStorage` em vez de `navigate(state)`.
 
-1. `parseADVDetailExcel` → gera `ParsedOrder[]` com `items[]` corretos ✅
-2. `mergeItinerarioWithADV` → faz `...advOrder` que inclui `items` ✅
-3. `handleProcessData` → chama `onDataReady(mergedOrders, true)` ✅
-4. `handleAutoDataReady` → `setOrders(filteredOrders)` ✅
-5. `handleCreateRoute` → `navigate()` com `pendingOrders: validOrders` ✅
-6. `RouteDetails` → `addOrders.mutate(pendingOrders.map(...))` com `items: o.items` ✅
-7. **`addOrders` → o log `originalsWithItems` é 0** ❌
+## Problema atual
 
-O problema está na **serialização via `navigate(state)`**: o React Router serializa o state via `structuredClone` ou similar, e os arrays `items` podem estar sendo perdidos se houver referências circulares ou se o objeto for muito grande. Alternativamente, o `file1Upload` usado em `handleFile2` (linha 493) pode ser um snapshot de estado vazio (closure stale).
+Os itens são perdidos durante a navegação entre NewRoute e RouteDetails porque o React Router serializa o state via `structuredClone`, que falha silenciosamente com payloads grandes. Resultado: `order_items` sempre vazio no banco, romaneio sempre vazio.
 
-## Plano de correção
+## Mudanças planejadas
 
-### 1. Migration: adicionar coluna `unit` na tabela `order_items`
-A tabela atual não guarda a unidade de medida (KG, FD, CX, UN). O sistema infere em runtime, mas isso é frágil. Adicionar:
+### 1. Novo parser CSV conforme especificação exata do documento
+**Arquivo:** `src/lib/advParser.ts`
+
+Adicionar função `parseVendasCSV(text: string)` que segue as regras do documento:
+- Separador `;`, encoding latin1
+- `partes[0] === "Cliente :"` → captura `partes[2]` como cliente
+- `partes[0] === "Venda Nº:"` → captura `partes[4]` como número da venda  
+- `partes[0]` numérico → extrai item com:
+  - `partes[0]` = código do produto
+  - `partes[4]` = descrição
+  - `partes[13]` = unidade (KG, FD, CX, UN, SC, PC)
+  - `partes[16]` = quantidade (formato BR: `1.234,56`)
+
+Adicionar função `compilarRomaneio(items, vendasSelecionadas)` que:
+- Agrupa por **código do produto** (não descrição)
+- Soma quantidades
+- Ordena alfabeticamente pela descrição
+
+### 2. Transferência de dados via sessionStorage (corrige perda de itens)
+**Arquivos:** `src/pages/NewRoute.tsx`, `src/pages/RouteDetails.tsx`
+
+- **NewRoute.tsx**: Antes de `navigate()`, salvar os pedidos com itens em `sessionStorage.setItem('pendingOrdersWithItems', JSON.stringify(ordersForState))`. Remover `pendingOrders` do state do navigate.
+- **RouteDetails.tsx**: Ler de `sessionStorage` em vez de `location.state`. Após leitura, limpar o sessionStorage.
+
+### 3. Consolidação do romaneio por código do produto
+**Arquivo:** `src/components/route/LoadingManifest.tsx`
+
+Alterar `consolidateProducts` para agrupar por código do produto (quando disponível via `order_items`) em vez de por nome normalizado. Adicionar colunas UN e Qtde separadas no layout do PDF conforme o documento:
+
+```
+# | Produto | UN | Qtde
+```
+
+### 4. Regras de exibição de quantidade
+**Arquivo:** `src/components/route/LoadingManifest.tsx`
+
+- KG → 2 casas decimais sempre (ex: `59,67 KG`)
+- UN, FD, CX, SC, PC → inteiro sem decimal
+
+### 5. Adicionar código do produto ao order_items
+**Migration SQL:**
 ```sql
-ALTER TABLE public.order_items ADD COLUMN unit text NOT NULL DEFAULT 'kg';
+ALTER TABLE public.order_items ADD COLUMN IF NOT EXISTS product_code text;
 ```
 
-### 2. `src/types/index.ts` — adicionar `unit` aos tipos
-- `ParsedOrderItem`: adicionar `unit?: string`
-- `OrderItem`: adicionar `unit: string`
+**Arquivo:** `src/hooks/useRoutes.ts` — salvar `product_code` no insert de items.
 
-### 3. `src/lib/advParser.ts` — salvar `unit` no `ParsedOrderItem`
-Na linha 1462, adicionar `unit: unitType || 'kg'` ao item parsed.
+### 6. Cabeçalho do PDF com lista de pedidos
+**Arquivo:** `src/components/route/LoadingManifest.tsx`
 
-### 4. `src/hooks/useRoutes.ts` — corrigir `addOrders` com diagnóstico detalhado
-- Adicionar log **antes** do filtro `originalsWithItems` mostrando exatamente o que cada pedido tem
-- Se `originalsWithItems.length === 0` mas pedidos têm `pedido_id`, logar alerta claro
-- Incluir `unit` no insert de `order_items`
+Adicionar ao cabeçalho do PDF: `Pedidos: [lista dos pedido_ids incluídos naquele caminhão]`
 
-### 5. `src/pages/NewRoute.tsx` — garantir serialização dos itens
-Antes de chamar `navigate()`, fazer deep-clone explícito dos itens para evitar perda na serialização:
-```typescript
-const ordersForState = validOrders.map(o => ({
-  ...o,
-  items: (o.items || []).map(item => ({ ...item })),
-}));
-navigate(`/rota/${route.id}`, { state: { pendingOrders: ordersForState, ... } });
-```
-
-### 6. `src/pages/RouteDetails.tsx` — validação na recepção dos pedidos
-Ao receber `pendingOrders` do state, logar quantos têm itens. Se zero têm itens mas todos têm `pedido_id`, exibir toast de alerta.
-
-### 7. `src/components/route/LoadingManifest.tsx` — usar `unit` do banco
-Quando `order.items` tem dados, usar `item.unit` diretamente em vez de inferir via `resolveUnit`.
-
-### 8. `src/hooks/useRoutes.ts` — `reimportItems` também salvar `unit`
-Incluir a unidade no reimport para consistência.
-
-### 9. Bloquear romaneio sem itens (já implementado, reforçar)
-Se `consolidatedProducts.length === 0`, mostrar erro claro e botão de reimport em destaque.
+### 7. Seção de conferência no PDF
+Já existe, mas ajustar layout para corresponder exatamente ao documento:
+- Separador + Assinatura
+- Conferente + Assinatura  
+- Data + Hora
 
 ## Arquivos a editar
-- Nova migration SQL (adicionar coluna `unit`)
-- `src/types/index.ts`
-- `src/lib/advParser.ts`
-- `src/hooks/useRoutes.ts`
-- `src/pages/NewRoute.tsx`
-- `src/pages/RouteDetails.tsx`
-- `src/components/route/LoadingManifest.tsx`
+- Nova migration SQL (coluna `product_code`)
+- `src/lib/advParser.ts` — novo parser CSV com índices fixos
+- `src/pages/NewRoute.tsx` — sessionStorage
+- `src/pages/RouteDetails.tsx` — ler de sessionStorage
+- `src/hooks/useRoutes.ts` — salvar `product_code`
+- `src/components/route/LoadingManifest.tsx` — consolidação por código, formato do PDF, regras de exibição
 
 ## Resultado esperado
-- Itens persistidos com unidade de medida na criação da rota
-- Serialização robusta via navigate state
-- Romaneio com produtos consolidados corretamente por caminhão
-- Unidade correta (kg, fardo, caixa, unidade) vinda do banco
-- Nunca mais romaneio vazio
+- Parser CSV segue exatamente a especificação (índices fixos, encoding latin1)
+- Itens nunca mais perdidos na transferência entre páginas (sessionStorage = 5MB)
+- Romaneio agrupa por código do produto, soma quantidades, exibe unidade correta
+- PDF com layout: `# | Produto | UN | Qtde`
+- Cabeçalho com lista de pedidos incluídos
+- Conferência de carga com campos de assinatura
 
