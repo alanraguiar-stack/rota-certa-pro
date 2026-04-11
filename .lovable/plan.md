@@ -1,44 +1,43 @@
 
 
-# Diagnóstico: Por que o romaneio saiu vazio novamente
+# Corrigir pipeline de dados do Romaneio de Carga
 
-## O que confirmei no banco de dados
-Consultei diretamente a tabela `orders` desta rota. Todos os pedidos têm `pedido_id` preenchido corretamente (ex: 281549, 281589, etc.), mas **nenhum tem itens na tabela `order_items`** (`item_count: 0` para todos).
+## Problema confirmado
+Consultei o banco: todos os 20 pedidos desta rota têm `pedido_id` preenchido mas **zero itens** na tabela `order_items`. O romaneio sai vazio porque depende 100% de `order_items` para consolidar produtos — e esses itens nunca foram persistidos.
 
-## Causa raiz identificada
-O fluxo de inserção de itens em `addOrders` (useRoutes.ts) depende de os pedidos chegarem com o campo `items[]` preenchido. Porém há dois cenários em que isso falha:
+## Causa raiz
+O fluxo de importação tem uma falha no momento de persistir os itens:
 
-1. **Itinerário sem ADV**: Se só o itinerário foi carregado (ou o merge não aconteceu), a função `createOrdersFromItinerario` cria pedidos com `items: []` — o `pedido_id` é salvo, mas sem itens.
+1. **Na importação inicial**: O `mergeItinerarioWithADV` faz `...advOrder` que deveria incluir `items[]`, mas o match dentro de `addOrders` entre os pedidos originais e os inseridos no banco falha silenciosamente — o log `[addOrders] No match for items of:` provavelmente aparece no console mas é ignorado.
 
-2. **Merge não consolidou itens**: Mesmo quando ambos os arquivos são carregados, se o ADV CSV passar pelo "motor inteligente" em vez do parser ADV hierárquico (`parseADVDetailExcel`), cada linha do CSV vira um "pedido" separado com 1 produto. O merge então só casa o primeiro item de cada `pedido_id`, perdendo os demais.
+2. **O match é frágil**: Usa `client_name + weight_kg` como fallback quando `pedido_id` não bate. Diferenças de normalização entre o nome que chega do merge e o que é inserido no banco causam falhas de casamento.
 
-3. **Limite de 1000 linhas do Supabase**: A query que busca `order_items` não tem paginação. Se houver mais de 1000 itens na rota, o romaneio fica incompleto.
+3. **Sem validação**: O sistema permite avançar o workflow mesmo com zero itens persistidos — não há barreira.
 
-## Correções planejadas
+## O que vou corrigir
 
-### 1. Consolidar itens no addOrders de forma robusta
-Em `useRoutes.ts`, quando o `addOrders` recebe pedidos sem `items`, mas com `pedido_id`, guardar o `pedido_id` para uso futuro no reimport. Adicionar log detalhado para diagnosticar quantos pedidos vieram com vs sem itens.
+### 1. Tornar o match em `addOrders` determinístico por `pedido_id`
+O `pedido_id` já está sendo salvo nos orders. Mas o match dentro de `addOrders` compara `io.pedido_id === original.pedido_id` de forma exata. Preciso normalizar ambos (remover zeros à esquerda, caracteres não-numéricos) — exatamente como o `reimportItems` já faz.
 
-### 2. Corrigir query de order_items para respeitar limite do Supabase
-Dividir a query `.in('order_id', orderIds)` em lotes de 200 IDs para evitar o limite de 1000 linhas, garantindo que todos os itens sejam carregados.
+### 2. Adicionar validação pós-inserção em `addOrders`
+Após inserir os `order_items`, verificar quantos foram realmente inseridos. Se zero itens foram persistidos mas os pedidos originais tinham itens, exibir toast de alerta claro.
 
-### 3. Reimport automático quando itens faltarem
-Quando o romaneio detectar que todos os pedidos do caminhão estão sem itens mas têm `pedido_id`, exibir botão proeminente de "Reimportar Detalhamento" em vez de gerar PDF vazio. Bloquear download/impressão quando não há itens.
+### 3. Bloquear geração do PDF quando `consolidatedProducts` está vazio
+Em `LoadingManifest.tsx`, o botão de download/impressão já está condicionado a `noItems`, mas isso verifica `ordersLackDetails` que olha `order.items`. Preciso garantir que `consolidatedProducts.length === 0` também bloqueia — e mostrar mensagem clara com o botão de reimport.
 
-### 4. Garantir que o ADV CSV sempre use o parser hierárquico
-No `DualFileUpload.tsx`, quando um CSV é detectado como ADV hierárquico via `isADVExcelFormat`, ele já usa `parseADVDetailExcel` (linha 165-175). Mas preciso verificar que a detecção funciona corretamente com o CSV do usuário e que os itens são preservados no merge.
+### 4. Adicionar fallback robusto no `addOrders`: se match por ID falhar, normalizar ambos os lados
+Aplicar a mesma normalização `replace(/\D/g, '').replace(/^0+/, '')` tanto no `original.pedido_id` quanto no `insertedOrder.pedido_id`.
 
-### 5. Adicionar fallback no merge: propagar items do ADV mesmo quando o itinerário é a lista mestre
-Na função `mergeItinerarioWithADV`, quando `advOrder` tem items mas o resultado do merge não os inclui (improvável mas possível por bug de spread), adicionar verificação explícita.
+### 5. Log de diagnóstico detalhado
+Adicionar contadores de match por tipo (ID vs nome+peso vs sem match) para facilitar debug futuro.
 
 ## Arquivos a editar
-- `src/hooks/useRoutes.ts` — paginar query de order_items; melhorar logs no addOrders
-- `src/components/route/LoadingManifest.tsx` — bloquear PDF vazio; botão reimport destacado
-- `src/components/route/DualFileUpload.tsx` — garantir que CSV ADV use parser correto
+- `src/hooks/useRoutes.ts` — normalizar `pedido_id` no match de `addOrders`; validação pós-inserção
+- `src/components/route/LoadingManifest.tsx` — blindar contra PDF vazio baseado em `consolidatedProducts.length`
 
 ## Resultado esperado
-- Query de itens sempre completa (sem limite de 1000)
-- Romaneio nunca mais gera PDF vazio — mostra aviso e botão de reimport
-- Logs detalhados para diagnosticar se itens estão chegando no addOrders
-- Parser ADV hierárquico sempre ativado para CSV com formato correto
+- Itens persistidos corretamente na criação da rota (match por `pedido_id` normalizado)
+- Romaneio com produtos consolidados conforme a tabela de vendas detalhadas
+- PDF nunca gerado vazio — erro claro quando faltar detalhamento
+- Reimport funcional como fallback
 
