@@ -328,6 +328,7 @@ export type Database = {
           order_id: string
           product_name: string
           quantity: number
+          unit: string
           weight_kg: number
         }
         Insert: {
@@ -336,6 +337,7 @@ export type Database = {
           order_id: string
           product_name: string
           quantity?: number
+          unit?: string
           weight_kg: number
         }
         Update: {
@@ -344,6 +346,7 @@ export type Database = {
           order_id?: string
           product_name?: string
           quantity?: number
+          unit?: string
           weight_kg?: number
         }
         Relationships: [

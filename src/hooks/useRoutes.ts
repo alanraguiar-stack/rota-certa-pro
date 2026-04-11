@@ -287,10 +287,15 @@ export function useRouteDetails(routeId: string | undefined) {
         product_name: string;
         weight_kg: number;
         quantity: number;
+        unit: string;
       }> = [];
 
       const originalsWithItems = orders.filter(o => o.items && o.items.length > 0);
       console.log(`[addOrders] Total: ${orders.length} orders, ${originalsWithItems.length} with items, ${orders.length - originalsWithItems.length} without items`);
+      // Debug: log first 3 orders' items detail
+      orders.slice(0, 3).forEach((o, i) => {
+        console.log(`[addOrders] Order[${i}] pedido_id=${o.pedido_id} items=${o.items?.length || 0} client=${o.client_name?.substring(0, 20)}`);
+      });
       const usedInsertedIds = new Set<string>();
       let matchById = 0, matchByName = 0, noMatch = 0;
 
@@ -323,6 +328,7 @@ export function useRouteDetails(routeId: string | undefined) {
               product_name: item.product_name,
               weight_kg: item.weight_kg,
               quantity: item.quantity,
+              unit: item.unit || 'kg',
             });
           }
         } else {
@@ -1301,7 +1307,7 @@ export function useRouteDetails(routeId: string | undefined) {
         await supabase.from('order_items').delete().in('order_id', chunk);
       }
 
-      const itemsToInsert: Array<{ order_id: string; product_name: string; weight_kg: number; quantity: number }> = [];
+      const itemsToInsert: Array<{ order_id: string; product_name: string; weight_kg: number; quantity: number; unit: string }> = [];
       const orderUpdates: Array<{ id: string; product_description: string }> = [];
       let matched = 0;
 
@@ -1349,6 +1355,7 @@ export function useRouteDetails(routeId: string | undefined) {
               product_name: item.product_name,
               weight_kg: item.weight_kg,
               quantity: item.quantity,
+              unit: item.unit || 'kg',
             });
           }
           orderUpdates.push({

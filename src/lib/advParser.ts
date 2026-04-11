@@ -1230,7 +1230,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   
   let currentClient = '';
   let currentVendaId = '';
-  let currentItems: { product_name: string; weight_kg: number; quantity: number }[] = [];
+  let currentItems: { product_name: string; weight_kg: number; quantity: number; unit?: string }[] = [];
   let inItemTable = false;
   let itemColumnMap: {
     codigo: number;
@@ -1463,6 +1463,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
         product_name: normalizeText(descricao),
         weight_kg: itemWeightKg,
         quantity: isWeightBased ? 1 : (itemQuantity > 0 ? itemQuantity : 1),
+        unit: unitType || 'kg',
       });
       console.log('[ADV Excel] ✅ Item:', descricao.substring(0, 35), '| qty:', qty, '| source:', extractionSource, '| unit:', unitType || 'N/A');
       continue;
@@ -1479,6 +1480,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
             product_name: normalizeText(descricao.trim()),
             weight_kg: weight,
             quantity: 1,
+            unit: 'kg',
           });
           console.log('[ADV Excel] ✅ Item (fallback regex):', descricao.substring(0, 35), weight, 'kg');
         }

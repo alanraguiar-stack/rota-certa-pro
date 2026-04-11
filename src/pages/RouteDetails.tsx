@@ -183,9 +183,15 @@ export default function RouteDetails() {
     }
     
     if (pendingOrders && pendingOrders.length > 0 && !hasAddedPendingOrders && route) {
+      const withItems = pendingOrders.filter((o: ParsedOrder) => o.items && o.items.length > 0);
+      const totalItems = pendingOrders.reduce((s: number, o: ParsedOrder) => s + (o.items?.length || 0), 0);
+      console.log(`[RouteDetails] Received ${pendingOrders.length} pendingOrders from state, ${withItems.length} have items (${totalItems} total items)`);
+      if (withItems.length === 0 && pendingOrders.some((o: ParsedOrder) => o.pedido_id)) {
+        console.warn('[RouteDetails] WARNING: All orders have pedido_id but zero items — serialization may have failed');
+      }
       setHasAddedPendingOrders(true);
       addOrders.mutate(
-        pendingOrders.map((o) => ({
+        pendingOrders.map((o: ParsedOrder) => ({
           client_name: o.client_name,
           address: o.address,
           weight_kg: o.weight_kg,
