@@ -1480,6 +1480,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
             product_name: normalizeText(descricao.trim()),
             weight_kg: weight,
             quantity: 1,
+            unit: 'kg',
           });
           console.log('[ADV Excel] ✅ Item (fallback regex):', descricao.substring(0, 35), weight, 'kg');
         }
