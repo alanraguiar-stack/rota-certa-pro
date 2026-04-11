@@ -645,14 +645,15 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
               <h3 className="text-center font-bold text-sm">PRODUTOS PARA SEPARAÇÃO</h3>
             </div>
 
-            {/* Consolidated Products Table — 3 columns */}
+            {/* Consolidated Products Table — 4 columns */}
             <div className="px-4 pb-2">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-12 text-center">#</TableHead>
                     <TableHead>Produto</TableHead>
-                    <TableHead className="w-28 text-right">Peso Total</TableHead>
+                    <TableHead className="w-16 text-center">UN</TableHead>
+                    <TableHead className="w-24 text-right">Qtde</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -660,6 +661,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                     <TableRow key={idx}>
                       <TableCell className="text-center text-muted-foreground">{idx + 1}</TableCell>
                       <TableCell className="font-medium">{product.product}</TableCell>
+                      <TableCell className="text-center">{formatUnitLabel(product.unitType)}</TableCell>
                       <TableCell className="text-right font-bold">
                         {formatQtyWithUnit(product.qty, product.unitType)}
                       </TableCell>
@@ -669,6 +671,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                   <TableRow className="border-t-2 font-bold">
                     <TableCell />
                     <TableCell className="font-bold">TOTAL</TableCell>
+                    <TableCell />
                     <TableCell className="text-right font-bold">{formatWeight(selectedTruck.totalWeight)}</TableCell>
                   </TableRow>
                 </TableBody>
