@@ -552,30 +552,9 @@ export function LoadingManifest({ routeName, date, trucks, routeId }: LoadingMan
                   <AlertDescription className="flex items-center justify-between gap-4">
                     <span>
                       {allMissing
-                        ? 'Detalhamento de produtos não importado. Reimporte o arquivo ADV para gerar o romaneio.'
-                        : `${missingCount} pedido(s) deste caminhão estão sem itens detalhados e foram omitidos da consolidação. Reimporte o ADV para incluí-los.`}
+                        ? 'Detalhamento de produtos não importado. Carregue o arquivo ADV acima para gerar o romaneio.'
+                        : `${missingCount} pedido(s) deste caminhão estão sem itens detalhados e foram omitidos da consolidação.`}
                     </span>
-                    {onReimportItems && (
-                      <>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept=".csv,.xlsx,.xls,.txt"
-                          className="hidden"
-                          onChange={handleReimportFile}
-                        />
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="shrink-0 gap-2"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isReimporting}
-                        >
-                          <Upload className="h-4 w-4" />
-                          {isReimporting ? 'Importando...' : 'Reimportar Detalhamento'}
-                        </Button>
-                      </>
-                    )}
                   </AlertDescription>
                 </Alert>
               );
