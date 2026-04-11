@@ -1,11 +1,11 @@
-import { Check, Truck, Package, ClipboardCheck, Route, FileText } from 'lucide-react';
+import { Check, Truck, Package, ClipboardCheck, Route, FileText, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type RouteWorkflowStep = 
   | 'select_trucks'
   | 'distribute_load'
   | 'loading_manifest'
-  | 'optimize_routes'
+  | 'import_adv'
   | 'delivery_manifest';
 
 interface WorkflowStepConfig {
@@ -33,17 +33,17 @@ const WORKFLOW_STEPS: WorkflowStepConfig[] = [
   },
   { 
     id: 'loading_manifest', 
-    title: 'Romaneio de Carga', 
-    description: 'Lista de separação do CD',
+    title: 'Confirmar Rotas', 
+    description: 'Ajustar e confirmar sequência de entrega',
     icon: ClipboardCheck,
     phase: 'romaneio',
   },
   { 
-    id: 'optimize_routes', 
-    title: 'Roteirizar', 
-    description: 'Definir ordem de entrega',
-    icon: Route,
-    phase: 'roteirizacao',
+    id: 'import_adv', 
+    title: 'Romaneio de Carga', 
+    description: 'Importar ADV e gerar romaneio',
+    icon: Upload,
+    phase: 'romaneio',
   },
   { 
     id: 'delivery_manifest', 
@@ -69,8 +69,6 @@ export function getActiveStep(
   
   if (!hasTrucks) return 'select_trucks';
   
-  // If we have assignments but status is still draft/trucks_assigned, 
-  // distribution happened but status update failed - advance to loading_manifest
   if (hasAssignments && (route.status === 'draft' || route.status === 'trucks_assigned')) {
     return 'loading_manifest';
   }
@@ -81,10 +79,9 @@ export function getActiveStep(
     case 'trucks_assigned':
       return 'distribute_load';
     case 'loading':
-    case 'loading_confirmed':
-      // Both loading and loading_confirmed show the loading_manifest step
-      // User can optimize routes directly from there
       return 'loading_manifest';
+    case 'loading_confirmed':
+      return 'import_adv';
     case 'distributed':
     case 'completed':
       return 'delivery_manifest';
