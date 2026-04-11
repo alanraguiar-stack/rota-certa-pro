@@ -585,6 +585,20 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                 {formatWeight(selectedTruck.truck.capacity_kg)} ({selectedTruck.occupancyPercent}%)
               </div>
             </div>
+            {/* Pedidos list */}
+            {(() => {
+              const pedidoIds = selectedTruck.orders
+                .map(o => o.pedido_id)
+                .filter(Boolean)
+                .filter((v, i, a) => a.indexOf(v) === i);
+              if (pedidoIds.length === 0) return null;
+              return (
+                <div className="px-4 py-2 border-b text-xs text-muted-foreground">
+                  <span className="font-bold">Pedidos: </span>
+                  {pedidoIds.join(', ')}
+                </div>
+              );
+            })()}
             
             {/* Warning for missing details */}
             {(() => {
