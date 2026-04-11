@@ -720,7 +720,7 @@ export default function RouteDetails() {
                 onClick={() => setShowMap(!showMap)} 
                 className="gap-2"
               >
-                <Map className="h-4 w-4" />
+                <MapIcon className="h-4 w-4" />
                 Mapa
               </Button>
             </div>
@@ -1068,7 +1068,7 @@ export default function RouteDetails() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-lg">
-                    <Map className="h-5 w-5" />
+                    <MapIcon className="h-5 w-5" />
                     Mapa das Rotas
                   </CardTitle>
                 </CardHeader>
