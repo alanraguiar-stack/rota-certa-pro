@@ -258,19 +258,20 @@ export default function NewRoute() {
         await markAsRouted(recoveredOrders.map(o => o.id), route.id);
       }
 
-      const ordersWithItems = validOrders.filter(o => o.items && o.items.length > 0);
-      console.log(`[NewRoute] Navigating with ${validOrders.length} orders, ${ordersWithItems.length} have items (${ordersWithItems.reduce((s, o) => s + (o.items?.length || 0), 0)} total items)`);
+      console.log(`[NewRoute] Navigating with ${validOrders.length} orders (no items — ADV imported later at Romaneio step)`);
 
-      // Deep-clone orders to prevent serialization loss of items array
-      const ordersForState = validOrders.map(o => ({
-        ...o,
-        items: (o.items || []).map(item => ({ ...item })),
+      // Simple orders without items — no sessionStorage needed
+      const ordersForTransfer = validOrders.map(o => ({
+        client_name: o.client_name,
+        address: o.address,
+        weight_kg: o.weight_kg,
+        product_description: o.product_description,
+        city: o.city,
+        pedido_id: o.pedido_id,
       }));
 
-      // Use sessionStorage to transfer large payload reliably (avoids structuredClone limits)
-      const json = JSON.stringify(ordersForState);
-      console.log(`[NewRoute] Saving ${ordersForState.length} orders to sessionStorage (${json.length} chars, ${ordersForState.reduce((s, o) => s + (o.items?.length || 0), 0)} total items)`);
-      sessionStorage.setItem('pendingOrdersWithItems', json);
+      // Use sessionStorage for reliable transfer (still small without items)
+      sessionStorage.setItem('pendingOrders', JSON.stringify(ordersForTransfer));
 
       navigate(`/rota/${route.id}`, {
         state: { 

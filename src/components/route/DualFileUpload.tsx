@@ -1,24 +1,13 @@
 /**
- * Componente de Upload Duplo para o fluxo automatizado
- * Recebe dois PDFs complementares:
- * 1) Relatório Geral de Vendas (endereços)
- * 2) Detalhe das Vendas (itens detalhados)
- * 
- * Os arquivos podem ser carregados em qualquer ordem.
- * O sistema detecta automaticamente o tipo e cruza pelo número da venda.
- * 
- * ATUALIZADO: Agora usa o Motor Inteligente de Leitura de Planilhas
- * que opera como um analista logístico humano:
- * - Lê TUDO primeiro
- * - Entende o significado dos dados
- * - Valida coerência antes de decidir
+ * Componente de Upload Único para o fluxo de roteirização
+ * Recebe APENAS o relatório "Vendas do Dia" (itinerário) para criar a rota.
+ * O "Detalhe das Vendas" (ADV) será carregado depois, na tela do Romaneio de Carga.
  */
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { 
   Upload, FileSpreadsheet, CheckCircle2, XCircle, 
-  Download, AlertCircle, Package, RefreshCcw, FileText, Link2,
-  Scale, Info
+  AlertCircle, Package, RefreshCcw, Info
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,40 +16,28 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { ParsedOrder } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { parseExcelWithValidation, downloadTemplate } from '@/lib/orderParser';
-import { 
-  parseItemDetailFile, 
-  generateItemDetailTemplate,
-  ParsedItemDetail,
-} from '@/lib/itemDetailParser';
-import { mergeItemsIntoOrders } from '@/lib/autoRouterEngine';
+import { parseExcelWithValidation } from '@/lib/orderParser';
 import { isPDFFile, isExcelFile } from '@/lib/pdfParser';
 import { decodeFileContent } from '@/lib/encoding';
 import {
   detectAndParsePDF,
-  mergeItinerarioWithADV,
   createOrdersFromItinerario,
   ItinerarioRecord,
-  PDFDetectionResult,
   isItinerarioExcelFormat,
   isADVExcelFormat,
   parseItinerarioExcel,
-  parseADVDetailExcel,
 } from '@/lib/advParser';
 import * as XLSX from 'xlsx';
-import { useProductUnits } from '@/hooks/useProductUnits';
 
 // Motor Inteligente de Leitura
 import { 
   analyzeSpreadsheet, 
-  convertToLegacyFormat,
   formatWeight as formatWeightIntl,
-  SpreadsheetAnalysis,
   ExtractedOrder,
+  SpreadsheetAnalysis,
 } from '@/lib/spreadsheet';
 
 interface DualFileUploadProps {
@@ -72,62 +49,27 @@ interface UploadState {
   status: 'idle' | 'processing' | 'success' | 'error';
   message: string;
   data: any;
-  detectedType?: 'adv' | 'itinerario' | 'excel' | 'generic' | 'intelligent';
+  detectedType?: 'itinerario' | 'excel' | 'generic' | 'intelligent';
   analysis?: SpreadsheetAnalysis | null;
   extractedOrders?: ExtractedOrder[];
 }
 
-interface MergeSummary {
-  total: number;
-  matched: number;
-  unmatched: number;
-  unmatchedOrders: { client_name: string; pedido_id: string }[];
-}
-
-// Usar formatWeight local para consistência, mas disponibilizar o inteligente também
-function formatWeightDisplay(weight: number): string {
-  if (weight >= 1000) {
-    return `${(weight / 1000).toFixed(1)}t`;
-  }
-  return `${weight.toFixed(0)}kg`;
-}
-
 export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
   const { toast } = useToast();
-  const { bulkAddNewProducts } = useProductUnits();
   
-  // Estado para arquivo 1 (Itinerário/Vendas)
-  const [file1Upload, setFile1Upload] = useState<UploadState>({
+  const [fileUpload, setFileUpload] = useState<UploadState>({
     file: null,
     status: 'idle',
     message: '',
     data: null,
   });
   
-  // Estado para arquivo 2 (ADV/Itens)
-  const [file2Upload, setFile2Upload] = useState<UploadState>({
-    file: null,
-    status: 'idle',
-    message: '',
-    data: null,
-  });
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
-  // Estado do cruzamento
-  const [mergeSummary, setMergeSummary] = useState<MergeSummary | null>(null);
-  const [mergedOrders, setMergedOrders] = useState<ParsedOrder[] | null>(null);
-  
-  const file1InputRef = useRef<HTMLInputElement>(null);
-  const file2InputRef = useRef<HTMLInputElement>(null);
-  
-  // Processar arquivo detectando formato ANTES de escolher o parser
-  const processFile = async (
-    file: File,
-    setUploadState: React.Dispatch<React.SetStateAction<UploadState>>
-  ): Promise<{ type: string; data: any } | null> => {
-    
-    // PRIMEIRO: Para arquivos Excel, verificar se é formato ADV hierárquico
+  const processFile = async (file: File) => {
+    // Excel/CSV files
     if (isExcelFile(file)) {
-      setUploadState({
+      setFileUpload({
         file,
         status: 'processing',
         message: 'Detectando formato da planilha...',
@@ -136,19 +78,14 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
       
       try {
         let rawRows: unknown[][];
-        
-        // CSV com separador `;` precisa de tratamento especial
         const isCSV = /\.csv$/i.test(file.name) || file.type === 'text/csv';
         
         if (isCSV) {
-          // Ler como texto e fazer split manual por `;`
           const text = await decodeFileContent(file);
           rawRows = text
             .split(/\r?\n/)
             .map(line => line.split(';').map(cell => cell.trim() || null));
-          console.log('[DualFileUpload] CSV lido com split por ";". Linhas:', rawRows.length);
         } else {
-          // Ler dados brutos primeiro para detectar formato
           const arrayBuffer = await file.arrayBuffer();
           const workbook = XLSX.read(arrayBuffer, { type: 'array' });
           const sheetName = workbook.SheetNames[0];
@@ -158,78 +95,23 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         
         console.log('[DualFileUpload] Analisando arquivo:', file.name, '- Linhas:', rawRows.length);
         
-        // =========================================================================
-        // PRIORIDADE 1: Detectar formato ADV hierárquico (Detalhe das Vendas)
-        // Se detectar padrões de Cliente:/Venda Nº:, usar parser especializado
-        // =========================================================================
+        // Reject ADV files — they should be uploaded in the Romaneio step
         if (isADVExcelFormat(rawRows)) {
-          console.log('[DualFileUpload] ✅ Formato ADV hierárquico detectado - usando parser especializado');
-          
-          setUploadState({
+          setFileUpload({
             file,
-            status: 'processing',
-            message: 'Processando Detalhe das Vendas...',
+            status: 'error',
+            message: 'Este é um arquivo de Detalhe das Vendas (ADV). Carregue-o depois, na tela do Romaneio de Carga. Aqui, use apenas o relatório "Vendas do Dia".',
             data: null,
           });
-          
-          const advOrders = parseADVDetailExcel(rawRows);
-          
-          if (advOrders.length > 0) {
-            // Calcular estatísticas corretas: pedidos únicos e total de itens
-            const uniqueOrderIds = new Set(advOrders.map(o => o.pedido_id));
-            const totalItems = advOrders.reduce((sum, o) => sum + (o.items?.length || 0), 0);
-            const totalWeight = advOrders.reduce((sum, o) => sum + o.weight_kg, 0);
-            const ordersWithItems = advOrders.filter(o => o.items && o.items.length > 0).length;
-            const ordersWithoutItems = advOrders.length - ordersWithItems;
-            
-            console.log('[DualFileUpload] ADV resultado:', {
-              pedidosUnicos: uniqueOrderIds.size,
-              totalItens: totalItems,
-              pesoTotal: totalWeight,
-              comItens: ordersWithItems,
-              semItens: ordersWithoutItems,
-            });
-            
-            const itemSummary = ordersWithoutItems > 0 
-              ? `${advOrders.length} pedidos | ${totalItems} itens | ⚠️ ${ordersWithoutItems} sem itens | ${formatWeightIntl(totalWeight)}`
-              : `${advOrders.length} pedidos | ${totalItems} itens | ${formatWeightIntl(totalWeight)}`;
-            
-            setUploadState({
-              file,
-              status: 'success',
-              message: itemSummary,
-              data: advOrders,
-              detectedType: 'adv',
-            });
-            
-            toast({
-              title: '📦 Detalhe das Vendas detectado!',
-              description: `${ordersWithItems} pedidos com ${totalItems} itens` + (ordersWithoutItems > 0 ? ` (${ordersWithoutItems} sem itens)` : ''),
-            });
-            
-            // Auto-cadastrar produtos novos
-            const allProducts = advOrders.flatMap(o => 
-              (o.items || []).map(item => ({ product_name: item.product_name }))
-            );
-            if (allProducts.length > 0) {
-              bulkAddNewProducts(allProducts).then(result => {
-                if (result.added > 0) {
-                  toast({
-                    title: '🆕 Produtos cadastrados automaticamente',
-                    description: `${result.added} novos produtos detectados e registrados`,
-                  });
-                }
-              });
-            }
-            
-            return { type: 'adv', data: advOrders };
-          }
+          toast({
+            title: 'Arquivo incorreto',
+            description: 'O Detalhe das Vendas deve ser carregado na etapa do Romaneio de Carga, não aqui.',
+            variant: 'destructive',
+          });
+          return;
         }
         
-        // =========================================================================
-        // PRIORIDADE 2: Detectar formato Itinerário (Relatório Geral)
-        // =========================================================================
-        // Procurar header do Itinerário nas primeiras 10 linhas
+        // Detect Itinerário format
         let itinerarioDetected = false;
         for (let i = 0; i < Math.min(10, rawRows.length); i++) {
           const rowHeaders = rawRows[i]?.map(c => String(c ?? '')) || [];
@@ -238,10 +120,10 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             break;
           }
         }
+        
         if (itinerarioDetected) {
-          console.log('[DualFileUpload] ✅ Formato Itinerário detectado - usando parser especializado');
-          
-          setUploadState({
+          console.log('[DualFileUpload] ✅ Formato Itinerário detectado');
+          setFileUpload({
             file,
             status: 'processing',
             message: 'Processando Vendas do Dia...',
@@ -253,7 +135,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           if (itinerarioRecords.length > 0) {
             const totalWeight = itinerarioRecords.reduce((sum, r) => sum + r.weight_kg, 0);
             
-            setUploadState({
+            setFileUpload({
               file,
               status: 'success',
               message: `${itinerarioRecords.length} vendas | ${formatWeightIntl(totalWeight)}`,
@@ -265,44 +147,26 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
               title: '📍 Vendas do Dia detectado!',
               description: `${itinerarioRecords.length} vendas com endereços (${formatWeightIntl(totalWeight)})`,
             });
-            
-            return { type: 'itinerario', data: itinerarioRecords };
+            return;
           }
         }
         
-        // =========================================================================
-        // PRIORIDADE 3: Fallback para Motor Inteligente (formatos genéricos)
-        // =========================================================================
-        console.log('[DualFileUpload] Usando Motor Inteligente como fallback para:', file.name);
-        
-        setUploadState({
+        // Fallback: Intelligent Engine
+        console.log('[DualFileUpload] Usando Motor Inteligente como fallback');
+        setFileUpload({
           file,
           status: 'processing',
           message: 'Analisando planilha com motor inteligente...',
           data: null,
         });
         
-        // Usar o motor inteligente
         const { analysis, orders: extractedOrders } = await analyzeSpreadsheet(file);
         
-        // Verificar se conseguiu extrair dados
         if (extractedOrders.length > 0) {
           const totalWeight = extractedOrders.reduce((sum, o) => sum + o.weight_kg, 0);
           const hasAddresses = extractedOrders.some(o => o.address && o.address.length >= 10);
           
-          // Determinar tipo baseado no formato detectado
-          let detectedType: UploadState['detectedType'] = 'intelligent';
-          if (analysis.format === 'mb_itinerario' || analysis.format === 'itinerario_generic') {
-            detectedType = 'itinerario';
-          } else if (analysis.format === 'mb_detalhe' || analysis.format === 'adv_hierarchical') {
-            detectedType = 'adv';
-          }
-          
-          // Converter para formato legado
-          const legacyOrders = convertToLegacyFormat(extractedOrders);
-          
-          // Criar ItinerarioRecord se tiver endereços (para compatibilidade com merge)
-          if (hasAddresses && (detectedType === 'itinerario' || detectedType === 'intelligent')) {
+          if (hasAddresses) {
             const itinerarioRecords: ItinerarioRecord[] = extractedOrders.map(o => ({
               venda_id: o.pedido_id,
               client_name: o.client_name,
@@ -313,7 +177,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
               weight_kg: o.weight_kg,
             }));
             
-            setUploadState({
+            setFileUpload({
               file,
               status: 'success',
               message: `${extractedOrders.length} vendas | ${formatWeightIntl(totalWeight)}`,
@@ -325,55 +189,47 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             
             toast({
               title: '✅ Motor Inteligente',
-              description: `${extractedOrders.length} pedidos (${formatWeightIntl(totalWeight)}) - ${analysis.format}`,
+              description: `${extractedOrders.length} pedidos (${formatWeightIntl(totalWeight)})`,
             });
-            
-            return { type: 'itinerario', data: itinerarioRecords };
+            return;
           }
           
-          // Se não tem endereços, é tipo ADV (só itens)
-          setUploadState({
+          // No addresses — not usable for routing
+          setFileUpload({
             file,
-            status: 'success',
-            message: `${extractedOrders.length} pedidos | ${formatWeightIntl(totalWeight)}`,
-            data: legacyOrders,
-            detectedType,
+            status: 'error',
+            message: 'Arquivo não contém endereços de entrega. Use o relatório "Vendas do Dia".',
+            data: null,
             analysis,
-            extractedOrders,
           });
-          
-          toast({
-            title: '✅ Planilha analisada',
-            description: `${extractedOrders.length} pedidos (${formatWeightIntl(totalWeight)})`,
-          });
-          
-          return { type: detectedType, data: legacyOrders };
+          return;
         }
         
-        // Se motor inteligente não encontrou dados, mostrar diagnóstico
         const diagnostics = analysis.validation.errors.map(e => e.message).join('; ');
-        
-        setUploadState({
+        setFileUpload({
           file,
           status: 'error',
           message: diagnostics || 'Não foi possível identificar dados válidos',
           data: null,
           analysis,
         });
-        
-        return null;
+        return;
         
       } catch (error) {
-        console.error('[DualFileUpload] Erro no motor inteligente:', error);
-        
-        // Fallback para parser antigo
-        console.log('[DualFileUpload] Tentando parser legado...');
+        console.error('[DualFileUpload] Erro:', error);
+        setFileUpload({
+          file,
+          status: 'error',
+          message: 'Erro ao processar arquivo',
+          data: null,
+        });
+        return;
       }
     }
     
-    // Verificar se é PDF
+    // PDF files
     if (isPDFFile(file)) {
-      setUploadState({
+      setFileUpload({
         file,
         status: 'processing',
         message: 'Analisando PDF...',
@@ -386,7 +242,7 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
         if (result.type === 'itinerario' && result.itinerarioRecords && result.itinerarioRecords.length > 0) {
           const totalWeight = result.itinerarioRecords.reduce((sum, r) => sum + r.weight_kg, 0);
           
-          setUploadState({
+          setFileUpload({
             file,
             status: 'success',
             message: `${result.itinerarioRecords.length} vendas | ${formatWeightIntl(totalWeight)}`,
@@ -398,217 +254,76 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
             title: 'Vendas do Dia detectado!',
             description: `${result.itinerarioRecords.length} endereços (${formatWeightIntl(totalWeight)})`,
           });
-          
-          return { type: 'itinerario', data: result.itinerarioRecords };
+          return;
         }
         
-        if (result.type === 'adv' && result.advOrders && result.advOrders.length > 0) {
-          const totalWeight = result.advOrders.reduce((sum, o) => sum + o.weight_kg, 0);
-          
-          setUploadState({
+        if (result.type === 'adv') {
+          setFileUpload({
             file,
-            status: 'success',
-            message: `${result.advOrders.length} pedidos | ${formatWeightIntl(totalWeight)}`,
-            data: result.advOrders,
-            detectedType: 'adv',
+            status: 'error',
+            message: 'Este é um arquivo de Detalhe das Vendas (ADV). Carregue-o na etapa do Romaneio de Carga.',
+            data: null,
           });
-          
           toast({
-            title: 'Detalhe das Vendas detectado!',
-            description: `${result.advOrders.length} pedidos (${formatWeightIntl(totalWeight)})`,
+            title: 'Arquivo incorreto',
+            description: 'O Detalhe das Vendas deve ser carregado na etapa do Romaneio.',
+            variant: 'destructive',
           });
-          
-          // Auto-cadastrar produtos novos do PDF ADV
-          const allProducts = result.advOrders.flatMap(o => 
-            (o.items || []).map(item => ({ product_name: item.product_name }))
-          );
-          if (allProducts.length > 0) {
-            bulkAddNewProducts(allProducts).then(res => {
-              if (res.added > 0) {
-                toast({
-                  title: '🆕 Produtos cadastrados automaticamente',
-                  description: `${res.added} novos produtos detectados e registrados`,
-                });
-              }
-            });
-          }
-          
-          return { type: 'adv', data: result.advOrders };
+          return;
         }
         
-        // Tentar parser genérico de PDF
+        // Generic PDF fallback
         const genericResult = await parseExcelWithValidation(file);
         if (genericResult.validRows > 0) {
-          setUploadState({
+          setFileUpload({
             file,
             status: 'success',
             message: `${genericResult.validRows} pedidos carregados`,
             data: genericResult,
             detectedType: 'generic',
           });
-          return { type: 'generic', data: genericResult };
+          return;
         }
         
-        setUploadState({
+        setFileUpload({
           file,
           status: 'error',
           message: 'Formato de PDF não reconhecido',
           data: null,
         });
-        return null;
+        return;
         
       } catch (error) {
         console.error('Erro ao processar PDF:', error);
-        setUploadState({
+        setFileUpload({
           file,
           status: 'error',
           message: 'Erro ao processar PDF',
           data: null,
         });
-        return null;
+        return;
       }
     }
     
-    setUploadState({
+    setFileUpload({
       file,
       status: 'error',
       message: 'Formato inválido. Use PDF, Excel ou CSV',
       data: null,
     });
-    return null;
   };
   
-  // Handler para arquivo 1
-  const handleFile1 = async (file: File) => {
-    const result = await processFile(file, setFile1Upload);
-    if (result) {
-      tryMergeData(result, file2Upload);
-    }
-  };
-  
-  // Handler para arquivo 2
-  const handleFile2 = async (file: File) => {
-    const result = await processFile(file, setFile2Upload);
-    if (result) {
-      tryMergeData(file1Upload, result);
-    }
-  };
-  
-  // Tentar cruzar dados quando ambos arquivos estão prontos
-  const tryMergeData = (
-    data1: { type: string; data: any } | UploadState,
-    data2: { type: string; data: any } | UploadState
-  ) => {
-    // Normalizar para mesmo formato
-    const normalize = (d: any): { type: string; data: any } | null => {
-      if (!d) return null;
-      if ('type' in d && 'data' in d && typeof d.type === 'string') {
-        return d as { type: string; data: any };
-      }
-      if ('status' in d && d.status === 'success' && d.data && d.detectedType) {
-        return { type: d.detectedType, data: d.data };
-      }
-      return null;
-    };
-    
-    const file1Data = normalize(data1);
-    const file2Data = normalize(data2);
-    
-    if (!file1Data || !file2Data) return;
-    
-    console.log('[DualFileUpload] Tentando cruzar:', file1Data.type, '+', file2Data.type);
-    
-    // Identificar qual é itinerário e qual é ADV
-    let itinerarioRecords: ItinerarioRecord[] | null = null;
-    let advOrders: ParsedOrder[] | null = null;
-    
-    if (file1Data.type === 'itinerario') {
-      itinerarioRecords = file1Data.data;
-    } else if (file1Data.type === 'adv') {
-      advOrders = file1Data.data;
-    }
-    
-    if (file2Data.type === 'itinerario') {
-      itinerarioRecords = file2Data.data;
-    } else if (file2Data.type === 'adv') {
-      advOrders = file2Data.data;
-    }
-    
-    // Se temos ambos, fazer o cruzamento
-    if (itinerarioRecords && advOrders) {
-      console.log('[DualFileUpload] Cruzando dados...');
-      const merged = mergeItinerarioWithADV(itinerarioRecords, advOrders);
-      
-      const matchedCount = merged.filter(o => o.isValid).length;
-      const unmatchedCount = merged.filter(o => !o.isValid).length;
-      
-      setMergedOrders(merged);
-      setMergeSummary({
-        total: merged.length,
-        matched: matchedCount,
-        unmatched: unmatchedCount,
-        unmatchedOrders: merged
-          .filter(o => !o.isValid)
-          .map(o => ({ client_name: o.client_name, pedido_id: o.pedido_id || '' })),
-      });
-      
-      toast({
-        title: 'Dados cruzados!',
-        description: `${matchedCount} pedidos completos, ${unmatchedCount} sem endereço`,
-      });
-    }
-  };
-  
-  // Efeito para tentar cruzar quando ambos arquivos estiverem prontos
-  useEffect(() => {
-    if (file1Upload.status === 'success' && file2Upload.status === 'success') {
-      tryMergeData(file1Upload, file2Upload);
-    }
-  }, [file1Upload.status, file2Upload.status]);
-  
-  // Processar e continuar
   const handleProcessData = () => {
-    // Se temos dados cruzados, usar eles
-    if (mergedOrders && mergedOrders.length > 0) {
-      onDataReady(mergedOrders, true);
-      return;
-    }
-    
-    // Se só temos itinerário, criar pedidos a partir dele
-    if (file1Upload.detectedType === 'itinerario' && file1Upload.data) {
-      const orders = createOrdersFromItinerario(file1Upload.data);
+    if (fileUpload.detectedType === 'itinerario' && fileUpload.data) {
+      const orders = createOrdersFromItinerario(fileUpload.data);
+      // Never pass items — items come later via ADV in the Romaneio step
       onDataReady(orders, false);
       return;
     }
     
-    if (file2Upload.detectedType === 'itinerario' && file2Upload.data) {
-      const orders = createOrdersFromItinerario(file2Upload.data);
-      onDataReady(orders, false);
-      return;
-    }
-    
-    // Se temos ADV sem itinerário, alertar
-    if (file1Upload.detectedType === 'adv' || file2Upload.detectedType === 'adv') {
-      toast({
-        title: 'Dados incompletos',
-        description: 'O Detalhe das Vendas não contém endereços. Carregue também as Vendas do Dia.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    
-    // Se temos Excel/genérico
-    if (file1Upload.detectedType === 'excel' || file1Upload.detectedType === 'generic') {
-      const result = file1Upload.data;
-      if (result && result.orders) {
-        onDataReady(result.orders, false);
-        return;
-      }
-    }
-    
-    if (file2Upload.detectedType === 'excel' || file2Upload.detectedType === 'generic') {
-      const result = file2Upload.data;
-      if (result && result.orders) {
+    if (fileUpload.detectedType === 'generic' || fileUpload.detectedType === 'excel') {
+      const result = fileUpload.data;
+      if (result?.orders) {
         onDataReady(result.orders, false);
         return;
       }
@@ -616,272 +331,92 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
     
     toast({
       title: 'Nenhum dado para processar',
-      description: 'Faça upload de pelo menos um arquivo',
+      description: 'Faça upload do relatório de Vendas do Dia',
       variant: 'destructive',
     });
   };
   
-  const canProcess = 
-    file1Upload.status === 'success' || 
-    file2Upload.status === 'success' ||
-    mergedOrders !== null;
-  
-  // Estatísticas com terminologia correta
-  const getFileSummary = (upload: UploadState): { count: number; label: string; extra?: string } | null => {
-    if (upload.status !== 'success' || !upload.data) return null;
-    
-    if (upload.detectedType === 'itinerario') {
-      // Relatório Geral: mostrar "vendas" (cada venda = 1 destino de entrega)
-      return { count: upload.data.length, label: 'vendas' };
-    }
-    if (upload.detectedType === 'adv') {
-      // Detalhe das Vendas: mostrar pedidos + contagem de itens
-      const orders = upload.data as ParsedOrder[];
-      const totalItems = orders.reduce((sum, o) => sum + (o.items?.length || 1), 0);
-      return { 
-        count: orders.length, 
-        label: 'pedidos',
-        extra: totalItems !== orders.length ? `${totalItems} itens` : undefined 
-      };
-    }
-    if (upload.detectedType === 'excel' || upload.detectedType === 'generic') {
-      return { count: upload.data.validRows || upload.data.orders?.length || 0, label: 'pedidos' };
-    }
-    return null;
-  };
-  
-  const file1Summary = getFileSummary(file1Upload);
-  const file2Summary = getFileSummary(file2Upload);
-  
-  // Determinar labels dinâmicos
-  const getFileLabel = (upload: UploadState, defaultLabel: string): string => {
-    if (upload.detectedType === 'itinerario') return 'Vendas do Dia';
-    if (upload.detectedType === 'adv') return 'Detalhe das Vendas';
-    if (upload.detectedType === 'excel') return 'Planilha Excel';
-    return defaultLabel;
-  };
-  
-  const getFileIcon = (upload: UploadState) => {
-    if (upload.detectedType === 'itinerario') return <FileSpreadsheet className="h-5 w-5 text-primary" />;
-    if (upload.detectedType === 'adv') return <FileText className="h-5 w-5 text-primary" />;
-    return <FileSpreadsheet className="h-5 w-5 text-primary" />;
-  };
+  const canProcess = fileUpload.status === 'success';
 
   return (
     <div className="space-y-6">
       {/* Instructions */}
       <Alert>
-        <FileSpreadsheet className="h-4 w-4" />
+        <Info className="h-4 w-4" />
         <AlertDescription>
-          <strong>Cruzamento Automático:</strong> Carregue dois arquivos PDF - as <strong>Vendas do Dia</strong> (com endereços) 
-          e o <strong>Detalhe das Vendas</strong> (com itens detalhados). O sistema irá cruzar os dados automaticamente pelo número da venda.
+          Carregue o relatório <strong>Vendas do Dia</strong> (com endereços de entrega). 
+          O detalhamento dos produtos (ADV) será importado depois, na etapa do Romaneio de Carga.
         </AlertDescription>
       </Alert>
       
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Arquivo 1 */}
-        <Card className={cn(
-          'transition-all min-w-0',
-          file1Upload.status === 'success' && 'ring-2 ring-success/50'
-        )}>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base flex-wrap">
-              {getFileIcon(file1Upload)}
-              {getFileLabel(file1Upload, '1. Vendas do Dia')}
-              {file1Upload.status === 'success' && (
-                <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
-              )}
-            </CardTitle>
-            <CardDescription>
-              {file1Upload.detectedType === 'itinerario' 
-                ? 'Contém endereços de entrega por venda'
-                : file1Upload.detectedType === 'adv'
-                ? 'Contém itens detalhados por venda'
-                : 'PDF ou Excel com dados de vendas'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div
-              className={cn(
-                'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all',
-                file1Upload.status === 'processing' && 'opacity-50',
-                file1Upload.status === 'success' && 'border-success/50 bg-success/5',
-                file1Upload.status === 'error' && 'border-destructive/50 bg-destructive/5'
-              )}
-            >
-              {file1Upload.status === 'processing' ? (
-                <RefreshCcw className="h-8 w-8 animate-spin text-primary" />
-              ) : file1Upload.status === 'success' ? (
-                <>
-                  <CheckCircle2 className="h-8 w-8 text-success mb-2" />
-                  <p className="font-medium text-success">{file1Upload.message}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{file1Upload.file?.name}</p>
-                </>
-              ) : file1Upload.status === 'error' ? (
-                <>
-                  <XCircle className="h-8 w-8 text-destructive mb-2" />
-                  <p className="text-sm text-destructive text-center">{file1Upload.message}</p>
-                </>
-              ) : (
-                <>
-                  <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                  <p className="text-sm text-muted-foreground text-center">
-                    Arraste ou clique para selecionar
-                  </p>
-                </>
-              )}
-            </div>
-            
-            <Input
-              ref={file1InputRef}
-              type="file"
-              accept=".xlsx,.xls,.pdf,.csv"
-              onChange={(e) => e.target.files?.[0] && handleFile1(e.target.files[0])}
-              className="hidden"
-              id="file1-upload"
-            />
-            
-            <div className="flex gap-2">
-              <Label htmlFor="file1-upload" className="flex-1">
-                <Button variant="outline" className="w-full" asChild>
-                  <span>
-                    <FileSpreadsheet className="mr-2 h-4 w-4" />
-                    {file1Upload.file ? 'Trocar Arquivo' : 'Selecionar Arquivo'}
-                  </span>
+      {/* Single file upload */}
+      <Card className={cn(
+        'transition-all',
+        fileUpload.status === 'success' && 'ring-2 ring-success/50'
+      )}>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FileSpreadsheet className="h-5 w-5 text-primary" />
+            Vendas do Dia
+            {fileUpload.status === 'success' && (
+              <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
+            )}
+          </CardTitle>
+          <CardDescription>
+            Relatório com clientes, endereços e pesos para roteirização
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div
+            className={cn(
+              'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 transition-all cursor-pointer',
+              fileUpload.status === 'processing' && 'opacity-50',
+              fileUpload.status === 'success' && 'border-success/50 bg-success/5',
+              fileUpload.status === 'error' && 'border-destructive/50 bg-destructive/5',
+              fileUpload.status === 'idle' && 'hover:border-primary/50 hover:bg-primary/5'
+            )}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {fileUpload.status === 'processing' ? (
+              <>
+                <RefreshCcw className="h-10 w-10 animate-spin text-primary mb-3" />
+                <p className="text-sm text-muted-foreground">{fileUpload.message}</p>
+              </>
+            ) : fileUpload.status === 'success' ? (
+              <>
+                <CheckCircle2 className="h-10 w-10 text-success mb-3" />
+                <p className="font-semibold text-success text-lg">{fileUpload.message}</p>
+                <p className="text-sm text-muted-foreground mt-1">{fileUpload.file?.name}</p>
+                <Button variant="ghost" size="sm" className="mt-3 text-xs">
+                  Trocar arquivo
                 </Button>
-              </Label>
-            </div>
-            
-            {/* File 1 Summary */}
-            {file1Summary && (
-              <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3 text-sm">
-                <div className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-muted-foreground" />
-                  <span>{file1Summary.count} {file1Summary.label}</span>
-                </div>
-                <Badge variant="secondary">{file1Upload.detectedType}</Badge>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        
-        {/* Arquivo 2 */}
-        <Card className={cn(
-          'transition-all min-w-0',
-          file2Upload.status === 'success' && 'ring-2 ring-success/50'
-        )}>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base flex-wrap">
-              {getFileIcon(file2Upload)}
-              {getFileLabel(file2Upload, '2. Detalhe das Vendas')}
-              <Badge variant="outline" className="ml-1 text-xs">Opcional</Badge>
-              {file2Upload.status === 'success' && (
-                <CheckCircle2 className="h-4 w-4 text-success ml-auto" />
-              )}
-            </CardTitle>
-            <CardDescription>
-              {file2Upload.detectedType === 'itinerario' 
-                ? 'Contém endereços de entrega por venda'
-                : file2Upload.detectedType === 'adv'
-                ? 'Contém itens detalhados por venda'
-                : 'Para cruzamento automático de dados'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div
-              className={cn(
-                'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 transition-all',
-                file2Upload.status === 'processing' && 'opacity-50',
-                file2Upload.status === 'success' && 'border-success/50 bg-success/5',
-                file2Upload.status === 'error' && 'border-destructive/50 bg-destructive/5'
-              )}
-            >
-              {file2Upload.status === 'processing' ? (
-                <RefreshCcw className="h-8 w-8 animate-spin text-primary" />
-              ) : file2Upload.status === 'success' ? (
-                <>
-                  <CheckCircle2 className="h-8 w-8 text-success mb-2" />
-                  <p className="font-medium text-success">{file2Upload.message}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{file2Upload.file?.name}</p>
-                </>
-              ) : file2Upload.status === 'error' ? (
-                <>
-                  <XCircle className="h-8 w-8 text-destructive mb-2" />
-                  <p className="text-sm text-destructive text-center">{file2Upload.message}</p>
-                </>
-              ) : (
-                <>
-                  <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-                  <p className="text-sm text-muted-foreground text-center">
-                    Opcional: segundo arquivo para cruzamento
-                  </p>
-                </>
-              )}
-            </div>
-            
-            <Input
-              ref={file2InputRef}
-              type="file"
-              accept=".xlsx,.xls,.pdf,.csv"
-              onChange={(e) => e.target.files?.[0] && handleFile2(e.target.files[0])}
-              className="hidden"
-              id="file2-upload"
-            />
-            
-            <div className="flex gap-2">
-              <Label htmlFor="file2-upload" className="flex-1">
-                <Button variant="outline" className="w-full" asChild>
-                  <span>
-                    <FileText className="mr-2 h-4 w-4" />
-                    {file2Upload.file ? 'Trocar Arquivo' : 'Selecionar Arquivo'}
-                  </span>
+              </>
+            ) : fileUpload.status === 'error' ? (
+              <>
+                <XCircle className="h-10 w-10 text-destructive mb-3" />
+                <p className="text-sm text-destructive text-center max-w-md">{fileUpload.message}</p>
+                <Button variant="ghost" size="sm" className="mt-3 text-xs">
+                  Tentar outro arquivo
                 </Button>
-              </Label>
-            </div>
-            
-            {/* File 2 Summary */}
-            {file2Summary && (
-              <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3 text-sm">
-                <div className="flex items-center gap-2">
-                  <Package className="h-4 w-4 text-muted-foreground" />
-                  <span>{file2Summary.count} {file2Summary.label}</span>
-                </div>
-                <Badge variant="secondary">{file2Upload.detectedType}</Badge>
-              </div>
+              </>
+            ) : (
+              <>
+                <Upload className="h-10 w-10 text-muted-foreground mb-3" />
+                <p className="font-medium">Arraste ou clique para selecionar</p>
+                <p className="text-sm text-muted-foreground mt-1">PDF, Excel ou CSV</p>
+              </>
             )}
-          </CardContent>
-        </Card>
-      </div>
-      
-      {/* Merge Summary */}
-      {mergeSummary && (
-        <Alert className={cn(
-          mergeSummary.unmatched > 0 ? 'border-warning' : 'border-success'
-        )}>
-          <Link2 className="h-4 w-4" />
-          <AlertDescription>
-            <div>
-              <strong>Cruzamento concluído:</strong>{' '}
-              <span className="text-success font-medium">{mergeSummary.matched} pedidos</span> cruzados com sucesso
-              {mergeSummary.unmatched > 0 && (
-                <>, <span className="text-warning font-medium">{mergeSummary.unmatched} pedidos</span> sem endereço correspondente</>
-              )}
-            </div>
-            {mergeSummary.unmatchedOrders.length > 0 && (
-              <div className="mt-3 text-sm text-muted-foreground">
-                <strong className="text-foreground">Pedidos sem correspondência:</strong>
-                <ul className="list-disc ml-5 mt-1 space-y-0.5">
-                  {mergeSummary.unmatchedOrders.map((o, i) => (
-                    <li key={i}>
-                      {o.client_name} {o.pedido_id && <span className="text-muted-foreground">(Venda: {o.pedido_id})</span>}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
+          </div>
+          
+          <Input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.pdf,.csv"
+            onChange={(e) => e.target.files?.[0] && processFile(e.target.files[0])}
+            className="hidden"
+          />
+        </CardContent>
+      </Card>
       
       <Separator />
       
@@ -896,25 +431,15 @@ export function DualFileUpload({ onDataReady }: DualFileUploadProps) {
           {canProcess ? (
             <>
               <CheckCircle2 className="mr-2 h-5 w-5" />
-              {mergedOrders ? `Continuar com ${mergedOrders.filter(o => o.isValid).length} Pedidos` : 'Processar e Continuar'}
+              Processar e Continuar
             </>
           ) : (
             <>
               <Upload className="mr-2 h-5 w-5" />
-              Aguardando upload de arquivo
+              Aguardando upload do arquivo
             </>
           )}
         </Button>
-        
-        {file1Upload.status === 'success' && file2Upload.status !== 'success' && (
-          <p className="text-sm text-muted-foreground text-center">
-            {file1Upload.detectedType === 'adv' 
-              ? 'Carregue as Vendas do Dia para obter os endereços de entrega.'
-              : file1Upload.detectedType === 'itinerario'
-              ? 'Você pode prosseguir ou carregar o Detalhe das Vendas para itens detalhados.'
-              : 'Você pode prosseguir ou carregar um segundo arquivo para cruzamento.'}
-          </p>
-        )}
       </div>
     </div>
   );
