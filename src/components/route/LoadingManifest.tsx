@@ -485,7 +485,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
       
       {/* Action buttons */}
       {(() => {
-        const noItems = selectedTruck ? ordersLackDetails(selectedTruck.orders) : true;
+        const noItems = selectedTruck ? (ordersLackDetails(selectedTruck.orders) || consolidatedProducts.length === 0) : true;
         return (
           <div className="flex gap-2 flex-wrap">
             {noItems && onReimportItems && (
@@ -501,6 +501,7 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isReimporting}
                   className="gap-2"
+                  variant="destructive"
                 >
                   <Upload className="h-4 w-4" />
                   {isReimporting ? 'Importando...' : 'Reimportar Detalhamento ADV'}
