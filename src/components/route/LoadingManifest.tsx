@@ -564,8 +564,8 @@ export function LoadingManifest({ routeName, date, trucks, routeId, onReimportIt
             {/* Warning for missing details */}
             {(() => {
               const missingCount = countOrdersWithoutItems(selectedTruck.orders);
-              const allMissing = ordersLackDetails(selectedTruck.orders);
-              if (missingCount === 0) return null;
+              const allMissing = ordersLackDetails(selectedTruck.orders) || consolidatedProducts.length === 0;
+              if (missingCount === 0 && consolidatedProducts.length > 0) return null;
               return (
                 <Alert variant="default" className="mx-4 mt-4 border-warning/50 bg-warning/10">
                   <AlertTriangle className="h-4 w-4 text-warning" />
