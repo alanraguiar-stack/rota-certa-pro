@@ -1,55 +1,79 @@
 
+Objetivo: corrigir de forma definitiva a importação do “Detalhe das Vendas”, eliminando o erro atual, validando o arquivo inteiro e deixando apenas um ponto de upload.
 
-# Fix: ADV import error + duplicate upload locations
+Diagnóstico confirmado:
+- O erro atual não é mais de `quantity integer`.
+- Agora a falha vem do banco: `order_items.weight_kg` tem constraint `CHECK (weight_kg > 0)`.
+- O arquivo enviado tem itens por unidade (`UN`, `FD`, `CX` etc.), e o parser corretamente gera `weight_kg = 0` para esses itens.
+- Isso é compatível com a operação do romaneio, mas incompatível com a modelagem atual da tabela.
+- Também existe dívida de arquitetura: o upload CSV está passando pelo parser genérico `parseADVDetailExcel`, embora já exista um parser específico para esse formato (`parseVendasCSV`), e o componente `LoadingManifest` ainda carrega lógica antiga de reimportação.
 
-## Root cause
+Formato do arquivo validado:
+- CSV hierárquico com `;`
+- Blocos por cliente
+- Linha de venda: `Venda Nº`
+- Cabeçalho de itens: `Código / Descrição / UN / Qtde / Unitário / Total`
+- Itens em linhas subsequentes
+- Esse formato combina muito melhor com parser dedicado por colunas fixas do que com heurística genérica
 
-**Error: "invalid input syntax for type integer: '15.01'"**
+Plano de correção:
 
-The `order_items.quantity` column is `integer` in the database. When the ADV parser extracts quantities like `15.01` (from BR number format parsing), the decimal value gets inserted directly, causing a PostgreSQL type error.
+1. Corrigir a modelagem do banco
+- Criar migration para ajustar `order_items.weight_kg` de `> 0` para permitir `0`.
+- Manter `quantity > 0`.
+- Justificativa: item por unidade pode ter quantidade física válida sem peso unitário conhecido.
+- Isso alinha banco com a regra real do romaneio.
 
-The parser at line 1469 of `advParser.ts` sets `quantity: isWeightBased ? 1 : (itemQuantity > 0 ? itemQuantity : 1)` — this can be a float like `15.01` for non-weight items.
+2. Trocar a rota de parsing do CSV/TXT
+- Em `RouteDetails.tsx`, quando o arquivo for `.csv` ou `.txt`, usar o parser específico do ADV CSV em vez do parser genérico.
+- Manter Excel (`.xls/.xlsx`) no parser atual.
+- Isso reduz ambiguidade de colunas, evita leituras erradas de quantidade e melhora a confiabilidade do vínculo por `pedido_id`.
 
-Similarly, `weight_kg` based items set `quantity: 1` (fine), but for unit-based items the raw parsed float passes through.
+3. Tabular e validar o arquivo inteiro antes de inserir
+- Em `advParser.ts`, montar uma etapa de validação/normalização que:
+  - conte clientes, vendas e itens
+  - detecte vendas sem número
+  - detecte itens sem descrição
+  - detecte quantidades inválidas
+  - normalize unidade (`KG`, `UN`, `FD`, `CX`, etc.)
+  - agrupe tudo por `venda_id`
+- Se houver problemas, retornar erro amigável com resumo, em vez de falhar só no insert.
 
-**Duplicate upload locations**: The `import_adv` step has both `ADVUploadSection` AND `LoadingManifest` (which has its own ADV upload inside). Need to keep only `ADVUploadSection`.
+4. Normalizar o modelo dos itens antes de salvar
+- Regras:
+  - item em `KG/G` → salvar `weight_kg > 0`, `quantity = 1`
+  - item em unidade/volume (`UN/FD/CX/...`) → salvar `weight_kg = 0`, `quantity` inteira
+- Em `useRoutes.ts`, reforçar saneamento final antes do insert:
+  - `weight_kg = Math.max(0, Number(...))`
+  - `quantity = Math.max(1, Math.round(...))`
+  - `unit` normalizada
+- Isso cria uma última barreira de segurança.
 
-## Changes
+5. Deixar um único lugar para upload
+- Remover a lógica de upload/reimport do `LoadingManifest.tsx`.
+- O único upload ficará no `ADVUploadSection` da etapa `import_adv`.
+- `LoadingManifest` passa a ser somente visualização/geração do romaneio.
 
-### 1. `src/hooks/useRoutes.ts` — Round quantity to integer before insert
+6. Melhorar a etapa 4 do fluxo
+- Em `RouteDetails.tsx`, após importação bem-sucedida:
+  - mostrar resumo: vendas lidas, pedidos cruzados, itens inseridos, pedidos sem match
+  - habilitar botão “Gerar Romaneio”
+- Se não houver match suficiente por `pedido_id`, mostrar aviso claro com contagem.
 
-In the `reimportItems` mutation (~line 1257), wrap `quantity` with `Math.round()`:
+Arquivos envolvidos:
+- `supabase/migrations/...` — ajuste da constraint de `order_items.weight_kg`
+- `src/lib/advParser.ts` — parser dedicado + validação completa do CSV
+- `src/hooks/useRoutes.ts` — saneamento final e mensagens de erro melhores
+- `src/pages/RouteDetails.tsx` — usar parser correto por tipo de arquivo + etapa única de upload
+- `src/components/route/LoadingManifest.tsx` — remover upload duplicado e deixar somente exibição
 
-```typescript
-quantity: Math.round(item.quantity),
-```
+Resultado esperado:
+- O ADV sobe sem quebrar quando houver itens por unidade
+- O sistema lê o arquivo inteiro de forma determinística
+- O vínculo por número da venda funciona de forma mais confiável
+- Existe apenas um ponto de upload
+- O romaneio passa a ser gerado só depois de uma importação válida
 
-This ensures all quantities are integers before hitting the DB.
-
-### 2. `src/pages/RouteDetails.tsx` — Remove duplicate upload
-
-In the `import_adv` step (~line 1005-1013), remove the `onReimportItems` and `isReimporting` props from `LoadingManifest` so it only displays the consolidated manifest without its own upload button. The `ADVUploadSection` above it is the single upload point.
-
-```typescript
-<LoadingManifest
-  routeName={route.name}
-  date={new Date(route.created_at).toLocaleDateString('pt-BR')}
-  trucks={truckDataForComponents}
-  routeId={route.id}
-  // Remove onReimportItems and isReimporting — upload only via ADVUploadSection
-/>
-```
-
-### 3. `src/lib/advParser.ts` — Ensure quantity is always integer at parse time
-
-At line 1469, round the quantity:
-
-```typescript
-quantity: isWeightBased ? 1 : Math.round(itemQuantity > 0 ? itemQuantity : 1),
-```
-
-## Result
-- No more "invalid input syntax for integer" errors
-- Single upload location for ADV file (the prominent `ADVUploadSection`)
-- `LoadingManifest` only shows the consolidated data, no redundant upload
-
+Observação técnica importante:
+- Esta é uma correção de arquitetura, não só de mensagem de erro.
+- Sem ajustar a constraint do banco, o problema continuará reaparecendo sempre que o ADV trouxer itens sem peso unitário.
