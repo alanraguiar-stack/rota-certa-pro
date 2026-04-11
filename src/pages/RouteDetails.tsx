@@ -724,51 +724,51 @@ export default function RouteDetails() {
         {/* ETAPA 2: DISTRIBUIR CARGA (ROMANEIO)       */}
         {/* ============================================ */}
         {activeStep === 'distribute_load' && (
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Package className="h-5 w-5" />
-                    Etapa 2: Distribuir Carga
-                  </CardTitle>
-                  <CardDescription>
-                    {route.route_trucks.length} caminhões selecionados. Distribua as cargas entre os veículos.
-                  </CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {route.route_trucks.map((rt) => (
-                  <div key={rt.id} className="rounded-lg border p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Truck className="h-4 w-4 text-primary" />
-                      <span className="font-medium">{rt.truck?.plate}</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{rt.truck?.model}</p>
-                    <p className="text-sm">Capacidade: {formatWeight(Number(rt.truck?.capacity_kg ?? 0))}</p>
+          <div className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Package className="h-5 w-5" />
+                      Etapa 2: Distribuir Carga
+                    </CardTitle>
+                    <CardDescription>
+                      {route.route_trucks.length} caminhões selecionados. Distribua as cargas entre os veículos.
+                    </CardDescription>
                   </div>
-                ))}
-              </div>
-              
-              <Button
-                className="w-full"
-                size="lg"
-                onClick={handleDistributeLoad}
-                disabled={distributeLoad.isPending}
-              >
-                {distributeLoad.isPending ? 'Distribuindo...' : 'Distribuir Cargas nos Caminhões'}
-              </Button>
-            </CardContent>
-          </Card>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                  {route.route_trucks.map((rt) => (
+                    <div key={rt.id} className="rounded-lg border p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Truck className="h-4 w-4 text-primary" />
+                        <span className="font-medium">{rt.truck?.plate}</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{rt.truck?.model}</p>
+                      <p className="text-sm">Capacidade: {formatWeight(Number(rt.truck?.capacity_kg ?? 0))}</p>
+                    </div>
+                  ))}
+                </div>
+                
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={handleDistributeLoad}
+                  disabled={distributeLoad.isPending}
+                >
+                  {distributeLoad.isPending ? 'Distribuindo...' : 'Distribuir Cargas nos Caminhões'}
+                </Button>
+              </CardContent>
+            </Card>
 
-          {/* ADV Upload section — shown after trucks are assigned */}
-          <ADVUploadSection
-            route={route}
-            reimportItems={reimportItems}
-          />
-        </div>
+            <ADVUploadSection
+              route={route}
+              reimportItems={reimportItems}
+            />
+          </div>
         )}
 
         {/* ============================================ */}
