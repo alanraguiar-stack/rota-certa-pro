@@ -1230,7 +1230,7 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
   
   let currentClient = '';
   let currentVendaId = '';
-  let currentItems: { product_name: string; weight_kg: number; quantity: number; unit?: string }[] = [];
+  let currentItems: { product_name: string; product_code?: string; weight_kg: number; quantity: number; unit?: string }[] = [];
   let inItemTable = false;
   let itemColumnMap: {
     codigo: number;
