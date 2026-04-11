@@ -336,11 +336,13 @@ export function useRouteDetails(routeId: string | undefined) {
 
       if (itemsToInsert.length > 0) {
         // Batch insert in chunks of 500
+        let totalInserted = 0;
         for (let i = 0; i < itemsToInsert.length; i += 500) {
           const batch = itemsToInsert.slice(i, i + 500);
-          const { error: itemsError } = await supabase
+          const { data: insertedItems, error: itemsError } = await supabase
             .from('order_items')
-            .insert(batch);
+            .insert(batch)
+            .select('id');
 
           if (itemsError) {
             console.error('[addOrders] Failed to insert order items batch:', itemsError);
@@ -349,8 +351,19 @@ export function useRouteDetails(routeId: string | undefined) {
               description: itemsError.message,
               variant: 'destructive',
             });
+          } else {
+            totalInserted += insertedItems?.length ?? 0;
           }
         }
+        console.log(`[addOrders] Successfully persisted ${totalInserted}/${itemsToInsert.length} order_items`);
+      } else if (originalsWithItems.length > 0) {
+        // Had items but none matched — alert user
+        console.error(`[addOrders] WARNING: ${originalsWithItems.length} orders had items but 0 were persisted (no match)`);
+        toast({
+          title: 'Atenção: detalhamento não vinculado',
+          description: `${originalsWithItems.length} pedido(s) tinham itens mas não foi possível vincular ao banco. Use o botão "Reimportar Detalhamento" no romaneio.`,
+          variant: 'destructive',
+        });
       }
 
       // Update route totals
