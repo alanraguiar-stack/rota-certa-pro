@@ -1,43 +1,78 @@
 
 
-# Corrigir pipeline de dados do Romaneio de Carga
+# Corrigir pipeline completo: Romaneio de Carga com cruzamento obrigatório
 
-## Problema confirmado
-Consultei o banco: todos os 20 pedidos desta rota têm `pedido_id` preenchido mas **zero itens** na tabela `order_items`. O romaneio sai vazio porque depende 100% de `order_items` para consolidar produtos — e esses itens nunca foram persistidos.
+## Problema raiz confirmado
+Consultei o banco de dados: **zero itens em `order_items`** em todas as rotas, apesar de todos os pedidos terem `pedido_id` preenchido. O romaneio sai com tabela de produtos vazia porque depende de `order_items` para consolidar — e esses itens nunca são persistidos.
 
-## Causa raiz
-O fluxo de importação tem uma falha no momento de persistir os itens:
+## Causa raiz técnica
+Rastreei todo o fluxo de dados:
 
-1. **Na importação inicial**: O `mergeItinerarioWithADV` faz `...advOrder` que deveria incluir `items[]`, mas o match dentro de `addOrders` entre os pedidos originais e os inseridos no banco falha silenciosamente — o log `[addOrders] No match for items of:` provavelmente aparece no console mas é ignorado.
+1. `parseADVDetailExcel` → gera `ParsedOrder[]` com `items[]` corretos ✅
+2. `mergeItinerarioWithADV` → faz `...advOrder` que inclui `items` ✅
+3. `handleProcessData` → chama `onDataReady(mergedOrders, true)` ✅
+4. `handleAutoDataReady` → `setOrders(filteredOrders)` ✅
+5. `handleCreateRoute` → `navigate()` com `pendingOrders: validOrders` ✅
+6. `RouteDetails` → `addOrders.mutate(pendingOrders.map(...))` com `items: o.items` ✅
+7. **`addOrders` → o log `originalsWithItems` é 0** ❌
 
-2. **O match é frágil**: Usa `client_name + weight_kg` como fallback quando `pedido_id` não bate. Diferenças de normalização entre o nome que chega do merge e o que é inserido no banco causam falhas de casamento.
+O problema está na **serialização via `navigate(state)`**: o React Router serializa o state via `structuredClone` ou similar, e os arrays `items` podem estar sendo perdidos se houver referências circulares ou se o objeto for muito grande. Alternativamente, o `file1Upload` usado em `handleFile2` (linha 493) pode ser um snapshot de estado vazio (closure stale).
 
-3. **Sem validação**: O sistema permite avançar o workflow mesmo com zero itens persistidos — não há barreira.
+## Plano de correção
 
-## O que vou corrigir
+### 1. Migration: adicionar coluna `unit` na tabela `order_items`
+A tabela atual não guarda a unidade de medida (KG, FD, CX, UN). O sistema infere em runtime, mas isso é frágil. Adicionar:
+```sql
+ALTER TABLE public.order_items ADD COLUMN unit text NOT NULL DEFAULT 'kg';
+```
 
-### 1. Tornar o match em `addOrders` determinístico por `pedido_id`
-O `pedido_id` já está sendo salvo nos orders. Mas o match dentro de `addOrders` compara `io.pedido_id === original.pedido_id` de forma exata. Preciso normalizar ambos (remover zeros à esquerda, caracteres não-numéricos) — exatamente como o `reimportItems` já faz.
+### 2. `src/types/index.ts` — adicionar `unit` aos tipos
+- `ParsedOrderItem`: adicionar `unit?: string`
+- `OrderItem`: adicionar `unit: string`
 
-### 2. Adicionar validação pós-inserção em `addOrders`
-Após inserir os `order_items`, verificar quantos foram realmente inseridos. Se zero itens foram persistidos mas os pedidos originais tinham itens, exibir toast de alerta claro.
+### 3. `src/lib/advParser.ts` — salvar `unit` no `ParsedOrderItem`
+Na linha 1462, adicionar `unit: unitType || 'kg'` ao item parsed.
 
-### 3. Bloquear geração do PDF quando `consolidatedProducts` está vazio
-Em `LoadingManifest.tsx`, o botão de download/impressão já está condicionado a `noItems`, mas isso verifica `ordersLackDetails` que olha `order.items`. Preciso garantir que `consolidatedProducts.length === 0` também bloqueia — e mostrar mensagem clara com o botão de reimport.
+### 4. `src/hooks/useRoutes.ts` — corrigir `addOrders` com diagnóstico detalhado
+- Adicionar log **antes** do filtro `originalsWithItems` mostrando exatamente o que cada pedido tem
+- Se `originalsWithItems.length === 0` mas pedidos têm `pedido_id`, logar alerta claro
+- Incluir `unit` no insert de `order_items`
 
-### 4. Adicionar fallback robusto no `addOrders`: se match por ID falhar, normalizar ambos os lados
-Aplicar a mesma normalização `replace(/\D/g, '').replace(/^0+/, '')` tanto no `original.pedido_id` quanto no `insertedOrder.pedido_id`.
+### 5. `src/pages/NewRoute.tsx` — garantir serialização dos itens
+Antes de chamar `navigate()`, fazer deep-clone explícito dos itens para evitar perda na serialização:
+```typescript
+const ordersForState = validOrders.map(o => ({
+  ...o,
+  items: (o.items || []).map(item => ({ ...item })),
+}));
+navigate(`/rota/${route.id}`, { state: { pendingOrders: ordersForState, ... } });
+```
 
-### 5. Log de diagnóstico detalhado
-Adicionar contadores de match por tipo (ID vs nome+peso vs sem match) para facilitar debug futuro.
+### 6. `src/pages/RouteDetails.tsx` — validação na recepção dos pedidos
+Ao receber `pendingOrders` do state, logar quantos têm itens. Se zero têm itens mas todos têm `pedido_id`, exibir toast de alerta.
+
+### 7. `src/components/route/LoadingManifest.tsx` — usar `unit` do banco
+Quando `order.items` tem dados, usar `item.unit` diretamente em vez de inferir via `resolveUnit`.
+
+### 8. `src/hooks/useRoutes.ts` — `reimportItems` também salvar `unit`
+Incluir a unidade no reimport para consistência.
+
+### 9. Bloquear romaneio sem itens (já implementado, reforçar)
+Se `consolidatedProducts.length === 0`, mostrar erro claro e botão de reimport em destaque.
 
 ## Arquivos a editar
-- `src/hooks/useRoutes.ts` — normalizar `pedido_id` no match de `addOrders`; validação pós-inserção
-- `src/components/route/LoadingManifest.tsx` — blindar contra PDF vazio baseado em `consolidatedProducts.length`
+- Nova migration SQL (adicionar coluna `unit`)
+- `src/types/index.ts`
+- `src/lib/advParser.ts`
+- `src/hooks/useRoutes.ts`
+- `src/pages/NewRoute.tsx`
+- `src/pages/RouteDetails.tsx`
+- `src/components/route/LoadingManifest.tsx`
 
 ## Resultado esperado
-- Itens persistidos corretamente na criação da rota (match por `pedido_id` normalizado)
-- Romaneio com produtos consolidados conforme a tabela de vendas detalhadas
-- PDF nunca gerado vazio — erro claro quando faltar detalhamento
-- Reimport funcional como fallback
+- Itens persistidos com unidade de medida na criação da rota
+- Serialização robusta via navigate state
+- Romaneio com produtos consolidados corretamente por caminhão
+- Unidade correta (kg, fardo, caixa, unidade) vinda do banco
+- Nunca mais romaneio vazio
 
