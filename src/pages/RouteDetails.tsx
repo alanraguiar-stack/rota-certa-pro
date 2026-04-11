@@ -175,7 +175,7 @@ const WORKFLOW_ORDER: RouteWorkflowStep[] = [
   'select_trucks',
   'distribute_load',
   'loading_manifest',
-  'optimize_routes',
+  'import_adv',
   'delivery_manifest',
 ];
 
@@ -898,11 +898,6 @@ export default function RouteDetails() {
                 </Button>
               </CardContent>
             </Card>
-
-            <ADVUploadSection
-              route={route}
-              reimportItems={reimportItems}
-            />
           </div>
         )}
 
@@ -973,32 +968,40 @@ export default function RouteDetails() {
               onConfirmAllRoutes={handleConfirmAllRoutesAndProceed}
               isProcessing={optimizeRoutes.isPending || moveOrderToTruck.isPending}
             />
-            
-            {/* Romaneio de Carga por Caminhão (para impressão) - colapsável */}
-            <details className="group">
-              <summary className="cursor-pointer list-none">
-                <Card className="hover:bg-muted/30 transition-colors">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <FileDown className="h-4 w-4" />
-                      Romaneios de Carga para Impressão
-                      <ChevronLeft className="ml-auto h-4 w-4 transition-transform group-open:rotate-[-90deg]" />
-                    </CardTitle>
-                  </CardHeader>
-                </Card>
-              </summary>
-              <div className="mt-4">
-                <LoadingManifest
-                  routeName={route.name}
-                  date={new Date(route.created_at).toLocaleDateString('pt-BR')}
-                  trucks={truckDataForComponents}
-                  routeId={route.id}
-                  onReimportItems={(advOrders) => reimportItems.mutateAsync(advOrders)}
-                  isReimporting={reimportItems.isPending}
-                />
-              </div>
-            </details>
+          </div>
+        )}
 
+        {/* ============================================ */}
+        {/* ETAPA 4: IMPORTAR ADV + GERAR ROMANEIO     */}
+        {/* ============================================ */}
+        {activeStep === 'import_adv' && (
+          <div className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
+                  Etapa 4: Importar Detalhamento e Gerar Romaneio
+                </CardTitle>
+                <CardDescription>
+                  Carregue o relatório "Detalhe das Vendas" (ADV) para vincular os itens aos pedidos de cada caminhão e gerar o romaneio de carga.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+
+            <ADVUploadSection
+              route={route}
+              reimportItems={reimportItems}
+            />
+
+            {/* Romaneio de Carga — sempre visível nesta etapa */}
+            <LoadingManifest
+              routeName={route.name}
+              date={new Date(route.created_at).toLocaleDateString('pt-BR')}
+              trucks={truckDataForComponents}
+              routeId={route.id}
+              onReimportItems={(advOrders) => reimportItems.mutateAsync(advOrders)}
+              isReimporting={reimportItems.isPending}
+            />
           </div>
         )}
 
