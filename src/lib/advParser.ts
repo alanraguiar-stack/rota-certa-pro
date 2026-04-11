@@ -1459,8 +1459,12 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       const itemWeightKg = isWeightBased ? qty : 0;
       const itemQuantity = isWeightBased ? 1 : qty;
       
+      // Extract product code if available
+      const productCode = itemColumnMap.codigo !== -1 ? String(row[itemColumnMap.codigo] ?? '').trim() : undefined;
+      
       currentItems.push({
         product_name: normalizeText(descricao),
+        product_code: productCode || undefined,
         weight_kg: itemWeightKg,
         quantity: isWeightBased ? 1 : (itemQuantity > 0 ? itemQuantity : 1),
         unit: unitType || 'kg',
