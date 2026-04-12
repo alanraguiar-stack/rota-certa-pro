@@ -14,6 +14,7 @@ import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
+import { DeprioritizedOrdersDialog } from '@/components/route/DeprioritizedOrdersDialog';
 
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
@@ -36,7 +37,7 @@ export default function NewRoute() {
   const { getHintsForOrders, patternsCount, extractedPatterns } = useHistoryPatterns();
   const { toast } = useToast();
   const { getCitiesForDate, isEnabled: isCalendarEnabled, schedule: citySchedule, getScheduleMap } = useCitySchedule();
-  const { savePendingOrders, getPendingOrdersForDate, markAsRouted, cancelPending, toParsedOrders } = usePendingOrders();
+  const { savePendingOrders, getPendingOrdersForDate, markAsRouted, cancelPending, toParsedOrders, getDeprioritized } = usePendingOrders();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
   const [completedSteps, setCompletedSteps] = useState<RouteWizardStep[]>([]);
@@ -57,6 +58,8 @@ export default function NewRoute() {
   const [recoveredOrders, setRecoveredOrders] = useState<PendingOrder[]>([]);
   const [storedOrders, setStoredOrders] = useState<ParsedOrder[]>([]);
   const [storedCount, setStoredCount] = useState(0);
+  const [deprioritizedOrders, setDeprioritizedOrders] = useState<PendingOrder[]>([]);
+  const [showDeprioritizedDialog, setShowDeprioritizedDialog] = useState(false);
 
 
   // Pedidos válidos são os que têm endereço (podem ser roterizados)
