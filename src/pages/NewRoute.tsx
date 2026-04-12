@@ -14,6 +14,7 @@ import { FleetRecommendation } from '@/components/route/FleetRecommendation';
 import { IntelligentFleetPanel } from '@/components/route/IntelligentFleetPanel';
 import { RoutingStrategySelector } from '@/components/route/RoutingStrategySelector';
 import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
+import { DeprioritizedOrdersDialog } from '@/components/route/DeprioritizedOrdersDialog';
 
 import { useRoutes } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
@@ -36,7 +37,7 @@ export default function NewRoute() {
   const { getHintsForOrders, patternsCount, extractedPatterns } = useHistoryPatterns();
   const { toast } = useToast();
   const { getCitiesForDate, isEnabled: isCalendarEnabled, schedule: citySchedule, getScheduleMap } = useCitySchedule();
-  const { savePendingOrders, getPendingOrdersForDate, markAsRouted, cancelPending, toParsedOrders } = usePendingOrders();
+  const { savePendingOrders, getPendingOrdersForDate, markAsRouted, cancelPending, toParsedOrders, getDeprioritized } = usePendingOrders();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
   const [completedSteps, setCompletedSteps] = useState<RouteWizardStep[]>([]);
@@ -57,6 +58,8 @@ export default function NewRoute() {
   const [recoveredOrders, setRecoveredOrders] = useState<PendingOrder[]>([]);
   const [storedOrders, setStoredOrders] = useState<ParsedOrder[]>([]);
   const [storedCount, setStoredCount] = useState(0);
+  const [deprioritizedOrders, setDeprioritizedOrders] = useState<PendingOrder[]>([]);
+  const [showDeprioritizedDialog, setShowDeprioritizedDialog] = useState(false);
 
 
   // Pedidos válidos são os que têm endereço (podem ser roterizados)
@@ -136,7 +139,17 @@ export default function NewRoute() {
     }
 
     setOrders(filteredOrders);
-    
+
+    // Check for deprioritized orders from previous routes
+    try {
+      const deprioritized = await getDeprioritized();
+      if (deprioritized.length > 0) {
+        setDeprioritizedOrders(deprioritized);
+        setShowDeprioritizedDialog(true);
+      }
+    } catch (e) {
+      console.warn('[NewRoute] Could not load deprioritized orders:', e);
+    }
     // Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
       const hints = getHintsForOrders(filteredOrders);
@@ -307,8 +320,29 @@ export default function NewRoute() {
     return summary;
   };
 
+  const handleDeprioritizedConfirm = async (selectedIds: string[]) => {
+    const selected = deprioritizedOrders.filter(o => selectedIds.includes(o.id));
+    if (selected.length > 0) {
+      const parsed = toParsedOrders(selected);
+      setOrders(prev => [...prev, ...parsed]);
+      await markAsRouted(selectedIds, '');
+      toast({
+        title: `${selected.length} venda(s) incluída(s)`,
+        description: 'Vendas despriorizadas foram adicionadas à roteirização',
+      });
+    }
+    setShowDeprioritizedDialog(false);
+    setDeprioritizedOrders([]);
+  };
+
   return (
     <AppLayout>
+      <DeprioritizedOrdersDialog
+        open={showDeprioritizedDialog}
+        onOpenChange={setShowDeprioritizedDialog}
+        orders={deprioritizedOrders}
+        onConfirm={handleDeprioritizedConfirm}
+      />
       <div className="mx-auto max-w-5xl space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
