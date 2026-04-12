@@ -1150,35 +1150,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {activeStep === 'import_adv' && (
           <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Upload className="h-5 w-5" />
-                  Etapa 4: Importar Detalhamento e Gerar Romaneio
-                </CardTitle>
-                <CardDescription>
-                  Carregue o relatório "Detalhe das Vendas" (ADV) para vincular os itens aos pedidos de cada caminhão e gerar o romaneio de carga.
-                </CardDescription>
-              </CardHeader>
-            </Card>
-
-            <ADVUploadSection
-              route={route}
-              reimportItems={reimportItems}
-              hasExistingItems={route.route_trucks.some((rt: any) => 
-                rt.assignments?.some((a: any) => a.order?.items?.length > 0)
-              )}
-            />
-
-            {/* Romaneio de Carga — sempre visível nesta etapa */}
-            <LoadingManifest
-              routeName={route.name}
-              date={new Date(route.created_at).toLocaleDateString('pt-BR')}
-              trucks={truckDataForComponents}
-              routeId={route.id}
-            />
-
-            {/* Botão para avançar ao Romaneio de Entrega */}
+            {/* Botão para avançar ao Romaneio de Entrega — no topo */}
             {(route.route_trucks.some((rt: any) => 
               rt.assignments?.some((a: any) => a.order?.items?.length > 0)
             )) && (
@@ -1209,6 +1181,22 @@ export default function RouteDetails() {
                 </CardContent>
               </Card>
             )}
+
+            <ADVUploadSection
+              route={route}
+              reimportItems={reimportItems}
+              hasExistingItems={route.route_trucks.some((rt: any) => 
+                rt.assignments?.some((a: any) => a.order?.items?.length > 0)
+              )}
+            />
+
+            {/* Romaneio de Carga — sempre visível nesta etapa */}
+            <LoadingManifest
+              routeName={route.name}
+              date={new Date(route.created_at).toLocaleDateString('pt-BR')}
+              trucks={truckDataForComponents}
+              routeId={route.id}
+            />
           </div>
         )}
 
