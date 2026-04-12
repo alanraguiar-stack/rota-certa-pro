@@ -976,47 +976,110 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {activeStep === 'loading_manifest' && (
           <div className="space-y-6">
-            {/* Resumo de vendas por cidade */}
+            {/* Resumo de vendas por cidade — chips clicáveis */}
             {(() => {
               const cityTotals: Record<string, number> = {};
+              const cityOrders: Record<string, any[]> = {};
               for (const rt of route.route_trucks) {
                 for (const a of (rt.assignments || [])) {
                   const city = a.order?.city || 'Sem cidade';
                   cityTotals[city] = (cityTotals[city] || 0) + 1;
+                  if (!cityOrders[city]) cityOrders[city] = [];
+                  cityOrders[city].push(a.order);
                 }
               }
               const sorted = Object.entries(cityTotals).sort((a, b) => b[1] - a[1]);
               if (sorted.length === 0) return null;
+
+              const enabledCount = sorted.reduce((s, [city, v]) => s + (disabledCities.has(city) ? 0 : v), 0);
+              const removedOrders = sorted
+                .filter(([city]) => disabledCities.has(city))
+                .flatMap(([city]) => (cityOrders[city] || []).map(o => ({ ...o, city })));
+
               return (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <MapPin className="h-4 w-4" />
-                      Resumo por Cidade ({sorted.reduce((s, [, v]) => s + v, 0)} vendas)
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-wrap gap-2">
-                      {sorted.map(([city, count], index) => (
-                        <div
-                          key={city}
-                          className={cn(
-                            "flex items-center gap-2 rounded-lg border px-3 py-1.5",
-                            index < 3 ? "bg-primary/5 border-primary/20" : "bg-muted/50 border-border"
-                          )}
-                        >
-                          <span className="text-sm capitalize">{city}</span>
-                          <Badge
-                            variant={index < 3 ? "default" : "outline"}
-                            className="min-w-[1.5rem] justify-center text-xs font-bold"
-                          >
-                            {count}
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
+                <>
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <MapPin className="h-4 w-4" />
+                        Resumo por Cidade ({enabledCount} vendas ativas)
+                      </CardTitle>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Clique em uma cidade para removê-la da roteirização
+                      </p>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-wrap gap-2">
+                        {sorted.map(([city, count], index) => {
+                          const isDisabled = disabledCities.has(city);
+                          return (
+                            <button
+                              key={city}
+                              type="button"
+                              onClick={() => {
+                                setDisabledCities(prev => {
+                                  const next = new Set(prev);
+                                  next.has(city) ? next.delete(city) : next.add(city);
+                                  return next;
+                                });
+                              }}
+                              className={cn(
+                                "flex items-center gap-2 rounded-lg border px-3 py-1.5 transition-all cursor-pointer",
+                                isDisabled
+                                  ? "opacity-40 line-through bg-muted/30 border-destructive/30"
+                                  : index < 3 ? "bg-primary/5 border-primary/20 hover:bg-primary/10" : "bg-muted/50 border-border hover:bg-muted"
+                              )}
+                            >
+                              {isDisabled && <XIcon className="h-3 w-3 text-destructive" />}
+                              <span className="text-sm capitalize">{city}</span>
+                              <Badge
+                                variant={isDisabled ? "destructive" : index < 3 ? "default" : "outline"}
+                                className="min-w-[1.5rem] justify-center text-xs font-bold"
+                              >
+                                {count}
+                              </Badge>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Vendas removidas — colapsável */}
+                  {removedOrders.length > 0 && (
+                    <Collapsible open={removedOrdersOpen} onOpenChange={setRemovedOrdersOpen}>
+                      <Card className="border-destructive/20 bg-destructive/5">
+                        <CollapsibleTrigger asChild>
+                          <CardHeader className="pb-2 cursor-pointer hover:bg-destructive/10 transition-colors">
+                            <CardTitle className="flex items-center gap-2 text-base">
+                              <AlertTriangle className="h-4 w-4 text-destructive" />
+                              Vendas removidas ({removedOrders.length})
+                              <ChevronDown className={cn("h-4 w-4 ml-auto transition-transform", removedOrdersOpen && "rotate-180")} />
+                            </CardTitle>
+                            <p className="text-xs text-muted-foreground">
+                              Estas vendas serão salvas no backlog ao confirmar as rotas
+                            </p>
+                          </CardHeader>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <CardContent>
+                            <div className="space-y-2 max-h-60 overflow-y-auto">
+                              {removedOrders.map((o, i) => (
+                                <div key={i} className="flex items-center justify-between rounded border bg-background p-2 text-sm">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-medium truncate">{o.client_name}</p>
+                                    <p className="text-xs text-muted-foreground truncate">{o.city} • {o.address}</p>
+                                  </div>
+                                  <Badge variant="outline" className="ml-2 shrink-0">{o.weight_kg} kg</Badge>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </CollapsibleContent>
+                      </Card>
+                    </Collapsible>
+                  )}
+                </>
               );
             })()}
 
@@ -1026,7 +1089,8 @@ export default function RouteDetails() {
               trucks={route.route_trucks.map(rt => ({
                 truck: rt.truck!,
                 routeTruckId: rt.id,
-                orders: rt.assignments?.map(a => a.order!).filter(Boolean) ?? [],
+                orders: (rt.assignments?.map(a => a.order!).filter(Boolean) ?? [])
+                  .filter(o => !disabledCities.has(o.city || 'Sem cidade')),
                 totalWeight: Number(rt.total_weight_kg),
                 occupancyPercent: rt.occupancy_percent,
                 isLocked: lockedTruckIds.has(rt.id),
@@ -1035,7 +1099,47 @@ export default function RouteDetails() {
               onReorder={handleReorderInTruck}
               onLockTruck={handleLockTruck}
               onUnlockTruck={handleUnlockTruck}
-              onConfirmAllRoutes={handleConfirmAllRoutesAndProceed}
+              onConfirmAllRoutes={async () => {
+                // Save deprioritized orders before confirming
+                if (disabledCities.size > 0 && route) {
+                  const removedOrders: any[] = [];
+                  for (const rt of route.route_trucks) {
+                    for (const a of (rt.assignments || [])) {
+                      const order = a.order;
+                      if (order && disabledCities.has(order.city || 'Sem cidade')) {
+                        removedOrders.push({
+                          client_name: order.client_name,
+                          address: order.address,
+                          city: order.city || 'Sem cidade',
+                          weight_kg: order.weight_kg,
+                          pedido_id: order.pedido_id,
+                          product_description: order.product_description,
+                        });
+                      }
+                    }
+                  }
+                  if (removedOrders.length > 0) {
+                    const saved = await saveDeprioritizedOrders(removedOrders, route.id);
+                    if (saved > 0) {
+                      toast({
+                        title: `${saved} venda(s) salva(s) no backlog`,
+                        description: 'Serão oferecidas para inclusão em futuras roteirizações',
+                      });
+                    }
+                    // Delete the order_assignments for disabled cities
+                    const { supabase } = await import('@/integrations/supabase/client');
+                    for (const rt of route.route_trucks) {
+                      for (const a of (rt.assignments || [])) {
+                        if (a.order && disabledCities.has(a.order.city || 'Sem cidade')) {
+                          await supabase.from('order_assignments').delete().eq('id', a.id);
+                          await supabase.from('orders').delete().eq('id', a.order.id);
+                        }
+                      }
+                    }
+                  }
+                }
+                await handleConfirmAllRoutesAndProceed();
+              }}
               isProcessing={optimizeRoutes.isPending || moveOrderToTruck.isPending}
             />
           </div>
