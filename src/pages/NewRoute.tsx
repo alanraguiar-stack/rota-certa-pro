@@ -320,8 +320,29 @@ export default function NewRoute() {
     return summary;
   };
 
+  const handleDeprioritizedConfirm = async (selectedIds: string[]) => {
+    const selected = deprioritizedOrders.filter(o => selectedIds.includes(o.id));
+    if (selected.length > 0) {
+      const parsed = toParsedOrders(selected);
+      setOrders(prev => [...prev, ...parsed]);
+      await markAsRouted(selectedIds, '');
+      toast({
+        title: `${selected.length} venda(s) incluída(s)`,
+        description: 'Vendas despriorizadas foram adicionadas à roteirização',
+      });
+    }
+    setShowDeprioritizedDialog(false);
+    setDeprioritizedOrders([]);
+  };
+
   return (
     <AppLayout>
+      <DeprioritizedOrdersDialog
+        open={showDeprioritizedDialog}
+        onOpenChange={setShowDeprioritizedDialog}
+        orders={deprioritizedOrders}
+        onConfirm={handleDeprioritizedConfirm}
+      />
       <div className="mx-auto max-w-5xl space-y-6">
         {/* Page Header */}
         <div className="flex items-center justify-between">
