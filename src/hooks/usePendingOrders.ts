@@ -131,6 +131,54 @@ export function usePendingOrders() {
     });
   }, [user, toast]);
 
+  /** Save deprioritized orders (city disabled from routing) */
+  const saveDeprioritizedOrders = useCallback(async (
+    orders: { client_name: string; address: string; city: string; weight_kg: number; pedido_id?: string | null; product_description?: string | null }[],
+    routeId: string
+  ): Promise<number> => {
+    if (!user || orders.length === 0) return 0;
+
+    const rows = orders.map(o => ({
+      user_id: user.id,
+      client_name: o.client_name,
+      address: o.address,
+      city: o.city || 'Desconhecida',
+      weight_kg: o.weight_kg,
+      pedido_id: o.pedido_id || null,
+      product_description: o.product_description || null,
+      status: 'deprioritized',
+      route_id: routeId,
+    }));
+
+    const { error } = await (supabase as any)
+      .from('pending_orders')
+      .insert(rows);
+
+    if (error) {
+      console.error('Error saving deprioritized orders:', error);
+      return 0;
+    }
+
+    return rows.length;
+  }, [user]);
+
+  /** Get all deprioritized orders */
+  const getDeprioritized = useCallback(async (): Promise<PendingOrder[]> => {
+    if (!user) return [];
+    setLoading(true);
+
+    const { data, error } = await (supabase as any)
+      .from('pending_orders')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'deprioritized')
+      .order('city', { ascending: true });
+
+    setLoading(false);
+    if (error) return [];
+    return (data || []) as PendingOrder[];
+  }, [user]);
+
   /** Convert PendingOrder back to ParsedOrder for routing */
   const toParsedOrders = useCallback((pending: PendingOrder[]): ParsedOrder[] => {
     return pending.map(p => ({
@@ -142,7 +190,7 @@ export function usePendingOrders() {
       items: [],
       city: p.city,
       isValid: true,
-      _backlogId: p.id, // keep reference for marking as routed
+      _backlogId: p.id,
     } as ParsedOrder & { _backlogId: string }));
   }, []);
 
@@ -153,6 +201,8 @@ export function usePendingOrders() {
     getAllPending,
     markAsRouted,
     cancelPending,
+    saveDeprioritizedOrders,
+    getDeprioritized,
     toParsedOrders,
   };
 }
