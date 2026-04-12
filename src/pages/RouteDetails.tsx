@@ -1059,7 +1059,7 @@ export default function RouteDetails() {
               route={route}
               reimportItems={reimportItems}
               hasExistingItems={route.route_trucks.some((rt: any) => 
-                rt.assignments?.some((a: any) => a.order?.order_items?.length > 0)
+                rt.assignments?.some((a: any) => a.order?.items?.length > 0)
               )}
             />
 
@@ -1073,7 +1073,7 @@ export default function RouteDetails() {
 
             {/* Botão para avançar ao Romaneio de Entrega */}
             {(route.route_trucks.some((rt: any) => 
-              rt.assignments?.some((a: any) => a.order?.order_items?.length > 0)
+              rt.assignments?.some((a: any) => a.order?.items?.length > 0)
             )) && (
               <Card className="border-primary/30 bg-primary/5">
                 <CardContent className="py-4">
