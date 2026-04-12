@@ -32,10 +32,11 @@ import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
 import { decodeFileContent } from '@/lib/encoding';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
-// ADV Upload section for Step 2
-function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems: any }) {
+// ADV Upload section for Step 4
+function ADVUploadSection({ route, reimportItems, hasExistingItems }: { route: any; reimportItems: any; hasExistingItems: boolean }) {
   const [advImported, setAdvImported] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
+  const [showReimport, setShowReimport] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -43,25 +44,28 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
     const file = e.target.files?.[0];
     if (!file) return;
 
+    // If items already exist and user hasn't confirmed reimport, ask for confirmation
+    if (hasExistingItems && !showReimport) {
+      const confirmed = confirm('Já existem itens importados. Deseja reimportar? Isso substituirá os dados atuais.');
+      if (!confirmed) {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
+    }
+
     try {
       const isCSVorTXT = file.name.endsWith('.csv') || file.name.endsWith('.txt');
       
       if (isCSVorTXT) {
-        // Use dedicated CSV parser for CSV/TXT files
         const { parseVendasCSV } = await import('@/lib/advParser');
         const text = await decodeFileContent(file);
         const csvItems = parseVendasCSV(text);
         
         if (csvItems.length === 0) {
-          toast({
-            title: 'Nenhum item encontrado',
-            description: 'O arquivo CSV não contém itens de vendas detalhadas.',
-            variant: 'destructive',
-          });
+          toast({ title: 'Nenhum item encontrado', description: 'O arquivo CSV não contém itens de vendas detalhadas.', variant: 'destructive' });
           return;
         }
 
-        // Group CSV items by venda_id to create ParsedOrder[]
         const vendaMap = new Map() as Map<string, { client_name: string; items: any[] }>;
         for (const item of csvItems) {
           if (!vendaMap.has(item.venda_id)) {
@@ -88,13 +92,10 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
 
         await reimportItems.mutateAsync(advOrders);
         setAdvImported(true);
+        setShowReimport(false);
         setImportedCount(csvItems.length);
-        toast({
-          title: 'Detalhamento importado!',
-          description: `${advOrders.length} vendas com ${csvItems.length} itens vinculados.`,
-        });
+        toast({ title: 'Detalhamento importado!', description: `${advOrders.length} vendas com ${csvItems.length} itens vinculados.` });
       } else {
-        // Excel path — use generic parser
         const XLSX = await import('xlsx');
         const buffer = await file.arrayBuffer();
         const wb = XLSX.read(buffer, { type: 'array' });
@@ -102,54 +103,78 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
         const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as unknown[][];
 
         if (!isADVExcelFormat(rows)) {
-          toast({
-            title: 'Formato não reconhecido',
-            description: 'O arquivo não parece ser um relatório de Detalhe das Vendas (ADV).',
-            variant: 'destructive',
-          });
+          toast({ title: 'Formato não reconhecido', description: 'O arquivo não parece ser um relatório de Detalhe das Vendas (ADV).', variant: 'destructive' });
           return;
         }
 
         const advOrders = parseADVDetailExcel(rows);
         if (advOrders.length === 0) {
-          toast({
-            title: 'Nenhum item encontrado',
-            description: 'O arquivo não contém itens detalhados de produtos.',
-            variant: 'destructive',
-          });
+          toast({ title: 'Nenhum item encontrado', description: 'O arquivo não contém itens detalhados de produtos.', variant: 'destructive' });
           return;
         }
 
         await reimportItems.mutateAsync(advOrders);
         setAdvImported(true);
+        setShowReimport(false);
         setImportedCount(advOrders.reduce((sum: number, o: ParsedOrder) => sum + (o.items?.length || 0), 0));
-        toast({
-          title: 'Detalhamento importado!',
-          description: `${advOrders.length} pedidos com itens vinculados à rota.`,
-        });
+        toast({ title: 'Detalhamento importado!', description: `${advOrders.length} pedidos com itens vinculados à rota.` });
       }
     } catch (err: any) {
-      toast({
-        title: 'Erro ao processar arquivo',
-        description: err.message || 'Erro desconhecido',
-        variant: 'destructive',
-      });
+      toast({ title: 'Erro ao processar arquivo', description: err.message || 'Erro desconhecido', variant: 'destructive' });
     }
 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  if (advImported) {
+  // Already imported (either just now or previously)
+  if (advImported || (hasExistingItems && !showReimport)) {
     return (
-      <Card className="border-green-500/30 bg-green-500/5">
+      <Card className="border-success/30 bg-success/5">
         <CardContent className="py-4">
-          <div className="flex items-center gap-3">
-            <CheckCircle2 className="h-5 w-5 text-green-600" />
-            <div>
-              <p className="font-medium text-green-700 dark:text-green-400">Detalhamento importado com sucesso</p>
-              <p className="text-sm text-muted-foreground">{importedCount} itens vinculados. O romaneio de carga estará disponível na próxima etapa.</p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 text-success" />
+              <div>
+                <p className="font-medium text-success">Detalhamento importado com sucesso</p>
+                <p className="text-sm text-muted-foreground">
+                  {advImported ? `${importedCount} itens vinculados.` : 'Itens já vinculados aos pedidos.'}
+                  {' '}O romaneio de carga está disponível abaixo.
+                </p>
+              </div>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowReimport(true)}
+            >
+              Reimportar
+            </Button>
           </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Show reimport UI
+  if (showReimport) {
+    return (
+      <Card className="border-dashed border-warning/50 bg-warning/5">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <AlertTriangle className="h-5 w-5 text-warning" />
+            Reimportar Detalhe das Vendas
+          </CardTitle>
+          <CardDescription>
+            Atenção: isso substituirá todos os itens já importados. Tem certeza?
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex gap-2">
+          <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx,.txt" className="hidden" onChange={handleADVFile} />
+          <Button variant="outline" className="border-warning/30 hover:bg-warning/10" onClick={() => fileInputRef.current?.click()} disabled={reimportItems.isPending}>
+            <Upload className="h-4 w-4 mr-2" />
+            {reimportItems.isPending ? 'Importando...' : 'Carregar Novo Arquivo'}
+          </Button>
+          <Button variant="ghost" onClick={() => setShowReimport(false)}>Cancelar</Button>
         </CardContent>
       </Card>
     );
@@ -165,7 +190,7 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
             <AlertTriangle className="h-5 w-5 text-muted-foreground" />
             <div>
               <p className="font-medium text-muted-foreground">Aguardando pedidos</p>
-              <p className="text-sm text-muted-foreground">Esta rota ainda não tem pedidos cadastrados. Aguarde o carregamento ou volte e importe o relatório "Vendas do Dia".</p>
+              <p className="text-sm text-muted-foreground">Esta rota ainda não tem pedidos cadastrados.</p>
             </div>
           </div>
         </CardContent>
@@ -185,19 +210,8 @@ function ADVUploadSection({ route, reimportItems }: { route: any; reimportItems:
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv,.xls,.xlsx,.txt"
-          className="hidden"
-          onChange={handleADVFile}
-        />
-        <Button
-          variant="outline"
-          className="w-full border-warning/30 hover:bg-warning/10"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={reimportItems.isPending}
-        >
+        <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx,.txt" className="hidden" onChange={handleADVFile} />
+        <Button variant="outline" className="w-full border-warning/30 hover:bg-warning/10" onClick={() => fileInputRef.current?.click()} disabled={reimportItems.isPending}>
           <Upload className="h-4 w-4 mr-2" />
           {reimportItems.isPending ? 'Importando...' : 'Carregar Arquivo ADV'}
         </Button>
@@ -1044,6 +1058,9 @@ export default function RouteDetails() {
             <ADVUploadSection
               route={route}
               reimportItems={reimportItems}
+              hasExistingItems={route.route_trucks.some((rt: any) => 
+                rt.assignments?.some((a: any) => a.order?.order_items?.length > 0)
+              )}
             />
 
             {/* Romaneio de Carga — sempre visível nesta etapa */}
@@ -1053,6 +1070,38 @@ export default function RouteDetails() {
               trucks={truckDataForComponents}
               routeId={route.id}
             />
+
+            {/* Botão para avançar ao Romaneio de Entrega */}
+            {(route.route_trucks.some((rt: any) => 
+              rt.assignments?.some((a: any) => a.order?.order_items?.length > 0)
+            )) && (
+              <Card className="border-primary/30 bg-primary/5">
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">Romaneio de carga pronto</p>
+                      <p className="text-sm text-muted-foreground">Avance para gerar os documentos de entrega para os motoristas.</p>
+                    </div>
+                    <Button
+                      size="lg"
+                      onClick={async () => {
+                        if (!confirm('Deseja finalizar o romaneio de carga e avançar para o romaneio de entrega?')) return;
+                        try {
+                          const { supabase } = await import('@/integrations/supabase/client');
+                          await supabase.from('routes').update({ status: 'distributed' }).eq('id', route.id);
+                          await refetch();
+                          toast({ title: 'Avançando para Romaneio de Entrega!' });
+                        } catch (err: any) {
+                          toast({ title: 'Erro', description: err.message, variant: 'destructive' });
+                        }
+                      }}
+                    >
+                      Avançar para Romaneio de Entrega
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 

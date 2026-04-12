@@ -131,7 +131,7 @@ export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false 
           const StepIcon = step.icon;
           
           // Phase separator
-          const showPhaseSeparator = index === 3; // Before "Roteirizar" (now at index 3)
+          const showPhaseSeparator = index === 4; // Before "Romaneio de Entrega"
           
           return (
             <div key={step.id} className="flex items-center flex-1">
