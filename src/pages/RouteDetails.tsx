@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Truck, Package, Calculator, FileDown, Map as MapIcon, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Truck, Package, Calculator, FileDown, Map as MapIcon, Clock, MapPin, Route as RouteIcon, AlertCircle, ChevronLeft, Lock, Unlock, Upload, CheckCircle2, AlertTriangle, X as XIcon, ChevronDown } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useRouteDetails } from '@/hooks/useRoutes';
 import { useTrucks } from '@/hooks/useTrucks';
+import { usePendingOrders } from '@/hooks/usePendingOrders';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 
 import { Truck as TruckType, ParsedOrder, RoutingStrategy } from '@/types';
@@ -261,14 +263,15 @@ export default function RouteDetails() {
     refetch 
   } = useRouteDetails(id);
   const { activeTrucks } = useTrucks();
-  
+  const { saveDeprioritizedOrders } = usePendingOrders();
 
   const [selectedTrucks, setSelectedTrucks] = useState<string[]>([]);
   const [hasAddedPendingOrders, setHasAddedPendingOrders] = useState(false);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>('padrao');
   const [showMap, setShowMap] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
-  
+  const [disabledCities, setDisabledCities] = useState<Set<string>>(new Set());
+  const [removedOrdersOpen, setRemovedOrdersOpen] = useState(false);
   
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
