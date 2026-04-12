@@ -139,7 +139,17 @@ export default function NewRoute() {
     }
 
     setOrders(filteredOrders);
-    
+
+    // Check for deprioritized orders from previous routes
+    try {
+      const deprioritized = await getDeprioritized();
+      if (deprioritized.length > 0) {
+        setDeprioritizedOrders(deprioritized);
+        setShowDeprioritizedDialog(true);
+      }
+    } catch (e) {
+      console.warn('[NewRoute] Could not load deprioritized orders:', e);
+    }
     // Auto-compose trucks if not already configured
     if (activeTrucks.length > 0 && !fleetConfirmed) {
       const hints = getHintsForOrders(filteredOrders);
