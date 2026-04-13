@@ -180,31 +180,59 @@ export default function Settings() {
     }
   };
 
-  const handleCreateDriver = async () => {
+  const handleCreateUser = async () => {
     if (!newDriverName.trim()) {
-      toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
+      toast({ title: 'Informe o nome do usuário', variant: 'destructive' });
       return;
     }
     if (!newDriverPassword || newDriverPassword.length < 6) {
       toast({ title: 'A senha deve ter pelo menos 6 caracteres', variant: 'destructive' });
       return;
     }
+
     setCreatingDriver(true);
     setDriverInfo(null);
+
     try {
-      const { data, error } = await supabase.functions.invoke('create-test-driver', {
-        body: { driverName: newDriverName.trim(), driverPassword: newDriverPassword || undefined },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
-      setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
+      if (newUserRole === 'motorista') {
+        // Use edge function for drivers
+        const { data, error } = await supabase.functions.invoke('create-test-driver', {
+          body: { driverName: newDriverName.trim(), driverPassword: newDriverPassword || undefined },
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
+        setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
+      } else {
+        // For admin/operacional, use signUp + role
+        if (!newUserEmail.trim()) {
+          toast({ title: 'Informe o e-mail para usuários admin/operacional', variant: 'destructive' });
+          setCreatingDriver(false);
+          return;
+        }
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: newUserEmail.trim(),
+          password: newDriverPassword,
+          options: { data: { full_name: newDriverName.trim() } },
+        });
+        if (signUpError) throw signUpError;
+        if (signUpData.user) {
+          // Update role from default 'operacional' to chosen role
+          if (newUserRole !== 'operacional') {
+            await updateUserRole(signUpData.user.id, newUserRole);
+          }
+        }
+      }
+
+      toast({ title: 'Usuário criado com sucesso!' });
       setNewDriverName('');
       setNewDriverPassword('');
-      toast({ title: 'Motorista criado com sucesso!' });
+      setNewUserEmail('');
+      setShowCreateDialog(false);
+
+      // Refresh users & access codes
       const allUsers = await getAllUsers();
       setUsers(allUsers);
-      // Refresh access codes
       const { data: codes } = await supabase.from('driver_access_codes').select('user_id, access_code');
       if (codes) {
         const codesMap: Record<string, { accessCode: string; password: string }> = {};
@@ -212,9 +240,19 @@ export default function Settings() {
         setAccessCodes(codesMap);
       }
     } catch (err: any) {
-      toast({ title: 'Erro ao criar motorista', description: err.message, variant: 'destructive' });
+      toast({ title: 'Erro ao criar usuário', description: err.message, variant: 'destructive' });
     } finally {
       setCreatingDriver(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    const { error } = await deleteUser(userId);
+    if (error) {
+      toast({ title: error, variant: 'destructive' });
+    } else {
+      toast({ title: `Usuário ${userName || ''} excluído` });
+      setUsers(prev => prev.filter(u => u.user_id !== userId));
     }
   };
 
