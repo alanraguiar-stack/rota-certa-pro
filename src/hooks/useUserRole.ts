@@ -135,9 +135,23 @@ export function useUserManagement() {
     return { error: error?.message };
   }, [isAdmin]);
 
+  const deleteUser = useCallback(async (userId: string) => {
+    if (!isAdmin) return { error: 'Unauthorized' };
+
+    // Delete from user_roles
+    await (supabase as any).from('user_roles').delete().eq('user_id', userId);
+    // Delete from driver_access_codes
+    await supabase.from('driver_access_codes').delete().eq('user_id', userId);
+    // Delete from profiles
+    await supabase.from('profiles').delete().eq('user_id', userId);
+
+    return { error: null };
+  }, [isAdmin]);
+
   return {
     getAllUsers,
     updateUserRole,
     toggleUserActive,
+    deleteUser,
   };
 }

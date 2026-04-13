@@ -10,12 +10,14 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/hooks/useTheme';
 import { useUserRole, useUserManagement, AppRole } from '@/hooks/useUserRole';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy, CalendarDays, MapPin } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, Package, History, UserPlus, Copy, CalendarDays, MapPin, Trash2 } from 'lucide-react';
 import { ProductUnitsImporter } from '@/components/route/ProductUnitsImporter';
 import { CityScheduleTab } from '@/components/settings/CityScheduleTab';
 import { RouteHistoryImporter } from '@/components/route/RouteHistoryImporter';
@@ -33,7 +35,7 @@ export default function Settings() {
   const { user } = useAuth();
   const { theme, toggleTheme, isDark } = useTheme();
   const { isAdmin, isMotorista, loading: roleLoading } = useUserRole();
-  const { getAllUsers, updateUserRole, toggleUserActive } = useUserManagement();
+  const { getAllUsers, updateUserRole, toggleUserActive, deleteUser } = useUserManagement();
   const { toast } = useToast();
 
   const [fullName, setFullName] = useState('');
@@ -47,6 +49,9 @@ export default function Settings() {
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [newDriverName, setNewDriverName] = useState('');
   const [newDriverPassword, setNewDriverPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<AppRole>('motorista');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [driverInfo, setDriverInfo] = useState<{ accessCode: string; password: string; fullName: string; accessLink: string } | null>(null);
   const [accessCodes, setAccessCodes] = useState<Record<string, { accessCode: string; password: string }>>({});
 
@@ -175,31 +180,59 @@ export default function Settings() {
     }
   };
 
-  const handleCreateDriver = async () => {
+  const handleCreateUser = async () => {
     if (!newDriverName.trim()) {
-      toast({ title: 'Informe o nome do motorista', variant: 'destructive' });
+      toast({ title: 'Informe o nome do usuário', variant: 'destructive' });
       return;
     }
     if (!newDriverPassword || newDriverPassword.length < 6) {
       toast({ title: 'A senha deve ter pelo menos 6 caracteres', variant: 'destructive' });
       return;
     }
+
     setCreatingDriver(true);
     setDriverInfo(null);
+
     try {
-      const { data, error } = await supabase.functions.invoke('create-test-driver', {
-        body: { driverName: newDriverName.trim(), driverPassword: newDriverPassword || undefined },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
-      setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
+      if (newUserRole === 'motorista') {
+        // Use edge function for drivers
+        const { data, error } = await supabase.functions.invoke('create-test-driver', {
+          body: { driverName: newDriverName.trim(), driverPassword: newDriverPassword || undefined },
+        });
+        if (error) throw error;
+        if (data?.error) throw new Error(data.error);
+        const accessLink = `${window.location.origin}/motorista/acesso/${data.accessCode}`;
+        setDriverInfo({ accessCode: data.accessCode, password: data.password, fullName: data.fullName, accessLink });
+      } else {
+        // For admin/operacional, use signUp + role
+        if (!newUserEmail.trim()) {
+          toast({ title: 'Informe o e-mail para usuários admin/operacional', variant: 'destructive' });
+          setCreatingDriver(false);
+          return;
+        }
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: newUserEmail.trim(),
+          password: newDriverPassword,
+          options: { data: { full_name: newDriverName.trim() } },
+        });
+        if (signUpError) throw signUpError;
+        if (signUpData.user) {
+          // Update role from default 'operacional' to chosen role
+          if (newUserRole !== 'operacional') {
+            await updateUserRole(signUpData.user.id, newUserRole);
+          }
+        }
+      }
+
+      toast({ title: 'Usuário criado com sucesso!' });
       setNewDriverName('');
       setNewDriverPassword('');
-      toast({ title: 'Motorista criado com sucesso!' });
+      setNewUserEmail('');
+      setShowCreateDialog(false);
+
+      // Refresh users & access codes
       const allUsers = await getAllUsers();
       setUsers(allUsers);
-      // Refresh access codes
       const { data: codes } = await supabase.from('driver_access_codes').select('user_id, access_code');
       if (codes) {
         const codesMap: Record<string, { accessCode: string; password: string }> = {};
@@ -207,9 +240,19 @@ export default function Settings() {
         setAccessCodes(codesMap);
       }
     } catch (err: any) {
-      toast({ title: 'Erro ao criar motorista', description: err.message, variant: 'destructive' });
+      toast({ title: 'Erro ao criar usuário', description: err.message, variant: 'destructive' });
     } finally {
       setCreatingDriver(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, userName: string) => {
+    const { error } = await deleteUser(userId);
+    if (error) {
+      toast({ title: error, variant: 'destructive' });
+    } else {
+      toast({ title: `Usuário ${userName || ''} excluído` });
+      setUsers(prev => prev.filter(u => u.user_id !== userId));
     }
   };
 
@@ -401,48 +444,94 @@ export default function Settings() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* Create Driver */}
-                  <div className="space-y-3 p-4 rounded-lg border border-dashed border-border">
-                    <div className="flex items-center gap-3 flex-wrap">
-                      <Input
-                        placeholder="Nome do motorista"
-                        value={newDriverName}
-                        onChange={(e) => setNewDriverName(e.target.value)}
-                        className="max-w-xs"
-                      />
-                      <Input
-                        placeholder="Senha (mín. 6 caracteres)"
-                        type="password"
-                        value={newDriverPassword}
-                        onChange={(e) => setNewDriverPassword(e.target.value)}
-                        className="max-w-xs"
-                      />
-                      <Button onClick={handleCreateDriver} disabled={creatingDriver} variant="outline" className="gap-2 shrink-0">
-                        <UserPlus className="h-4 w-4" />
-                        {creatingDriver ? 'Criando...' : 'Criar Motorista'}
-                      </Button>
-                    </div>
-                    {driverInfo && (
-                      <div className="text-sm space-y-2 bg-muted p-3 rounded-md">
-                        <p className="font-medium">{driverInfo.fullName}</p>
-                        <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">Link de acesso:</span>
-                          <code className="text-xs bg-background px-2 py-1 rounded break-all">{driverInfo.accessLink}</code>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.accessLink); toast({ title: 'Link copiado!' }); }}>
-                            <Copy className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-muted-foreground">Senha:</span>
-                          <code className="text-xs bg-background px-2 py-1 rounded">{driverInfo.password}</code>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.password); toast({ title: 'Senha copiada!' }); }}>
-                            <Copy className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <p className="text-xs text-muted-foreground">Envie o link e a senha para o motorista.</p>
-                      </div>
-                    )}
+                  {/* Create User Button + Dialog */}
+                  <div className="flex items-center justify-between">
+                    <Button onClick={() => setShowCreateDialog(true)} variant="outline" className="gap-2">
+                      <UserPlus className="h-4 w-4" />
+                      Criar Usuário
+                    </Button>
                   </div>
+
+                  {driverInfo && (
+                    <div className="text-sm space-y-2 bg-muted p-3 rounded-md">
+                      <p className="font-medium">{driverInfo.fullName}</p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">Link de acesso:</span>
+                        <code className="text-xs bg-background px-2 py-1 rounded break-all">{driverInfo.accessLink}</code>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.accessLink); toast({ title: 'Link copiado!' }); }}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">Senha:</span>
+                        <code className="text-xs bg-background px-2 py-1 rounded">{driverInfo.password}</code>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { navigator.clipboard.writeText(driverInfo.password); toast({ title: 'Senha copiada!' }); }}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Envie o link e a senha para o motorista.</p>
+                    </div>
+                  )}
+
+                  {/* Create User Dialog */}
+                  <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Criar Novo Usuário</DialogTitle>
+                        <DialogDescription>Preencha os dados e escolha a categoria do usuário.</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>Categoria</Label>
+                          <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as AppRole)}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="admin">Administrador</SelectItem>
+                              <SelectItem value="operacional">Operacional</SelectItem>
+                              <SelectItem value="motorista">Motorista</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Nome</Label>
+                          <Input
+                            placeholder="Nome completo"
+                            value={newDriverName}
+                            onChange={(e) => setNewDriverName(e.target.value)}
+                          />
+                        </div>
+                        {newUserRole !== 'motorista' && (
+                          <div className="space-y-2">
+                            <Label>E-mail</Label>
+                            <Input
+                              placeholder="email@exemplo.com"
+                              type="email"
+                              value={newUserEmail}
+                              onChange={(e) => setNewUserEmail(e.target.value)}
+                            />
+                          </div>
+                        )}
+                        <div className="space-y-2">
+                          <Label>Senha</Label>
+                          <Input
+                            placeholder="Mínimo 6 caracteres"
+                            type="password"
+                            value={newDriverPassword}
+                            onChange={(e) => setNewDriverPassword(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
+                        <Button onClick={handleCreateUser} disabled={creatingDriver}>
+                          {creatingDriver ? 'Criando...' : 'Criar Usuário'}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
                   {loadingUsers ? (
                     <p className="text-center text-muted-foreground py-8">
                       Carregando usuários...
@@ -456,8 +545,7 @@ export default function Settings() {
                       <TableHeader>
                         <TableRow>
                           <TableHead>Nome</TableHead>
-                          <TableHead>Senha</TableHead>
-                          <TableHead>Link Rápido</TableHead>
+                          <TableHead>Código</TableHead>
                           <TableHead>Permissão</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Ações</TableHead>
@@ -472,17 +560,7 @@ export default function Settings() {
                             <TableCell>
                               {accessCodes[u.user_id] ? (
                                 <div className="flex items-center gap-1">
-                                  <code className="text-xs">{accessCodes[u.user_id].password}</code>
-                                  <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { navigator.clipboard.writeText(accessCodes[u.user_id].password); toast({ title: 'Senha copiada!' }); }}>
-                                    <Copy className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              ) : <span className="text-muted-foreground">—</span>}
-                            </TableCell>
-                            <TableCell>
-                              {accessCodes[u.user_id] ? (
-                                <div className="flex items-center gap-1">
-                                  <code className="text-xs truncate max-w-[120px]">{accessCodes[u.user_id].accessCode}</code>
+                                  <code className="text-xs truncate max-w-[100px]">{accessCodes[u.user_id].accessCode}</code>
                                   <Button variant="ghost" size="icon" className="h-5 w-5" onClick={() => { 
                                     const link = `${window.location.origin}/motorista/acesso/${accessCodes[u.user_id].accessCode}`;
                                     navigator.clipboard.writeText(link); 
@@ -515,14 +593,40 @@ export default function Settings() {
                               </Badge>
                             </TableCell>
                             <TableCell>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleToggleActive(u.user_id, u.is_active)}
-                                disabled={u.user_id === user?.id}
-                              >
-                                {u.is_active ? 'Desativar' : 'Ativar'}
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleToggleActive(u.user_id, u.is_active)}
+                                  disabled={u.user_id === user?.id}
+                                >
+                                  {u.is_active ? 'Desativar' : 'Ativar'}
+                                </Button>
+                                {!u.is_active && u.user_id !== user?.id && (
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="destructive" size="sm" className="gap-1">
+                                        <Trash2 className="h-3 w-3" />
+                                        Excluir
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Excluir usuário?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                          Esta ação removerá permanentemente o perfil e permissões de <strong>{u.full_name || 'este usuário'}</strong>. Esta ação não pode ser desfeita.
+                                        </AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                        <AlertDialogAction onClick={() => handleDeleteUser(u.user_id, u.full_name || '')}>
+                                          Excluir
+                                        </AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                )}
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
