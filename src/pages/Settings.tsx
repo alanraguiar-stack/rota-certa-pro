@@ -35,7 +35,7 @@ export default function Settings() {
   const { user } = useAuth();
   const { theme, toggleTheme, isDark } = useTheme();
   const { isAdmin, isMotorista, loading: roleLoading } = useUserRole();
-  const { getAllUsers, updateUserRole, toggleUserActive } = useUserManagement();
+  const { getAllUsers, updateUserRole, toggleUserActive, deleteUser } = useUserManagement();
   const { toast } = useToast();
 
   const [fullName, setFullName] = useState('');
@@ -49,6 +49,9 @@ export default function Settings() {
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [newDriverName, setNewDriverName] = useState('');
   const [newDriverPassword, setNewDriverPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<AppRole>('motorista');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [driverInfo, setDriverInfo] = useState<{ accessCode: string; password: string; fullName: string; accessLink: string } | null>(null);
   const [accessCodes, setAccessCodes] = useState<Record<string, { accessCode: string; password: string }>>({});
 
