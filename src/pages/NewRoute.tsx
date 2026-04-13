@@ -463,16 +463,16 @@ export default function NewRoute() {
                 />
                 
                 {fleetConfirmed && (
-                  <div className="mt-6 p-5 rounded-2xl bg-success/10 border border-success/30">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/20">
-                        <Check className="h-5 w-5 text-success" />
+                  <div className="mt-8 p-8 rounded-2xl bg-success/10 border border-success/30">
+                    <div className="flex items-center gap-5">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-success/20 shrink-0">
+                        <Check className="h-7 w-7 text-success" />
                       </div>
-                      <div>
-                        <p className="font-semibold text-success">
+                      <div className="space-y-1">
+                        <p className="text-lg font-bold text-success">
                           Frota confirmada: {selectedTruckIds.length} caminhão(ões)
                         </p>
-                        <p className="text-sm text-muted-foreground mt-0.5">
+                        <p className="text-sm text-muted-foreground">
                           Esta seleção será usada para romaneio e roteirização.
                         </p>
                       </div>

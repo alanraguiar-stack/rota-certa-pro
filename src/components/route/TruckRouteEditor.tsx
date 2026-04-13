@@ -189,9 +189,21 @@ function OrderCard({
               {formatWeight(Number(order.weight_kg))}
             </Badge>
           </div>
-          <p className="text-sm text-muted-foreground break-words">
-            <MapPin className="inline h-3 w-3 mr-1" />
-            {order.address}
+          <p className="text-sm text-muted-foreground break-words inline-flex items-start gap-1 flex-wrap">
+            <MapPin className="inline h-3 w-3 mr-0.5 mt-0.5 shrink-0" />
+            <span>{order.address}</span>
+            <button
+              type="button"
+              className="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-muted shrink-0 mt-0.5 opacity-40 hover:opacity-100 transition-opacity"
+              title="Copiar endereço"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(order.address);
+                toast({ title: 'Endereço copiado!' });
+              }}
+            >
+              <Copy className="h-2.5 w-2.5" />
+            </button>
           </p>
         </div>
         
