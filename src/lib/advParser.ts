@@ -1654,6 +1654,101 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
   }
 
   console.log(`[parseVendasCSV] Parsed ${items.length} items from ${lines.length} lines`);
+
+  // Fallback dinâmico: se a passagem com índices fixos não extraiu nada,
+  // tentar detectar dinamicamente as posições de cliente, venda e colunas de itens.
+  if (items.length === 0) {
+    const dynamicItems = parseVendasCSVDynamic(lines);
+    console.log(`[parseVendasCSV][dynamic-fallback] Parsed ${dynamicItems.length} items`);
+    return dynamicItems;
+  }
+
+  return items;
+}
+
+/** Inferir unidade pelo nome do produto (espelho de inferUnitFromName, em maiúsculas para romaneio) */
+function inferUnitFromProductName(productName: string): string {
+  const upper = (productName || '').toUpperCase();
+  if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'FD';
+  const map: Array<[RegExp, string]> = [
+    [/\bFD\d*\b|FARDO/, 'FD'],
+    [/\bCX\d*\b|CAIXA/, 'CX'],
+    [/\bPCT\d*\b|PACOTE/, 'PCT'],
+    [/\bSC\d*\b|SACO/, 'SC'],
+    [/\bDP\d*\b|DISPLAY/, 'DP'],
+    [/\bGF\d*\b|GARRAFA/, 'GF'],
+    [/\bLT\d*\b|LITRO/, 'LT'],
+    [/\bPC\d*\b|PECA|PEÇA/, 'PC'],
+    [/\bUN\d*\b|UNIDADE/, 'UN'],
+    [/\bKG\b|QUILO/, 'KG'],
+  ];
+  for (const [re, u] of map) if (re.test(upper)) return u;
+  return 'KG';
+}
+
+/**
+ * Parser dinâmico de fallback: detecta posições reais de cliente, venda e colunas
+ * (Código / Descrição / Qtde) em vez de usar índices fixos.
+ */
+function parseVendasCSVDynamic(lines: string[]): VendaCSVItem[] {
+  const items: VendaCSVItem[] = [];
+  let currentClient = '';
+  let currentVendaId = '';
+  let descIdx = -1;
+  let qtyIdx = -1;
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const partes = line.split(';').map(p => p.trim());
+    const first = partes[0] ?? '';
+
+    // Cliente: primeiro campo não-vazio depois de partes[0]
+    if (/^Cliente\s*:?$/i.test(first)) {
+      for (let i = 1; i < partes.length; i++) {
+        const v = partes[i];
+        if (v && !/^\d+$/.test(v)) { currentClient = v; break; }
+      }
+      continue;
+    }
+
+    // Venda Nº: primeiro número longo (≥4 dígitos) depois de partes[0]
+    if (/^Venda\s*N[º°o]?\s*:?$/i.test(first)) {
+      for (let i = 1; i < partes.length; i++) {
+        const v = (partes[i] ?? '').replace(/\D/g, '');
+        if (v.length >= 4) { currentVendaId = v; break; }
+      }
+      continue;
+    }
+
+    // Cabeçalho da tabela de itens: contém "Código" e "Descrição" (com ou sem acento) e "Qtde"
+    const hasCodigo = partes.some(p => /^c[óo]digo$/i.test(p));
+    const hasDesc = partes.some(p => /^descri[çc][ãa]o$/i.test(p));
+    const hasQtde = partes.some(p => /^qtde\.?$/i.test(p));
+    if (hasCodigo && hasDesc && hasQtde) {
+      descIdx = partes.findIndex(p => /^descri[çc][ãa]o$/i.test(p));
+      qtyIdx = partes.findIndex(p => /^qtde\.?$/i.test(p));
+      continue;
+    }
+
+    // Item: partes[0] numérico, com cabeçalho mapeado e venda atual
+    if (/^\d+$/.test(first) && currentVendaId && descIdx > 0 && qtyIdx > 0) {
+      const productCode = first;
+      const productName = (partes[descIdx] ?? '').trim();
+      const qtyRaw = (partes[qtyIdx] ?? '0').trim();
+      const quantity = parseBRNumber(qtyRaw);
+      if (productName && quantity > 0) {
+        items.push({
+          product_code: productCode,
+          product_name: productName,
+          unit: inferUnitFromProductName(productName),
+          quantity,
+          venda_id: currentVendaId,
+          client_name: currentClient,
+        });
+      }
+    }
+  }
+
   return items;
 }
 
