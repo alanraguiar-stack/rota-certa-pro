@@ -49,6 +49,12 @@ function normalize(str: string): string {
 export function inferUnitFromName(productName: string): string {
   const upper = productName.toUpperCase();
 
+  // Regras específicas por categoria/marca (ganham prioridade)
+  if (/CAFE|CAFÉ|FARINHA/.test(upper)) return 'fardo';
+  if (/MOLHO DE TOMATE/.test(upper)) return 'pacote';
+  if (/SALSICHA|BISTECA|APRESUNTADO/.test(upper)) return 'kg';
+  if (/KETCHUP|MAIONESE/.test(upper)) return 'unidade';
+
   // Categorias de bebidas → sempre fardo
   if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'fardo';
 
