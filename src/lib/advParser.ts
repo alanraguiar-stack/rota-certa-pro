@@ -1696,6 +1696,7 @@ function parseVendasCSVDynamic(lines: string[]): VendaCSVItem[] {
   let currentVendaId = '';
   let descIdx = -1;
   let qtyIdx = -1;
+  let alignmentShift: number | null = null; // -1 quando dados estão deslocados 1 col à esquerda do header
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -1727,6 +1728,7 @@ function parseVendasCSVDynamic(lines: string[]): VendaCSVItem[] {
     if (hasCodigo && hasDesc && hasQtde) {
       descIdx = partes.findIndex(p => /^descri[çc][ãa]o$/i.test(p));
       qtyIdx = partes.findIndex(p => /^qtde\.?$/i.test(p));
+      alignmentShift = null; // resetar para detectar na primeira linha de item
       continue;
     }
 
@@ -1734,7 +1736,24 @@ function parseVendasCSVDynamic(lines: string[]): VendaCSVItem[] {
     if (/^\d+$/.test(first) && currentVendaId && descIdx > 0 && qtyIdx > 0) {
       const productCode = first;
       const productName = (partes[descIdx] ?? '').trim();
-      const qtyRaw = (partes[qtyIdx] ?? '0').trim();
+
+      // Detectar desalinhamento na primeira linha: se valor em qtyIdx parece preço
+      // (decimal com 2 casas tipo "21,99") e a célula anterior parece quantidade
+      // (inteiro pequeno tipo "10"), aplicar shift de -1.
+      if (alignmentShift === null) {
+        const atHeader = (partes[qtyIdx] ?? '').trim();
+        const atShifted = (partes[qtyIdx - 1] ?? '').trim();
+        const looksLikePrice = /^\d{1,5},\d{2}$/.test(atHeader);
+        const looksLikeQty = /^\d{1,4}([.,]\d{1,3})?$/.test(atShifted) && !/^\d{1,5},\d{2}$/.test(atShifted);
+        if (looksLikePrice && looksLikeQty && qtyIdx - 1 > descIdx) {
+          alignmentShift = -1;
+        } else {
+          alignmentShift = 0;
+        }
+      }
+
+      const effectiveQtyIdx = qtyIdx + (alignmentShift ?? 0);
+      const qtyRaw = (partes[effectiveQtyIdx] ?? '0').trim();
       const quantity = parseBRNumber(qtyRaw);
       if (productName && quantity > 0) {
         items.push({
