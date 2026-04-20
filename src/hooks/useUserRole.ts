@@ -25,18 +25,22 @@ export function useUserRole(): UserRoleState {
     }
 
     try {
-      // Query user_roles table directly using any to bypass type issues
+      // Fetch all roles (user may have multiple); pick highest privilege
       const { data, error } = await (supabase as any)
         .from('user_roles')
         .select('role')
-        .eq('user_id', user.id)
-        .single();
+        .eq('user_id', user.id);
 
       if (error) {
         console.error('Error fetching user role:', error);
         setRole(null);
+      } else if (data && data.length > 0) {
+        const roles = data.map((r: any) => r.role as AppRole);
+        const priority: AppRole[] = ['admin', 'operacional', 'motorista'];
+        const best = priority.find((p) => roles.includes(p)) ?? null;
+        setRole(best);
       } else {
-        setRole((data?.role as AppRole) || null);
+        setRole(null);
       }
     } catch (err) {
       console.error('Error fetching role:', err);
@@ -113,13 +117,19 @@ export function useUserManagement() {
   const updateUserRole = useCallback(async (userId: string, newRole: AppRole) => {
     if (!isAdmin) return { error: 'Unauthorized' };
 
-    // Upsert the role
+    // Replace any existing roles to ensure a single role per user
+    const { error: deleteError } = await (supabase as any)
+      .from('user_roles')
+      .delete()
+      .eq('user_id', userId);
+
+    if (deleteError) {
+      return { error: deleteError.message };
+    }
+
     const { error } = await (supabase as any)
       .from('user_roles')
-      .upsert(
-        { user_id: userId, role: newRole },
-        { onConflict: 'user_id,role' }
-      );
+      .insert({ user_id: userId, role: newRole });
 
     return { error: error?.message };
   }, [isAdmin]);
