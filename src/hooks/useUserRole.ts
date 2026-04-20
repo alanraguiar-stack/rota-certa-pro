@@ -25,18 +25,22 @@ export function useUserRole(): UserRoleState {
     }
 
     try {
-      // Query user_roles table directly using any to bypass type issues
+      // Fetch all roles (user may have multiple); pick highest privilege
       const { data, error } = await (supabase as any)
         .from('user_roles')
         .select('role')
-        .eq('user_id', user.id)
-        .single();
+        .eq('user_id', user.id);
 
       if (error) {
         console.error('Error fetching user role:', error);
         setRole(null);
+      } else if (data && data.length > 0) {
+        const roles = data.map((r: any) => r.role as AppRole);
+        const priority: AppRole[] = ['admin', 'operacional', 'motorista'];
+        const best = priority.find((p) => roles.includes(p)) ?? null;
+        setRole(best);
       } else {
-        setRole((data?.role as AppRole) || null);
+        setRole(null);
       }
     } catch (err) {
       console.error('Error fetching role:', err);
