@@ -1,30 +1,35 @@
 
 
-# Corrigir parser ADV CSV preservando funcionamento atual
+# Corrigir botão "Reimportar" para abrir o seletor de arquivo direto
 
-## Garantia
+## Problema
 
-A correção será **aditiva e não-destrutiva**: o parser atual continua tentando primeiro com a lógica antiga (que funciona para arquivos em formato anterior). Só quando ela falhar (0 itens extraídos) é que o novo modo dinâmico entra em ação. Assim, o romaneio que já funcionava continua funcionando, e o arquivo `VENDAS_DETALHADAS_20.04.csv` passa a funcionar também.
+O botão **Reimportar** (em `src/pages/RouteDetails.tsx`, linha 147-153) hoje apenas alterna `showReimport=true`, exibindo uma segunda tela de aviso com outro botão "Carregar Novo Arquivo". Resultado: parece que "não funciona" — o usuário clica e nada acontece (ou abre uma tela intermediária inesperada).
 
-## Mudança em `src/lib/advParser.ts`
+## Solução
 
-### Estratégia: detecção dinâmica como fallback
+Tornar o botão **Reimportar** um atalho direto que:
 
-1. **Manter** a função `parseVendasCSV` atual intacta como caminho primário
-2. **Adicionar** uma segunda passagem dinâmica caso a primeira retorne 0 vendas válidas:
-   - Detectar `Cliente:` no `partes[0]` → pegar primeiro campo não-vazio depois (cobre `[2]`, `[3]`, `[4]`)
-   - Detectar `Venda Nº:` no `partes[0]` → pegar primeiro número ≥4 dígitos depois (cobre `[4]`, `[5]`, `[6]`)
-   - Detectar linha de cabeçalho com `Código`, `Descrição`, `Qtde` → mapear índices reais de cada coluna
-   - Para cada linha de item subsequente: extrair código (`[0]`), descrição (índice mapeado), quantidade (índice mapeado), unitário e total
-3. **Inferir unidade** pelo nome do produto via `inferUnitFromName()` (já existe em `useProductUnits.ts`), pois o novo formato não traz coluna de unidade. Default = `KG`.
+1. **Abre o seletor de arquivo imediatamente** (`fileInputRef.current?.click()`) — sem etapa intermediária
+2. A confirmação de "isso vai substituir os dados atuais" já existe em `handleADVFile` (linha 50-56) via `confirm()` nativo, então a proteção contra substituição acidental fica preservada
+3. O `<input type="file">` precisa estar montado nesse card de "já importado" (hoje só existe no card de reimport e no card inicial) — adicionar uma referência ao input nesse card também
 
-### Resultado esperado
+### Mudanças em `src/pages/RouteDetails.tsx`
 
-- Arquivos no formato antigo: **continuam funcionando exatamente como antes** (caminho primário)
-- Arquivo `VENDAS_DETALHADAS_20.04.csv` e variantes: **passam a funcionar** via fallback dinâmico
-- Aprendizado automático de produtos (`bulkAddNewProducts`) continua ativo no fluxo do romaneio
+- No card "Detalhamento importado com sucesso" (linhas 132-158):
+  - Adicionar o `<input type="file" ref={fileInputRef} hidden>` dentro do card
+  - Trocar `onClick={() => setShowReimport(true)}` por `onClick={() => { setShowReimport(true); fileInputRef.current?.click(); }}` — mantém o estado para o handler reconhecer que é uma reimportação intencional, mas abre o seletor imediatamente
+- A tela intermediária de aviso (`if (showReimport)` linhas 161-183) pode ser **removida**, já que a confirmação nativa do `confirm()` em `handleADVFile` já protege contra substituição acidental
+- Ao cancelar o seletor de arquivo (usuário fecha sem escolher), resetar `showReimport=false` para não deixar estado pendurado — fazer isso no início do `handleADVFile` quando `!file`
+
+## Resultado
+
+- Um clique em "Reimportar" → abre o seletor de arquivo
+- Após escolher o arquivo, aparece o `confirm()` nativo perguntando se quer substituir
+- Confirmando, o novo arquivo é processado e os itens substituídos
+- Cancelando no seletor, nada acontece e o card volta ao estado normal
 
 ## Arquivo
 
-- `src/lib/advParser.ts` — adicionar fallback dinâmico em `parseVendasCSV` sem alterar o caminho principal
+- `src/pages/RouteDetails.tsx` — simplificar o componente `ADVUploadSection` removendo a etapa intermediária e ligando o botão "Reimportar" direto ao seletor de arquivo
 
