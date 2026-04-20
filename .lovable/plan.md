@@ -1,66 +1,45 @@
 
 
-# Limpeza: remover abas obsoletas e toasts informativos
+# Corrigir acesso da Caroline Santos Mendes
 
-## Contexto verificado
+## Causa raiz
 
-**Produtos — aprendizado automático ativo ✓**
-- `useProductUnits.bulkAddNewProducts()` é chamado em `DualPasteData.tsx` (linhas 528 e 574) durante o upload das vendas
-- Novos produtos são auto-cadastrados com `inferUnitFromName()` (REFRIGERANTE→fardo, CX→caixa, UN→unidade, etc.)
-- A aba "Produtos" em Configurações é redundante
+A Caroline tem **dois papéis** simultâneos na tabela `user_roles`: `admin` e `operacional`. O hook `useUserRole` usa `.single()` no Supabase — quando encontra mais de uma linha, lança erro e define `role = null`. O `AppLayout` então exibe a tela "Acesso não autorizado".
 
-**Histórico — aprendizado automático ativo ✓**
-- `RouteDetails.tsx` salva snapshots em `route_history_patterns` após cada alteração manual:
-  - Linhas 304-333: ao mover/reordenar entregas (debounce 2s)
-  - Linhas 588-632: ao confirmar rotas
-- O `HistoryGuidedRouter` lê esses padrões e aplica peso 2x para sequências manuais
-- A aba "Histórico" (importação manual de roteiros antigos) também é redundante
+Esse bug pode acontecer com qualquer usuário que receba mais de um papel (provavelmente causado pelo `upsert` no `updateUserRole` com `onConflict: 'user_id,role'`, que não substitui papéis diferentes — apenas evita duplicar o mesmo papel).
 
-**Notificações no rodapé**
-- O print mostra o toast "Frota confirmada!" (componente Sonner)
-- Há vários toasts informativos similares espalhados pelo fluxo de roteirização que poluem a tela
+## Correção em 2 partes
 
-## Mudanças
+### 1. Banco — limpar duplicata da Caroline
+Remover o papel `operacional` da Caroline, mantendo `admin`:
 
-### 1. `src/pages/Settings.tsx` — remover abas Produtos e Histórico
+```sql
+DELETE FROM user_roles 
+WHERE user_id = '24aba505-cf01-4edd-bcb8-25d02206d2c9' 
+  AND role = 'operacional';
+```
 
-- Remover imports: `ProductUnitsImporter`, `RouteHistoryImporter`, ícones `Package` e `History`
-- Remover `<TabsTrigger value="products">` e `<TabsTrigger value="history">`
-- Remover `<TabsContent value="products">` e `<TabsContent value="history">`
-- Ajustar `grid-cols` do TabsList: de `lg:grid-cols-7` → `lg:grid-cols-5` (Conta, Calendário, Territórios, Aparência, Usuários)
+### 2. Código — blindar contra papéis múltiplos no futuro
 
-### 2. Remover toasts informativos de roteirização
+**`src/hooks/useUserRole.ts`** — trocar `.single()` por busca ordenada que pega o papel de maior privilégio quando houver mais de um:
+- Buscar todos os papéis do usuário (sem `.single()`)
+- Aplicar prioridade: `admin` > `operacional` > `motorista`
+- Retornar o de maior privilégio
 
-Manter apenas toasts de **erro** e **ações destrutivas/críticas** (exclusão, falha de upload, erro de gravação). Remover toasts puramente informativos como:
-
-- `src/pages/NewRoute.tsx`:
-  - "Frota confirmada!" (linha ~256)
-  - Toasts informativos de upload/parsing bem-sucedidos
-  - Toasts de "Vendas despriorizadas incluídas"
-  
-- `src/components/route/DualPasteData.tsx`:
-  - Toasts "X novos produtos cadastrados automaticamente" (linhas ~528 e 574)
-
-- `src/components/route/TruckRouteEditor.tsx`:
-  - Toast "Endereço copiado!" (manter discreto ou remover)
-
-A ação visual já é clara pela transição de etapa do stepper, então o toast é redundante.
-
-### 3. Não mexer
-
-- Os arquivos `RouteHistoryImporter.tsx`, `ProductUnitsImporter.tsx` e o hook `useHistoryPatterns` permanecem no código (são usados internamente por outros componentes ou podem ser reativados)
-- O Sonner/Toaster continua disponível para erros e ações administrativas
-
-## Arquivos editados
-
-- `src/pages/Settings.tsx` — remoção de 2 abas
-- `src/pages/NewRoute.tsx` — remoção de toasts informativos
-- `src/components/route/DualPasteData.tsx` — remoção de toasts de produtos
-- `src/components/route/TruckRouteEditor.tsx` — toast de cópia mais discreto
+**`updateUserRole`** — antes de inserir o novo papel, deletar quaisquer papéis existentes do usuário, garantindo um único papel por usuário:
+```ts
+await supabase.from('user_roles').delete().eq('user_id', userId);
+await supabase.from('user_roles').insert({ user_id: userId, role: newRole });
+```
 
 ## Resultado
 
-- Configurações mais enxutas (5 abas em vez de 7)
-- Tela de roteirização limpa, sem notificações flutuantes redundantes
-- Aprendizado contínuo de produtos e sequência continua funcionando em background
+- Caroline volta a acessar como admin imediatamente
+- Sistema fica imune a esse tipo de bloqueio caso outro usuário acabe com papéis duplicados
+- Atualizações de papel passam a substituir, não acumular
+
+## Arquivos
+
+- Migração SQL — limpar papel duplicado da Caroline
+- `src/hooks/useUserRole.ts` — busca tolerante a múltiplos papéis + `updateUserRole` com delete-then-insert
 
