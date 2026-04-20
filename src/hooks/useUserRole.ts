@@ -117,13 +117,19 @@ export function useUserManagement() {
   const updateUserRole = useCallback(async (userId: string, newRole: AppRole) => {
     if (!isAdmin) return { error: 'Unauthorized' };
 
-    // Upsert the role
+    // Replace any existing roles to ensure a single role per user
+    const { error: deleteError } = await (supabase as any)
+      .from('user_roles')
+      .delete()
+      .eq('user_id', userId);
+
+    if (deleteError) {
+      return { error: deleteError.message };
+    }
+
     const { error } = await (supabase as any)
       .from('user_roles')
-      .upsert(
-        { user_id: userId, role: newRole },
-        { onConflict: 'user_id,role' }
-      );
+      .insert({ user_id: userId, role: newRole });
 
     return { error: error?.message };
   }, [isAdmin]);
