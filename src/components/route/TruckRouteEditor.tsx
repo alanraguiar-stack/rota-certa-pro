@@ -20,7 +20,7 @@ import {
   X,
   Copy
 } from 'lucide-react';
-import { toast } from 'sonner';
+
 import { arrayMove } from '@dnd-kit/sortable';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -201,7 +201,6 @@ function OrderCard({
               onClick={(e) => {
                 e.stopPropagation();
                 navigator.clipboard.writeText(order.address);
-                toast('Endereço copiado!');
               }}
             >
               <Copy className="h-2.5 w-2.5" />
