@@ -525,14 +525,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
         (o.items || []).map(item => ({ product_name: item.product_name }))
       );
       if (allProducts.length > 0) {
-        bulkAddNewProducts(allProducts).then(result => {
-          if (result.added > 0) {
-            toast({
-              title: '🆕 Produtos cadastrados automaticamente',
-              description: `${result.added} novos produtos detectados e registrados`,
-            });
-          }
-        });
+        bulkAddNewProducts(allProducts).catch(() => {});
       }
       
       return { type: 'adv', data: orders };
@@ -571,14 +564,7 @@ export function DualPasteData({ onParsed }: DualPasteDataProps) {
         (o.items || []).map(item => ({ product_name: item.product_name }))
       );
       if (allProducts2.length > 0) {
-        bulkAddNewProducts(allProducts2).then(result => {
-          if (result.added > 0) {
-            toast({
-              title: '🆕 Produtos cadastrados automaticamente',
-              description: `${result.added} novos produtos detectados e registrados`,
-            });
-          }
-        });
+        bulkAddNewProducts(allProducts2).catch(() => {});
       }
       
       return { type: 'adv', data: orders };

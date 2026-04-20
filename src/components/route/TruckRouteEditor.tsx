@@ -201,7 +201,6 @@ function OrderCard({
               onClick={(e) => {
                 e.stopPropagation();
                 navigator.clipboard.writeText(order.address);
-                toast('Endereço copiado!');
               }}
             >
               <Copy className="h-2.5 w-2.5" />

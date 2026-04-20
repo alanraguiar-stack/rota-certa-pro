@@ -124,17 +124,6 @@ export default function NewRoute() {
       if (recovered.length > 0) {
         const backlogParsed = toParsedOrders(recovered);
         filteredOrders = [...filteredOrders, ...backlogParsed];
-        toast({
-          title: `${recovered.length} pedido(s) do backlog recuperado(s)`,
-          description: 'Pedidos de uploads anteriores foram incluídos nesta rota',
-        });
-      }
-
-      if (filteredOut.length > 0) {
-        toast({
-          title: `${filteredOut.length} pedido(s) guardado(s) no backlog`,
-          description: 'Cidades sem entrega amanhã — serão incluídos automaticamente no dia correto',
-        });
       }
     }
 
@@ -205,13 +194,6 @@ export default function NewRoute() {
       }, hints.length > 0 ? hints : undefined, extractedPatterns, allowedCities ? allowedCities : undefined, plateOverrides, customTerritoryRules);
       setAutoResult(result);
       
-      if (hints.length > 0) {
-        toast({
-          title: 'Padrões históricos aplicados',
-          description: `${hints.length} padrões do analista foram considerados na composição`,
-        });
-      }
-      
     }
     
     completeStep('orders');
@@ -253,10 +235,6 @@ export default function NewRoute() {
     setFleetConfirmed(true);
     completeStep('fleet');
     setCurrentStep('strategy');
-    toast({
-      title: 'Frota confirmada!',
-      description: `${selectedTruckIds.length} caminhão(ões) selecionado(s) para esta rota`,
-    });
   };
 
   const handleCreateRoute = async () => {
@@ -326,10 +304,6 @@ export default function NewRoute() {
       const parsed = toParsedOrders(selected);
       setOrders(prev => [...prev, ...parsed]);
       await markAsRouted(selectedIds, '');
-      toast({
-        title: `${selected.length} venda(s) incluída(s)`,
-        description: 'Vendas despriorizadas foram adicionadas à roteirização',
-      });
     }
     setShowDeprioritizedDialog(false);
     setDeprioritizedOrders([]);
