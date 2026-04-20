@@ -20,7 +20,7 @@ import {
   X,
   Copy
 } from 'lucide-react';
-import { toast } from 'sonner';
+
 import { arrayMove } from '@dnd-kit/sortable';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
