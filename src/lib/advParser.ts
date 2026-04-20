@@ -1676,6 +1676,11 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
 /** Inferir unidade pelo nome do produto (espelho de inferUnitFromName, em maiúsculas para romaneio) */
 function inferUnitFromProductName(productName: string): string {
   const upper = (productName || '').toUpperCase();
+  // Regras específicas por categoria/marca (ganham prioridade)
+  if (/CAFE|CAFÉ|FARINHA/.test(upper)) return 'FD';
+  if (/MOLHO DE TOMATE/.test(upper)) return 'PCT';
+  if (/SALSICHA|BISTECA|APRESUNTADO/.test(upper)) return 'KG';
+  if (/KETCHUP|MAIONESE/.test(upper)) return 'UN';
   if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'FD';
   const map: Array<[RegExp, string]> = [
     [/\bFD\d*\b|FARDO/, 'FD'],
