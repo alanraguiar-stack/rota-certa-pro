@@ -1604,8 +1604,9 @@ export interface VendaCSVItem {
  * - partes[0] numérico → item do produto:
  *   - partes[0] = código do produto
  *   - partes[4] = descrição
- *   - partes[13] = unidade (KG, FD, CX, UN, SC, PC)
- *   - partes[16] = quantidade (formato BR: 1.234,56)
+ *   - partes[13] = unidade (KG, FD, CX, UN, SC, PC) — quando presente no layout antigo
+ *   - partes[12] = quantidade vendida (coluna M) no layout atual "Vendas Detalhadas"
+ *   - partes[16] = quantidade no layout legado (fallback se M vier vazia/inválida)
  */
 export function parseVendasCSV(text: string): VendaCSVItem[] {
   const lines = text.split(/\r?\n/);
@@ -1634,11 +1635,17 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
     if (/^\d+$/.test(first) && currentVendaId) {
       const productCode = first;
       const productName = (partes[4] ?? '').trim();
-      const unit = (partes[13] ?? 'KG').trim().toUpperCase();
-      const qtyRaw = (partes[16] ?? '0').trim();
-      
-      // Parse quantidade formato BR (1.234,56)
-      const quantity = parseBRNumber(qtyRaw);
+      // Quantidade: priorizar coluna M (índice 12) do layout atual "Vendas Detalhadas".
+      // Fallback para o índice 16 (layout legado) caso M esteja vazia/inválida.
+      const qtyFromM = parseBRNumber((partes[12] ?? '').trim());
+      const qtyFromLegacy = parseBRNumber((partes[16] ?? '').trim());
+      const quantity = qtyFromM > 0 ? qtyFromM : qtyFromLegacy;
+
+      // Unidade: usar coluna 13 quando trouxer rótulo válido (layout antigo);
+      // caso contrário inferir pelo nome do produto (layout atual sem coluna de unidade).
+      const rawUnit = (partes[13] ?? '').trim().toUpperCase();
+      const validUnit = /^(KG|G|FD|CX|UN|SC|PC|PCT|DP|GF|LT)$/.test(rawUnit);
+      const unit = validUnit ? rawUnit : inferUnitFromProductName(productName);
       
       if (productName && quantity > 0) {
         items.push({
