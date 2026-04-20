@@ -1,57 +1,30 @@
 
 
-# Compartilhar frota e configurações entre admins
+# Corrigir parser ADV CSV preservando funcionamento atual
 
-## Causa raiz
+## Garantia
 
-Todas as tabelas de configuração operacional (`trucks`, `truck_territories`, `territory_overrides`, `city_delivery_schedule`, `product_units`, `route_history_patterns`, `app_settings`) têm RLS estrita por `auth.uid() = user_id`. Como Alan cadastrou 11 caminhões + 423 produtos sob o `user_id` dele, a Caroline (que também é admin) não enxerga nada — vê só o 1 caminhão que ela mesma cadastrou.
+A correção será **aditiva e não-destrutiva**: o parser atual continua tentando primeiro com a lógica antiga (que funciona para arquivos em formato anterior). Só quando ela falhar (0 itens extraídos) é que o novo modo dinâmico entra em ação. Assim, o romaneio que já funcionava continua funcionando, e o arquivo `VENDAS_DETALHADAS_20.04.csv` passa a funcionar também.
 
-A operação é uma só (mesma frota, mesmos territórios, mesmo calendário), então admins precisam compartilhar essas configurações.
+## Mudança em `src/lib/advParser.ts`
 
-## Solução: políticas RLS expandidas para admins
+### Estratégia: detecção dinâmica como fallback
 
-Para cada tabela de configuração, adicionar políticas que permitem **qualquer admin** ler/editar/criar/deletar registros — independente de quem foi o `user_id` original. As políticas atuais (dono próprio) continuam, então usuários `operacional` continuam vendo só os dados deles.
+1. **Manter** a função `parseVendasCSV` atual intacta como caminho primário
+2. **Adicionar** uma segunda passagem dinâmica caso a primeira retorne 0 vendas válidas:
+   - Detectar `Cliente:` no `partes[0]` → pegar primeiro campo não-vazio depois (cobre `[2]`, `[3]`, `[4]`)
+   - Detectar `Venda Nº:` no `partes[0]` → pegar primeiro número ≥4 dígitos depois (cobre `[4]`, `[5]`, `[6]`)
+   - Detectar linha de cabeçalho com `Código`, `Descrição`, `Qtde` → mapear índices reais de cada coluna
+   - Para cada linha de item subsequente: extrair código (`[0]`), descrição (índice mapeado), quantidade (índice mapeado), unitário e total
+3. **Inferir unidade** pelo nome do produto via `inferUnitFromName()` (já existe em `useProductUnits.ts`), pois o novo formato não traz coluna de unidade. Default = `KG`.
 
-### Tabelas afetadas
-- `trucks` — frota compartilhada
-- `truck_territories` — territórios da frota
-- `territory_overrides` — overrides de cidades
-- `city_delivery_schedule` — calendário de entregas
-- `product_units` — catálogo de produtos aprendidos
-- `route_history_patterns` — histórico de aprendizado
-- `app_settings` — configurações gerais
+### Resultado esperado
 
-### Política a adicionar em cada tabela
-```sql
--- Exemplo para trucks (replicado nas demais)
-CREATE POLICY "Admins can view all trucks"
-  ON trucks FOR SELECT TO authenticated
-  USING (has_role(auth.uid(), 'admin'));
+- Arquivos no formato antigo: **continuam funcionando exatamente como antes** (caminho primário)
+- Arquivo `VENDAS_DETALHADAS_20.04.csv` e variantes: **passam a funcionar** via fallback dinâmico
+- Aprendizado automático de produtos (`bulkAddNewProducts`) continua ativo no fluxo do romaneio
 
-CREATE POLICY "Admins can insert trucks"
-  ON trucks FOR INSERT TO authenticated
-  WITH CHECK (has_role(auth.uid(), 'admin'));
+## Arquivo
 
-CREATE POLICY "Admins can update trucks"
-  ON trucks FOR UPDATE TO authenticated
-  USING (has_role(auth.uid(), 'admin'));
-
-CREATE POLICY "Admins can delete trucks"
-  ON trucks FOR DELETE TO authenticated
-  USING (has_role(auth.uid(), 'admin'));
-```
-
-## Ajuste no código
-
-`src/hooks/useTrucks.ts` — a query atual usa `queryKey: ['trucks', user?.id]`, o que é seguro mas faz o cache trocar por usuário (ok). Nenhuma mudança de código necessária — assim que a RLS for liberada, a Caroline passará a ver os 11 caminhões automaticamente. Mesmo vale para `useTruckTerritories`, `useCitySchedule`, `useProductUnits`, `useHistoryPatterns`.
-
-## Resultado
-
-- Caroline (e qualquer futuro admin) passa a ver toda a frota, territórios, calendário, produtos aprendidos e histórico
-- Usuários `operacional` continuam restritos aos próprios dados (políticas atuais preservadas)
-- Motoristas continuam isolados pelas políticas específicas deles
-
-## Arquivos
-
-- Migração SQL — adicionar políticas de admin nas 7 tabelas de configuração
+- `src/lib/advParser.ts` — adicionar fallback dinâmico em `parseVendasCSV` sem alterar o caminho principal
 
