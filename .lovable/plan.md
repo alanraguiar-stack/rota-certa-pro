@@ -1,43 +1,93 @@
 
+# Ajustar a função principal do ADV CSV para usar a coluna M na quantidade vendida
 
-# Corrigir leitura de quantidade no parser ADV CSV (formato Vendas Detalhadas)
+## Problema
 
-## Causa do erro
+Hoje o caminho principal do CSV (`parseVendasCSV` em `src/lib/advParser.ts`) ainda usa índice fixo antigo para quantidade:
 
-No arquivo `VENDAS_DETALHADAS_*.csv`, **o cabeçalho e as linhas de dados estão desalinhados por uma coluna** nos campos numéricos da direita:
-
-```
-Linha cabeçalho (12):  Código;;;Descrição;;;;;;;;;;Qtde.;Unitário;;;Total;;
-                       [0]      [3]              [13] [14]    [17]
-
-Linha de dados   (14): 1014;;;LINGUIÇA...;;;;;;;;;10;21,99;;;219,90;;
-                       [0]    [3]              [12][13]   [16]
+```ts
+const qtyRaw = (partes[16] ?? '0').trim();
 ```
 
-A `Qtde.` aparece em `[13]` no cabeçalho mas o **valor real fica em `[12]` (coluna M)**. O fallback dinâmico atual (`parseVendasCSVDynamic` em `src/lib/advParser.ts`, linhas 1693-1745) mapeia os índices pela posição do cabeçalho, então acaba lendo `21,99` (preço unitário, coluna N) como se fosse a quantidade. Resultado: romaneio sai com quantidades infladas/erradas.
+Ou seja:
+- a função principal continua lendo a coluna antiga
+- o fallback dinâmico só entra quando **0 itens** são extraídos
+- como o arquivo atual ainda extrai itens, ele passa pelo parser principal e o romaneio sai com quantidade errada
 
 ## Correção
 
-Em `src/lib/advParser.ts`, dentro de `parseVendasCSVDynamic`:
+## 1) Ajustar o parser principal `parseVendasCSV`
+Trocar a leitura fixa da quantidade para priorizar a **coluna M** do layout atual.
 
-1. Após detectar a linha de cabeçalho (`Código`/`Descrição`/`Qtde`), além de salvar `qtyIdx` (posição do header), salvar também `unitarioIdx` e `totalIdx` (posição dos demais headers à direita).
+### Regra nova
+- usar **`partes[12]`** como fonte principal da quantidade vendida
+- manter fallback legado para layouts antigos, usando `partes[16]` somente se a coluna M vier vazia/inválida
 
-2. Na primeira linha de item válida, **verificar o alinhamento**: se `partes[qtyIdx]` parece um preço (valor com `,XX` decimal típico de dinheiro, ex: `21,99`) e `partes[qtyIdx - 1]` parece quantidade (inteiro pequeno ou decimal sem padrão monetário, ex: `10`), aplicar shift de `-1` a todos os índices numéricos da direita (`qtyIdx`, `unitarioIdx`, `totalIdx`).
+### Estratégia
+Criar uma pequena resolução centralizada de quantidade no parser principal:
 
-3. Guardar esse shift detectado e aplicá-lo às demais linhas de item da mesma seção/cliente.
+- `qtyFromM = parseBRNumber(partes[12])`
+- `qtyFromLegacy = parseBRNumber(partes[16])`
 
-4. **Fallback de segurança**: caso a detecção de shift seja inconclusiva (poucas linhas, valores ambíguos), aplicar shift `-1` por padrão para arquivos que correspondam ao padrão "Vendas Detalhadas" (cabeçalho na linha que começa com `Código;;;Descrição`), já que esse layout é o do exportador ADV atual.
+Aplicação:
+- se `qtyFromM > 0`, usar `qtyFromM`
+- senão, usar `qtyFromLegacy`
 
-5. **Não alterar** o caminho primário (`parseVendasCSV` com índices fixos) — continua intacto para compatibilidade com formatos antigos.
+Assim:
+- o formato atual passa a usar a coluna M
+- arquivos antigos continuam compatíveis
 
-## Resultado
+## 2) Preservar compatibilidade com unidade
+No mesmo bloco do item:
+- manter leitura da unidade quando existir no layout antigo
+- se a unidade vier vazia ou inconsistente no formato novo, continuar usando `inferUnitFromProductName(productName)`
 
-- Quantidade passa a ser lida corretamente da coluna **M (índice 12)**
-- Preço unitário e total continuam corretos
-- Romaneio de carga reflete as quantidades reais do pedido
-- Formato antigo (que já funcionava) continua funcionando sem mudança
+Isso evita quebrar o romaneio:
+- itens `KG` continuam indo por peso
+- itens volumétricos (`UN`, `FD`, `CX`, `SC`, `PC`) continuam indo por quantidade
+
+## 3) Alinhar o fallback dinâmico com a mesma regra
+Em `parseVendasCSVDynamic`, consolidar a mesma prioridade:
+- preferir a célula equivalente à coluna M quando o layout atual for detectado
+- manter o fallback legado apenas como segurança
+
+Isso evita divergência entre:
+- parser principal
+- parser dinâmico
+
+## 4) Atualizar documentação inline
+Corrigir o comentário da função `parseVendasCSV` para refletir o layout real atual:
+- descrição
+- unidade
+- quantidade vendida na coluna M
+
+Isso reduz regressões futuras.
+
+## Resultado esperado
+
+Depois da correção:
+- o **romaneio de carga** passa a refletir a **quantidade vendida da coluna M**
+- o caminho principal do CSV deixa de depender da coluna antiga
+- arquivos antigos seguem funcionando via fallback
+- o cálculo deixa de inflar ou deslocar quantidades por causa da leitura errada
 
 ## Arquivo
 
-- `src/lib/advParser.ts` — ajustar `parseVendasCSVDynamic` para detectar e compensar o desalinhamento de 1 coluna entre cabeçalho e dados nos campos numéricos da direita
+- `src/lib/advParser.ts`
 
+## Detalhes técnicos
+
+```text
+Layout atual desejado:
+- Código:      partes[0]
+- Descrição:   coluna já mapeada do formato atual
+- Quantidade:  partes[12]   <- coluna M
+- Legado:      partes[16]   <- fallback apenas se M estiver vazia/inválida
+```
+
+Ajuste principal:
+```ts
+const qtyPrimary = parseBRNumber((partes[12] ?? '').trim());
+const qtyLegacy = parseBRNumber((partes[16] ?? '').trim());
+const quantity = qtyPrimary > 0 ? qtyPrimary : qtyLegacy;
+```
