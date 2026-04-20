@@ -1,40 +1,66 @@
 
 
-# Melhorias: Layout, Gestão de Usuários, Cópia de Endereço + Aprendizado
+# Limpeza: remover abas obsoletas e toasts informativos
 
-## 1. Layout "Frota confirmada" (NewRoute.tsx)
+## Contexto verificado
 
-O card verde em `src/pages/NewRoute.tsx` (linhas 466-481) está compacto demais. Ajustes:
-- Aumentar padding interno
-- Ícone maior (h-12 w-12)
-- Tipografia mais espaçada
-- Texto secundário com margem maior
+**Produtos — aprendizado automático ativo ✓**
+- `useProductUnits.bulkAddNewProducts()` é chamado em `DualPasteData.tsx` (linhas 528 e 574) durante o upload das vendas
+- Novos produtos são auto-cadastrados com `inferUnitFromName()` (REFRIGERANTE→fardo, CX→caixa, UN→unidade, etc.)
+- A aba "Produtos" em Configurações é redundante
 
-## 2. Gestão de Usuários (Settings.tsx)
+**Histórico — aprendizado automático ativo ✓**
+- `RouteDetails.tsx` salva snapshots em `route_history_patterns` após cada alteração manual:
+  - Linhas 304-333: ao mover/reordenar entregas (debounce 2s)
+  - Linhas 588-632: ao confirmar rotas
+- O `HistoryGuidedRouter` lê esses padrões e aplica peso 2x para sequências manuais
+- A aba "Histórico" (importação manual de roteiros antigos) também é redundante
 
-Atualmente a criação de motorista é inline. Mudanças:
-- **Botão "Criar Usuário"** que abre um `Dialog` (popup)
-- No popup: nome, email, senha, e **seletor de categoria** (Admin / Operacional / Motorista)
-- Ao criar motorista, continua usando a edge function `create-test-driver`; para admin/operacional, criar via `supabase.auth.signUp` + inserir role
-- **Botão "Excluir"** visível apenas para usuários **inativos** (desativados), com confirmação
-- Excluir: deletar `user_roles`, `profiles`, `driver_access_codes` do user (não é possível deletar de `auth.users` pelo client, mas limpar as tabelas públicas efetivamente remove o acesso)
+**Notificações no rodapé**
+- O print mostra o toast "Frota confirmada!" (componente Sonner)
+- Há vários toasts informativos similares espalhados pelo fluxo de roteirização que poluem a tela
 
-## 3. Cópia rápida de endereço (TruckRouteEditor.tsx)
+## Mudanças
 
-No card de cada entrega (linhas 192-195 do `TruckRouteEditor.tsx`), após o endereço, adicionar um ícone pequeno de cópia (`Copy` do Lucide, `h-3 w-3`) que copia o endereço para a clipboard com um toast discreto.
+### 1. `src/pages/Settings.tsx` — remover abas Produtos e Histórico
 
-```text
-📍 Rua Exemplo, 123 - Bairro, Cidade - SP  [📋]
-```
+- Remover imports: `ProductUnitsImporter`, `RouteHistoryImporter`, ícones `Package` e `History`
+- Remover `<TabsTrigger value="products">` e `<TabsTrigger value="history">`
+- Remover `<TabsContent value="products">` e `<TabsContent value="history">`
+- Ajustar `grid-cols` do TabsList: de `lg:grid-cols-7` → `lg:grid-cols-5` (Conta, Calendário, Territórios, Aparência, Usuários)
 
-## 4. Confirmação sobre aprendizado
+### 2. Remover toasts informativos de roteirização
 
-O sistema já captura automaticamente snapshots das alterações manuais (conforme o motor `HistoryGuidedRouter`). Isso já está funcionando — nenhuma mudança de código necessária. Apenas confirmar ao usuário na resposta.
+Manter apenas toasts de **erro** e **ações destrutivas/críticas** (exclusão, falha de upload, erro de gravação). Remover toasts puramente informativos como:
 
-## Arquivos
+- `src/pages/NewRoute.tsx`:
+  - "Frota confirmada!" (linha ~256)
+  - Toasts informativos de upload/parsing bem-sucedidos
+  - Toasts de "Vendas despriorizadas incluídas"
+  
+- `src/components/route/DualPasteData.tsx`:
+  - Toasts "X novos produtos cadastrados automaticamente" (linhas ~528 e 574)
 
-- `src/pages/NewRoute.tsx` — melhorar layout do card "Frota confirmada"
-- `src/pages/Settings.tsx` — popup de criação de usuário com categoria, botão excluir para inativos
-- `src/components/route/TruckRouteEditor.tsx` — ícone de cópia ao lado do endereço
-- `src/hooks/useUserRole.ts` — adicionar método `deleteUser`
+- `src/components/route/TruckRouteEditor.tsx`:
+  - Toast "Endereço copiado!" (manter discreto ou remover)
+
+A ação visual já é clara pela transição de etapa do stepper, então o toast é redundante.
+
+### 3. Não mexer
+
+- Os arquivos `RouteHistoryImporter.tsx`, `ProductUnitsImporter.tsx` e o hook `useHistoryPatterns` permanecem no código (são usados internamente por outros componentes ou podem ser reativados)
+- O Sonner/Toaster continua disponível para erros e ações administrativas
+
+## Arquivos editados
+
+- `src/pages/Settings.tsx` — remoção de 2 abas
+- `src/pages/NewRoute.tsx` — remoção de toasts informativos
+- `src/components/route/DualPasteData.tsx` — remoção de toasts de produtos
+- `src/components/route/TruckRouteEditor.tsx` — toast de cópia mais discreto
+
+## Resultado
+
+- Configurações mais enxutas (5 abas em vez de 7)
+- Tela de roteirização limpa, sem notificações flutuantes redundantes
+- Aprendizado contínuo de produtos e sequência continua funcionando em background
 
