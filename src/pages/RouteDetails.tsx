@@ -44,7 +44,10 @@ function ADVUploadSection({ route, reimportItems, hasExistingItems }: { route: a
 
   const handleADVFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      setShowReimport(false);
+      return;
+    }
 
     // If items already exist and user hasn't confirmed reimport, ask for confirmation
     if (hasExistingItems && !showReimport) {
@@ -144,39 +147,17 @@ function ADVUploadSection({ route, reimportItems, hasExistingItems }: { route: a
                 </p>
               </div>
             </div>
+            <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx,.txt" className="hidden" onChange={handleADVFile} />
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setShowReimport(true)}
+              onClick={() => { setShowReimport(true); fileInputRef.current?.click(); }}
+              disabled={reimportItems.isPending}
             >
-              Reimportar
+              <Upload className="h-4 w-4 mr-2" />
+              {reimportItems.isPending ? 'Importando...' : 'Reimportar'}
             </Button>
           </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // Show reimport UI
-  if (showReimport) {
-    return (
-      <Card className="border-dashed border-warning/50 bg-warning/5">
-        <CardHeader className="pb-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <AlertTriangle className="h-5 w-5 text-warning" />
-            Reimportar Detalhe das Vendas
-          </CardTitle>
-          <CardDescription>
-            Atenção: isso substituirá todos os itens já importados. Tem certeza?
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex gap-2">
-          <input ref={fileInputRef} type="file" accept=".csv,.xls,.xlsx,.txt" className="hidden" onChange={handleADVFile} />
-          <Button variant="outline" className="border-warning/30 hover:bg-warning/10" onClick={() => fileInputRef.current?.click()} disabled={reimportItems.isPending}>
-            <Upload className="h-4 w-4 mr-2" />
-            {reimportItems.isPending ? 'Importando...' : 'Carregar Novo Arquivo'}
-          </Button>
-          <Button variant="ghost" onClick={() => setShowReimport(false)}>Cancelar</Button>
         </CardContent>
       </Card>
     );
