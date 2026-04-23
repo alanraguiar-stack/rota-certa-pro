@@ -1,63 +1,52 @@
 
 
-# Adicionar regras específicas de unidade por categoria/marca de produto
+# Adicionar botão "Limpar Todas" no pop-up de Vendas Despriorizadas
 
-## Onde
+## Problema
 
-Duas funções espelhadas precisam receber as mesmas regras (uma para auto-cadastro de produtos, outra para o romaneio):
+No acesso da Caroline (e qualquer operador), ao iniciar uma nova rota aparece o pop-up **"Vendas Despriorizadas Disponíveis"** listando vendas que ficaram para trás de roteirizações anteriores. Algumas dessas vendas **já foram entregues hoje em outra rota** (lançadas manualmente em outro fluxo), mas continuam aparecendo no pop-up porque permanecem com status `deprioritized` na tabela `pending_orders`.
 
-- `src/hooks/useProductUnits.ts` → `inferUnitFromName` (retorna minúsculas: `kg`, `fardo`, `pacote`, `unidade`)
-- `src/lib/advParser.ts` → `inferUnitFromProductName` (retorna abreviações maiúsculas: `KG`, `FD`, `PCT`, `UN`)
+Hoje, as únicas saídas do diálogo são:
+- **Ignorar** → fecha o pop-up, mas as vendas voltam a aparecer na próxima rota
+- **Incluir Selecionada(s)** → adiciona à rota atual
 
-## Regras a adicionar (na ordem, antes das regras genéricas)
+Falta uma forma de **descartar definitivamente** as vendas que já não são mais relevantes.
 
-| Padrão no nome (UPPER) | Unidade |
-|---|---|
-| `CAFE` ou `CAFÉ` (qualquer café) | `fardo` / `FD` |
-| `FARINHA` (qualquer farinha) | `fardo` / `FD` |
-| `MOLHO DE TOMATE` | `pacote` / `PCT` |
-| `SALSICHA` | `kg` / `KG` |
-| `BISTECA` | `kg` / `KG` |
-| `APRESUNTADO` (cobre "APRESUNTADO FRIELLA") | `kg` / `KG` |
-| `KETCHUP` (cobre "KETCHUP PREDILECTA") | `unidade` / `UN` |
-| `MAIONESE` (cobre "MAIONESE HELLMANNS") | `unidade` / `UN` |
+## Solução
 
-Notas:
-- Usar `CAFE|CAFÉ` para tolerar acento.
-- "Qualquer café/farinha/salsicha/bisteca/maionese/ketchup" = match por substring case-insensitive na descrição.
-- Essas regras vencem o default `KG` e também a regra antiga de bebidas (que retornava `FD`), pois hoje "CAFÉ" não estava coberto.
+Adicionar um terceiro botão no `DeprioritizedOrdersDialog`: **"Limpar todas"** (ou as selecionadas, se houver seleção), que marca as vendas escolhidas como `cancelled` em `pending_orders`. Essas vendas deixam de aparecer em qualquer pop-up futuro, mas ficam preservadas no histórico do banco (não são deletadas).
 
-## Ordem de avaliação (importa)
+### Comportamento do novo botão
 
-1. **Regras específicas novas** (lista acima) — ganham primeiro
-2. Categoria de bebidas existente (`REFRIGERANTE|AGUA MINERAL|SUCO|...`) → `FD`
-3. Abreviações explícitas no nome (`FD`, `CX`, `PCT`, `SC`, `DP`, `GF`, `LT`, `PC`, `UN`, `KG`)
-4. Default `KG`
+- **Sem seleção** → botão diz **"Limpar todas (N)"** e remove todas as N vendas do pop-up
+- **Com seleção** → botão diz **"Limpar selecionadas (X)"** e remove apenas as marcadas
+- Mostra um `confirm()` nativo para evitar clique acidental: *"Remover X venda(s) do backlog? Elas não aparecerão mais em rotas futuras."*
+- Após confirmar, chama `cancelPending(ids)` (já existe no `usePendingOrders`), fecha o diálogo e dispara um toast de sucesso
 
-Isso garante, por exemplo, que "KETCHUP PREDILECTA UN" continue `UN`, e que "CAFÉ PILÃO 500G" não seja inferido como `KG` por causa do "G".
+### Fluxo
 
-## Compatibilidade
-
-- Produtos já cadastrados manualmente em `product_units` continuam tendo prioridade — `getUnitForProduct` consulta o banco antes de chamar `inferUnitFromName`. Ou seja, as novas regras só atuam em produtos novos / não cadastrados.
-- Para produtos antigos cadastrados com unidade errada, o usuário pode corrigir manualmente em **Configurações → Produtos** (já existe `addUnit` / `deleteUnit`), ou re-importar a planilha.
+```text
+Pop-up "Vendas Despriorizadas"
+├─ [Ignorar]                 → fecha (vendas voltam na próxima)
+├─ [Limpar todas/seleção]    → cancela no banco (NOVO)
+└─ [Incluir Selecionadas]    → adiciona à rota atual
+```
 
 ## Arquivos editados
 
-- `src/hooks/useProductUnits.ts` — adicionar bloco de regras específicas no topo de `inferUnitFromName`
-- `src/lib/advParser.ts` — adicionar o mesmo bloco (em maiúsculas/abreviações) no topo de `inferUnitFromProductName`
+- `src/components/route/DeprioritizedOrdersDialog.tsx`
+  - Adicionar prop `onClear: (ids: string[]) => Promise<void> | void`
+  - Adicionar botão **"Limpar"** no `DialogFooter` (variant `ghost` com cor de aviso)
+  - Texto dinâmico baseado em `selectedIds.size`
+  - `confirm()` antes de executar
+  - Limpar `selectedIds` e fechar o diálogo após sucesso
 
-## Resultado esperado
+- `src/pages/NewRoute.tsx`
+  - Já importa `cancelPending` indiretamente via `usePendingOrders` — adicionar à desestruturação
+  - Implementar `handleDeprioritizedClear(ids)` que chama `cancelPending(ids)`, atualiza `deprioritizedOrders` removendo os limpos e mantém o diálogo aberto se ainda restar algum, ou fecha se a lista ficou vazia
+  - Passar `onClear={handleDeprioritizedClear}` para o `DeprioritizedOrdersDialog`
 
-Ao importar um ADV novo (sem cadastro prévio dos produtos), o romaneio passará a mostrar:
+## Resultado
 
-- APRESUNTADO FRIELLA → **KG**
-- CAFE DU MINEIRO EX. FORTE → **FD**
-- CAFE PILAO TRADICIONAL → **FD**
-- CAFE SABOR DA ROÇA → **FD**
-- FARINHA DE TRIGO XYZ → **FD**
-- MOLHO DE TOMATE QUERO → **PCT**
-- SALSICHA SADIA → **KG**
-- BISTECA SUÍNA → **KG**
-- KETCHUP PREDILECTA → **UN**
-- MAIONESE HELLMANNS → **UN**
+A Caroline (e qualquer operador) poderá, no pop-up de vendas despriorizadas, **eliminar de uma vez** as vendas que já foram entregues por outro caminho, sem precisar incluí-las na rota nem conviver com o pop-up cheio toda vez. As vendas ficam com status `cancelled` no banco — preservadas para auditoria, mas invisíveis nos próximos planejamentos.
 
