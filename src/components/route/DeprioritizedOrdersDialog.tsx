@@ -11,9 +11,10 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   orders: PendingOrder[];
   onConfirm: (selectedIds: string[]) => void;
+  onClear?: (ids: string[]) => Promise<void> | void;
 }
 
-export function DeprioritizedOrdersDialog({ open, onOpenChange, orders, onConfirm }: Props) {
+export function DeprioritizedOrdersDialog({ open, onOpenChange, orders, onConfirm, onClear }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const grouped = useMemo(() => {
@@ -44,6 +45,18 @@ export function DeprioritizedOrdersDialog({ open, onOpenChange, orders, onConfir
 
   const handleConfirm = () => {
     onConfirm(Array.from(selectedIds));
+    setSelectedIds(new Set());
+  };
+
+  const handleClear = async () => {
+    if (!onClear) return;
+    const ids = selectedIds.size > 0 ? Array.from(selectedIds) : orders.map(o => o.id);
+    const count = ids.length;
+    const ok = window.confirm(
+      `Remover ${count} venda(s) do backlog? Elas não aparecerão mais em rotas futuras.`
+    );
+    if (!ok) return;
+    await onClear(ids);
     setSelectedIds(new Set());
   };
 
@@ -116,6 +129,17 @@ export function DeprioritizedOrdersDialog({ open, onOpenChange, orders, onConfir
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Ignorar
           </Button>
+          {onClear && (
+            <Button
+              variant="ghost"
+              onClick={handleClear}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              {selectedIds.size > 0
+                ? `Limpar selecionadas (${selectedIds.size})`
+                : `Limpar todas (${orders.length})`}
+            </Button>
+          )}
           <Button onClick={handleConfirm} disabled={selectedIds.size === 0}>
             Incluir {selectedIds.size} Selecionada(s)
           </Button>

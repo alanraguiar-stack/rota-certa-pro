@@ -309,6 +309,16 @@ export default function NewRoute() {
     setDeprioritizedOrders([]);
   };
 
+  const handleDeprioritizedClear = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    await cancelPending(ids);
+    const remaining = deprioritizedOrders.filter(o => !ids.includes(o.id));
+    setDeprioritizedOrders(remaining);
+    if (remaining.length === 0) {
+      setShowDeprioritizedDialog(false);
+    }
+  };
+
   return (
     <AppLayout>
       <DeprioritizedOrdersDialog
@@ -316,6 +326,7 @@ export default function NewRoute() {
         onOpenChange={setShowDeprioritizedDialog}
         orders={deprioritizedOrders}
         onConfirm={handleDeprioritizedConfirm}
+        onClear={handleDeprioritizedClear}
       />
       <div className="mx-auto max-w-5xl space-y-6">
         {/* Page Header */}
