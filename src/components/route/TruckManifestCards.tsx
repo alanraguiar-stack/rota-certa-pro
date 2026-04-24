@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName, getStrongUnitMarker } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName, getStrongUnitMarker, getCategoryRule } from '@/hooks/useProductUnits';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -69,6 +69,9 @@ function toASCII(text: string): string {
  * 1. Marcador explícito forte → 2. Cadastro salvo → 3. Categoria/marca → 4. kg
  */
 function resolveUnit(productName: string, getUnitForProduct: (name: string) => string): string {
+  const ruled = getCategoryRule(productName);
+  if (ruled) return ruled;
+
   const strong = getStrongUnitMarker(productName);
   if (strong) return strong;
 
@@ -101,8 +104,12 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
         const existing = productMap.get(key) || { product: productName, weight: 0, qty: 0, unitType };
         
         if (isWeightUnit(unitType)) {
-          existing.qty += Number(item.weight_kg);
-          existing.weight += Number(item.weight_kg);
+          // Se regra é kg mas item salvo veio como volumétrico (weight_kg=0,
+          // quantity=valor real da coluna Qtde do ADV), usar quantity como peso.
+          const weight = Number(item.weight_kg) || 0;
+          const effective = weight > 0 ? weight : Number(item.quantity || 0);
+          existing.qty += effective;
+          existing.weight += effective;
         } else {
           existing.qty += (item.quantity || 1);
           existing.weight += Number(item.weight_kg);
