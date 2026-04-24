@@ -76,6 +76,9 @@ function ADVUploadSection({ route, reimportItems, hasExistingItems }: { route: a
           if (!vendaMap.has(item.venda_id)) {
             vendaMap.set(item.venda_id, { client_name: item.client_name, items: [] });
           }
+          // O parser CSV (parseVendasCSV) já aplica getCategoryRule e
+          // devolve unit = "KG" para produtos direcionados (linguiça,
+          // bisteca, apresuntado, etc.), então basta confiar no campo.
           const isWeight = /^(KG|G|KILO|QUILO)S?$/i.test(item.unit);
           vendaMap.get(item.venda_id)!.items.push({
             product_name: item.product_name,
