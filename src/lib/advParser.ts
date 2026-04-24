@@ -13,7 +13,7 @@ import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { ParseResult, ValidationError } from './orderParser';
 import { extractRawTextFromPDF, parsePDFFile } from './pdfParser';
 import { normalizeText, removeAccents } from './encoding';
-import { inferUnitFromName } from '@/hooks/useProductUnits';
+import { inferUnitFromName, getCategoryRule } from '@/hooks/useProductUnits';
 
 /** Strip accents, replacement chars, and lowercase for robust matching */
 function normalizeForMatch(s: string): string {
@@ -1448,7 +1448,16 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       if (!unitType) {
         unitType = inferUnitFromName(descricao);
       }
-      
+
+      // Regra de NEGÓCIO sempre vence: linguiça/bisteca/apresuntado etc.
+      // O ADV pode trazer "CAIXA" no campo unidade, mas operacionalmente
+      // é peso — então gravamos como kg e usamos a Qtde da planilha como
+      // o próprio peso (em kg).
+      const ruled = getCategoryRule(descricao);
+      if (ruled) {
+        unitType = ruled;
+      }
+
       // Decide weight_kg vs quantity based on unit
       const isWeightBased = /^(kg|g|kilo|quilo)s?$/i.test(unitType);
       const itemWeightKg = isWeightBased ? qty : 0;
@@ -1652,7 +1661,20 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
       // caso contrário inferir pelo nome do produto (layout atual sem coluna de unidade).
       const rawUnit = (partes[13] ?? '').trim().toUpperCase();
       const validUnit = /^(KG|G|FD|CX|UN|SC|PC|PCT|DP|GF|LT)$/.test(rawUnit);
-      const unit = validUnit ? rawUnit : inferUnitFromProductName(productName);
+      let unit = validUnit ? rawUnit : inferUnitFromProductName(productName);
+
+      // Regra de NEGÓCIO sobrescreve unidade do arquivo:
+      // produtos como linguiça/apresuntado/bisteca devem ir como KG mesmo
+      // que o ADV traga "CAIXA" no campo de unidade.
+      const ruled = getCategoryRule(productName);
+      if (ruled) {
+        const RULE_TO_ABBREV: Record<string, string> = {
+          kg: 'KG', g: 'G', fardo: 'FD', caixa: 'CX', unidade: 'UN',
+          pacote: 'PCT', saco: 'SC', display: 'DP', garrafa: 'GF',
+          litro: 'LT', peca: 'PC',
+        };
+        unit = RULE_TO_ABBREV[ruled] || unit;
+      }
       
       if (productName && quantity > 0) {
         items.push({
@@ -1682,20 +1704,23 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
 
 /** Inferir unidade pelo nome do produto (espelho de inferUnitFromName, em maiúsculas para romaneio) */
 function inferUnitFromProductName(productName: string): string {
+  // 1) Regra de negócio (mesma de getCategoryRule, mas devolvendo abreviação)
+  const ruled = getCategoryRule(productName);
+  if (ruled) {
+    const RULE_TO_ABBREV: Record<string, string> = {
+      kg: 'KG', g: 'G', fardo: 'FD', caixa: 'CX', unidade: 'UN',
+      pacote: 'PCT', saco: 'SC', display: 'DP', garrafa: 'GF',
+      litro: 'LT', peca: 'PC',
+    };
+    return RULE_TO_ABBREV[ruled] || 'KG';
+  }
+
   const upper = (productName || '')
     .toUpperCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
-  // Regras específicas por categoria/marca (espelham inferUnitFromName)
-  if (/\bSALSICHA\b/.test(upper)) return 'KG';
-  if (/\bBISTECA\b/.test(upper)) return 'KG';
-  if (/\bAPRESUNTADO\b/.test(upper)) return 'KG';
-  if (/\bKETCHUP\b/.test(upper)) return 'UN';
-  if (/\bMAIONESE\b/.test(upper)) return 'UN';
-  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'PCT';
-  if (/\bCAFE\b/.test(upper)) return 'FD';
-  if (/\bFARINHA\b/.test(upper)) return 'FD';
+  // Bebidas → fardo (não direcionamento estrito, segue inferência)
   if (/REFRIGERANTE|AGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ISOTON|CHA\s+GELADO|ICE\s+TEA|\bCHA\b/.test(upper)) return 'FD';
 
   const map: Array<[RegExp, string]> = [

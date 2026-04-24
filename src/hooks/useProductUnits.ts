@@ -35,6 +35,38 @@ export function isWeightUnit(unitType: string): boolean {
 }
 
 /**
+ * Regra de NEGÓCIO de categoria/produto.
+ * Quando retorna um valor não-nulo, ele tem precedência absoluta sobre
+ * marcadores de embalagem no nome (FD12UN, CX15KG, ...) e sobre
+ * cadastros automáticos antigos que possam estar conflitantes.
+ *
+ * Use só para produtos cuja unidade operacional foi explicitamente
+ * direcionada pela operação. Produtos sem regra direcionada caem na
+ * hierarquia normal (marcador → cadastro → inferência → kg).
+ */
+export function getCategoryRule(productName: string): string | null {
+  const upper = (productName || '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  // Proteínas / frios — sempre KG (mesmo com "CX 15KG" no nome)
+  if (/\bLINGUICA\b/.test(upper)) return 'kg';
+  if (/\bSALSICHA\b/.test(upper)) return 'kg';
+  if (/\bBISTECA\b/.test(upper)) return 'kg';
+  if (/\bAPRESUNTADO\b/.test(upper)) return 'kg';
+
+  // Categorias direcionadas
+  if (/\bCAFE\b/.test(upper)) return 'fardo';
+  if (/\bFARINHA\b/.test(upper)) return 'fardo';
+  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'pacote';
+  if (/\bKETCHUP\b/.test(upper)) return 'unidade';
+  if (/\bMAIONESE\b/.test(upper)) return 'unidade';
+
+  return null;
+}
+
+/**
  * Detecta marcadores explícitos fortes de unidade no nome do produto
  * (ex: "REFRI 2L FD12UN", "BISCOITO CX24"). Retorna a unidade detectada
  * ou null se não houver marcador explícito.
@@ -77,32 +109,17 @@ function normalize(str: string): string {
  * Prioridade: refrigerante > abreviações explícitas > kg (padrão).
  */
 export function inferUnitFromName(productName: string): string {
+  // 1) Regra de NEGÓCIO: proteína / categoria direcionada vence tudo
+  const ruled = getCategoryRule(productName);
+  if (ruled) return ruled;
+
   // Normalizar: maiúsculas e sem acentos para regras consistentes
   const upper = productName
     .toUpperCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
-  // ─────────────────────────────────────────────────────────────
-  // Regras específicas por categoria/marca (ganham prioridade)
-  // Ordem: específicas → genéricas
-  // ─────────────────────────────────────────────────────────────
-
-  // Categorias por KG (proteínas/frios)
-  if (/\bSALSICHA\b/.test(upper)) return 'kg';
-  if (/\bBISTECA\b/.test(upper)) return 'kg';
-  if (/\bAPRESUNTADO\b/.test(upper)) return 'kg';
-
-  // Marcas/produtos por UNIDADE
-  if (/\bKETCHUP\b/.test(upper)) return 'unidade';
-  if (/\bMAIONESE\b/.test(upper)) return 'unidade';
-
-  // Categorias por PACOTE
-  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'pacote';
-
-  // Categorias por FARDO (cafés, farinhas, bebidas)
-  if (/\bCAFE\b/.test(upper)) return 'fardo';
-  if (/\bFARINHA\b/.test(upper)) return 'fardo';
+  // Bebidas → fardo (categoria genérica, mas não direcionamento estrito)
   if (/REFRIGERANTE|AGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ISOTON|CHA\s+GELADO|ICE\s+TEA|\bCHA\b/.test(upper)) return 'fardo';
 
   // Abreviações flexíveis — aceita FD12UN, CX6, PCT24 etc.
@@ -168,6 +185,11 @@ export function useProductUnits() {
   }, [units]);
 
   const getUnitForProduct = useCallback((productName: string): string => {
+    // 1) Regra de NEGÓCIO sempre vence — protege contra cadastros antigos
+    //    salvos errados (ex.: linguiça/apresuntado/bisteca como "caixa").
+    const ruled = getCategoryRule(productName);
+    if (ruled) return ruled;
+
     const normalized = normalize(productName);
     
     // Exact match
