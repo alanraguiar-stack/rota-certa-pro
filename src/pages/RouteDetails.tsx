@@ -259,6 +259,11 @@ export default function RouteDetails() {
   
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
+
+  // Etapa que o usuário está revendo no momento (override visual do stepper).
+  // null = mostra a etapa real (activeStep). Definir para uma etapa anterior
+  // já concluída faz a página renderizar aquela seção sem alterar o status da rota.
+  const [viewStep, setViewStep] = useState<RouteWorkflowStep | null>(null);
   
   // Track orders that were manually moved between trucks
   const [manuallyMovedOrderIds, setManuallyMovedOrderIds] = useState<Set<string>>(new Set());
