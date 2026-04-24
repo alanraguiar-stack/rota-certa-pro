@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { ManifestViewer } from '@/components/route/ManifestViewer';
 import { LoadingManifest } from '@/components/route/LoadingManifest';
 
-import { RouteWorkflowStepper, getActiveStep, RouteWorkflowStep } from '@/components/route/RouteWorkflowStepper';
+import { RouteWorkflowStepper, getActiveStep, RouteWorkflowStep, WORKFLOW_STEPS, getStepConfig } from '@/components/route/RouteWorkflowStepper';
 import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
@@ -259,6 +259,11 @@ export default function RouteDetails() {
   
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
+
+  // Etapa que o usuário está revendo no momento (override visual do stepper).
+  // null = mostra a etapa real (activeStep). Definir para uma etapa anterior
+  // já concluída faz a página renderizar aquela seção sem alterar o status da rota.
+  const [viewStep, setViewStep] = useState<RouteWorkflowStep | null>(null);
   
   // Track orders that were manually moved between trucks
   const [manuallyMovedOrderIds, setManuallyMovedOrderIds] = useState<Set<string>>(new Set());
@@ -332,6 +337,23 @@ export default function RouteDetails() {
     rt => (rt.assignments?.length ?? 0) > 0
   ) ?? false;
   const activeStep = route ? getActiveStep(route, hasTrucks, hasAssignments) : 'select_trucks';
+
+  // Etapa que está sendo de fato renderizada — combina o viewStep (override do
+  // usuário) com a activeStep real derivada do status. Se viewStep for inválido
+  // (apontar para uma etapa futura, à frente do real), ignoramos.
+  const stepOrder: RouteWorkflowStep[] = WORKFLOW_STEPS.map(s => s.id);
+  const activeIdx = stepOrder.indexOf(activeStep);
+  const viewIdx = viewStep ? stepOrder.indexOf(viewStep) : -1;
+  const displayStep: RouteWorkflowStep =
+    viewStep && viewIdx >= 0 && viewIdx <= activeIdx ? viewStep : activeStep;
+  const isReviewing = displayStep !== activeStep;
+
+  // Quando a etapa real avançar, sair do modo revisão automaticamente.
+  useEffect(() => {
+    if (viewStep && stepOrder.indexOf(viewStep) > activeIdx) {
+      setViewStep(null);
+    }
+  }, [activeStep]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle order reordering from the map
   const handleOrderReorder = async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
@@ -731,9 +753,53 @@ export default function RouteDetails() {
         {/* Workflow Stepper */}
         <Card>
           <CardContent className="py-4">
-            <RouteWorkflowStepper route={route} hasTrucks={hasTrucks} hasAssignments={hasAssignments} />
+            <RouteWorkflowStepper
+              route={route}
+              hasTrucks={hasTrucks}
+              hasAssignments={hasAssignments}
+              viewStep={viewStep ?? undefined}
+              onStepClick={(step) => {
+                const idx = stepOrder.indexOf(step);
+                // só aceita ir para etapas <= a etapa real
+                if (idx < 0 || idx > activeIdx) return;
+                // clicou na etapa atual real → sai do modo revisão
+                setViewStep(step === activeStep ? null : step);
+              }}
+            />
           </CardContent>
         </Card>
+
+        {/* Banner — Modo revisão de etapa anterior */}
+        {isReviewing && (
+          <Card className="border-warning/40 bg-warning/5">
+            <CardContent className="py-3">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-warning shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-medium">
+                      Você está revendo a etapa{' '}
+                      <span className="text-warning">"{getStepConfig(displayStep)?.title}"</span>.
+                    </p>
+                    <p className="text-muted-foreground">
+                      A rota continua na etapa{' '}
+                      <span className="font-medium text-foreground">"{getStepConfig(activeStep)?.title}"</span>{' '}
+                      — qualquer ajuste feito aqui é refletido normalmente, mas o progresso atual está preservado.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setViewStep(null)}
+                  className="border-warning/40 text-warning hover:bg-warning/10 hover:text-warning"
+                >
+                  Voltar para a etapa atual
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Recovery Alert - If status is inconsistent with data */}
         {hasAssignments && (route.status === 'draft' || route.status === 'trucks_assigned') && (
@@ -830,7 +896,7 @@ export default function RouteDetails() {
         {/* ETAPA 1: SELECIONAR CAMINHÕES               */}
         {/* (Only shown if fleet wasn't configured in wizard) */}
         {/* ============================================ */}
-        {activeStep === 'select_trucks' && (
+        {displayStep === 'select_trucks' && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -912,7 +978,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 2: DISTRIBUIR CARGA (ROMANEIO)       */}
         {/* ============================================ */}
-        {activeStep === 'distribute_load' && (
+        {displayStep === 'distribute_load' && (
           <div className="space-y-4">
             <Card>
               <CardHeader>
@@ -958,7 +1024,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 3: AJUSTE MANUAL DE ROTAS + ROMANEIO */}
         {/* ============================================ */}
-        {activeStep === 'loading_manifest' && (
+        {displayStep === 'loading_manifest' && (
           <div className="space-y-6">
             {/* Resumo de vendas por cidade — chips clicáveis */}
             {(() => {
@@ -1132,7 +1198,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 4: IMPORTAR ADV + GERAR ROMANEIO     */}
         {/* ============================================ */}
-        {activeStep === 'import_adv' && (
+        {displayStep === 'import_adv' && (
           <div className="space-y-6">
             {/* Botão para avançar ao Romaneio de Entrega — no topo */}
             {(route.route_trucks.some((rt: any) => 
@@ -1189,7 +1255,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 6: ROMANEIO DE ENTREGA (FINAL)       */}
         {/* ============================================ */}
-        {activeStep === 'delivery_manifest' && (
+        {displayStep === 'delivery_manifest' && (
           <>
             {/* Map Visualization - Compact */}
             {showMap && (
@@ -1259,7 +1325,7 @@ export default function RouteDetails() {
         )}
 
         {/* Driver Assignment - shown when route is distributed/completed */}
-        {(activeStep === 'delivery_manifest' || route.status === 'distributed' || route.status === 'completed') && route.route_trucks.length > 0 && (
+        {(displayStep === 'delivery_manifest' || route.status === 'distributed' || route.status === 'completed') && route.route_trucks.length > 0 && (
           <DriverAssignment
             routeTrucks={route.route_trucks}
             routeId={route.id}
