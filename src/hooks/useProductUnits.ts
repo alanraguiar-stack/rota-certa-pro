@@ -34,6 +34,36 @@ export function isWeightUnit(unitType: string): boolean {
   return u === 'kg' || u === 'g';
 }
 
+/**
+ * Detecta marcadores explícitos fortes de unidade no nome do produto
+ * (ex: "REFRI 2L FD12UN", "BISCOITO CX24"). Retorna a unidade detectada
+ * ou null se não houver marcador explícito.
+ *
+ * Esses marcadores ganham precedência sobre qualquer cadastro/inferência.
+ */
+export function getStrongUnitMarker(productName: string): string | null {
+  const upper = (productName || '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  // Marcadores explícitos com dígitos colados (FD12UN, CX6, PCT24...)
+  const strongMap: Array<[RegExp, string]> = [
+    [/\bFD\d+\b/, 'fardo'],
+    [/\bCX\d+\b/, 'caixa'],
+    [/\bPCT\d+\b/, 'pacote'],
+    [/\bSC\d+\b/, 'saco'],
+    [/\bDP\d+\b/, 'display'],
+    [/\bGF\d+\b/, 'garrafa'],
+    [/\bLT\d+\b/, 'litro'],
+    [/\bUN\d+\b/, 'unidade'],
+  ];
+  for (const [re, unit] of strongMap) {
+    if (re.test(upper)) return unit;
+  }
+  return null;
+}
+
 function normalize(str: string): string {
   return str
     .toLowerCase()
