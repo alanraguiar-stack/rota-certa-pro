@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { ManifestViewer } from '@/components/route/ManifestViewer';
 import { LoadingManifest } from '@/components/route/LoadingManifest';
 
-import { RouteWorkflowStepper, getActiveStep, RouteWorkflowStep } from '@/components/route/RouteWorkflowStepper';
+import { RouteWorkflowStepper, getActiveStep, RouteWorkflowStep, WORKFLOW_STEPS, getStepConfig } from '@/components/route/RouteWorkflowStepper';
 import { RouteMap } from '@/components/route/RouteMap';
 import { DepartureTimeConfig } from '@/components/route/DepartureTimeConfig';
 import { TruckTimelineSummary } from '@/components/route/RouteTimeline';
