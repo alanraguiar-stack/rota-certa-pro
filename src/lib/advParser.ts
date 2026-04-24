@@ -1661,7 +1661,20 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
       // caso contrário inferir pelo nome do produto (layout atual sem coluna de unidade).
       const rawUnit = (partes[13] ?? '').trim().toUpperCase();
       const validUnit = /^(KG|G|FD|CX|UN|SC|PC|PCT|DP|GF|LT)$/.test(rawUnit);
-      const unit = validUnit ? rawUnit : inferUnitFromProductName(productName);
+      let unit = validUnit ? rawUnit : inferUnitFromProductName(productName);
+
+      // Regra de NEGÓCIO sobrescreve unidade do arquivo:
+      // produtos como linguiça/apresuntado/bisteca devem ir como KG mesmo
+      // que o ADV traga "CAIXA" no campo de unidade.
+      const ruled = getCategoryRule(productName);
+      if (ruled) {
+        const RULE_TO_ABBREV: Record<string, string> = {
+          kg: 'KG', g: 'G', fardo: 'FD', caixa: 'CX', unidade: 'UN',
+          pacote: 'PCT', saco: 'SC', display: 'DP', garrafa: 'GF',
+          litro: 'LT', peca: 'PC',
+        };
+        unit = RULE_TO_ABBREV[ruled] || unit;
+      }
       
       if (productName && quantity > 0) {
         items.push({
