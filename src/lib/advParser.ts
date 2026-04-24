@@ -1448,7 +1448,16 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       if (!unitType) {
         unitType = inferUnitFromName(descricao);
       }
-      
+
+      // Regra de NEGÓCIO sempre vence: linguiça/bisteca/apresuntado etc.
+      // O ADV pode trazer "CAIXA" no campo unidade, mas operacionalmente
+      // é peso — então gravamos como kg e usamos a Qtde da planilha como
+      // o próprio peso (em kg).
+      const ruled = getCategoryRule(descricao);
+      if (ruled) {
+        unitType = ruled;
+      }
+
       // Decide weight_kg vs quantity based on unit
       const isWeightBased = /^(kg|g|kilo|quilo)s?$/i.test(unitType);
       const itemWeightKg = isWeightBased ? qty : 0;
