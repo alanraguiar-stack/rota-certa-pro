@@ -1392,54 +1392,49 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       // ===================================================================
       let qty = 0;
       let extractionSource = '';
-      
-      // ATTEMPT 1: Primary qtde column
+
+      // Quando o layout atual foi reconhecido (coluna Qtde mapeada), usar
+      // EXCLUSIVAMENTE essa coluna como fonte autoritativa. Nunca cair em
+      // heurísticas que podem puxar preço/total como quantidade.
       if (itemColumnMap.qtde !== -1) {
         qty = parseExcelWeight(row[itemColumnMap.qtde] as string | number | null | undefined);
-        if (qty > 0) extractionSource = 'qtde';
-      }
-      
-      // ATTEMPT 2: Try total column (often has the total weight/value)
-      if (qty === 0 && itemColumnMap.total !== -1) {
-        const totalVal = parseExcelWeight(row[itemColumnMap.total] as string | number | null | undefined);
-        if (totalVal > 0) {
-          qty = totalVal;
-          extractionSource = 'total';
+        if (qty > 0) {
+          extractionSource = 'qtde';
+        } else {
+          // Coluna Qtde reconhecida mas vazia/inválida — pular item, não inventar
+          console.log('[ADV Excel] ⚠️ Item ignorado: Qtde vazia/inválida na coluna mapeada -', descricao.substring(0, 40));
+          continue;
         }
-      }
-      
-      // ATTEMPT 3: Scan ALL numeric cells adjacent to description
-      if (qty === 0) {
+      } else {
+        // Layout antigo / fora do padrão: aplicar fallbacks heurísticos limitados
+        // ATTEMPT A: scan numeric cells (excluindo unitario/total para não pegar preço)
         const numericValues: { idx: number; val: number }[] = [];
         for (let ci = 0; ci < row.length; ci++) {
           if (ci === itemColumnMap.descricao || ci === itemColumnMap.codigo) continue;
+          if (ci === itemColumnMap.unitario || ci === itemColumnMap.total) continue;
           const val = parseExcelWeight(row[ci] as string | number | null | undefined);
-          if (val > 0) {
-            numericValues.push({ idx: ci, val });
-          }
+          if (val > 0) numericValues.push({ idx: ci, val });
         }
-        // Pick the first plausible numeric value (usually quantity comes before price)
         if (numericValues.length > 0) {
           qty = numericValues[0].val;
           extractionSource = `fallback-col-${numericValues[0].idx}`;
         }
-      }
-      
-      // ATTEMPT 4: Regex on concatenated row text (reuse PDF extractItem logic)
-      if (qty === 0) {
-        const cleanLine = rowText.replace(/[|│]/g, ' ').trim();
-        const regexMatch = cleanLine.match(/\s+([\d]+[,.][\d]+)\s+/);
-        if (regexMatch) {
-          qty = parseExcelWeight(regexMatch[1]);
-          extractionSource = 'regex-line';
+
+        // ATTEMPT B: regex no texto da linha
+        if (qty === 0) {
+          const cleanLine = rowText.replace(/[|│]/g, ' ').trim();
+          const regexMatch = cleanLine.match(/\s+([\d]+[,.][\d]+)\s+/);
+          if (regexMatch) {
+            qty = parseExcelWeight(regexMatch[1]);
+            extractionSource = 'regex-line';
+          }
         }
-      }
-      
-      // FINAL: Accept item even with qty=0 if we have a description (use qty=1 as fallback)
-      if (qty === 0) {
-        qty = 1; // Default: at least 1 unit
-        extractionSource = 'default-1';
-        console.log('[ADV Excel] ⚠️ No numeric value found for item, defaulting to qty=1:', descricao.substring(0, 40));
+
+        // Sem layout reconhecido E sem valor numérico → pular para não corromper romaneio
+        if (qty === 0) {
+          console.log('[ADV Excel] ⚠️ Item ignorado: nenhum valor numérico identificável -', descricao.substring(0, 40));
+          continue;
+        }
       }
       
       // Determine if this is weight or unit-count based
