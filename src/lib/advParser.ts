@@ -13,7 +13,7 @@ import { ParsedOrder, ParsedOrderItem } from '@/types';
 import { ParseResult, ValidationError } from './orderParser';
 import { extractRawTextFromPDF, parsePDFFile } from './pdfParser';
 import { normalizeText, removeAccents } from './encoding';
-import { inferUnitFromName } from '@/hooks/useProductUnits';
+import { inferUnitFromName, getCategoryRule } from '@/hooks/useProductUnits';
 
 /** Strip accents, replacement chars, and lowercase for robust matching */
 function normalizeForMatch(s: string): string {
