@@ -185,6 +185,11 @@ export function useProductUnits() {
   }, [units]);
 
   const getUnitForProduct = useCallback((productName: string): string => {
+    // 1) Regra de NEGÓCIO sempre vence — protege contra cadastros antigos
+    //    salvos errados (ex.: linguiça/apresuntado/bisteca como "caixa").
+    const ruled = getCategoryRule(productName);
+    if (ruled) return ruled;
+
     const normalized = normalize(productName);
     
     // Exact match
