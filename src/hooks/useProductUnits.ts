@@ -47,16 +47,33 @@ function normalize(str: string): string {
  * Prioridade: refrigerante > abreviações explícitas > kg (padrão).
  */
 export function inferUnitFromName(productName: string): string {
-  const upper = productName.toUpperCase();
+  // Normalizar: maiúsculas e sem acentos para regras consistentes
+  const upper = productName
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 
+  // ─────────────────────────────────────────────────────────────
   // Regras específicas por categoria/marca (ganham prioridade)
-  if (/CAFE|CAFÉ|FARINHA/.test(upper)) return 'fardo';
-  if (/MOLHO DE TOMATE/.test(upper)) return 'pacote';
-  if (/SALSICHA|BISTECA|APRESUNTADO/.test(upper)) return 'kg';
-  if (/KETCHUP|MAIONESE/.test(upper)) return 'unidade';
+  // Ordem: específicas → genéricas
+  // ─────────────────────────────────────────────────────────────
 
-  // Categorias de bebidas → sempre fardo
-  if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'fardo';
+  // Categorias por KG (proteínas/frios)
+  if (/\bSALSICHA\b/.test(upper)) return 'kg';
+  if (/\bBISTECA\b/.test(upper)) return 'kg';
+  if (/\bAPRESUNTADO\b/.test(upper)) return 'kg';
+
+  // Marcas/produtos por UNIDADE
+  if (/\bKETCHUP\b/.test(upper)) return 'unidade';
+  if (/\bMAIONESE\b/.test(upper)) return 'unidade';
+
+  // Categorias por PACOTE
+  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'pacote';
+
+  // Categorias por FARDO (cafés, farinhas, bebidas)
+  if (/\bCAFE\b/.test(upper)) return 'fardo';
+  if (/\bFARINHA\b/.test(upper)) return 'fardo';
+  if (/REFRIGERANTE|AGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ISOTON|CHA\s+GELADO|ICE\s+TEA|\bCHA\b/.test(upper)) return 'fardo';
 
   // Abreviações flexíveis — aceita FD12UN, CX6, PCT24 etc.
   // Ordem importa: FD antes de UN para não conflitar com "FD12UN"
@@ -76,7 +93,7 @@ export function inferUnitFromName(productName: string): string {
     [/\bLT\d*\b/, 'litro'],
     [/LITRO/, 'litro'],
     [/\bPC\d*\b/, 'peca'],
-    [/PECA|PEÇA/, 'peca'],
+    [/PECA/, 'peca'],
     [/\bUN\d*\b/, 'unidade'],
     [/UNIDADE/, 'unidade'],
   ];

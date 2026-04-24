@@ -1682,13 +1682,22 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
 
 /** Inferir unidade pelo nome do produto (espelho de inferUnitFromName, em maiúsculas para romaneio) */
 function inferUnitFromProductName(productName: string): string {
-  const upper = (productName || '').toUpperCase();
-  // Regras específicas por categoria/marca (ganham prioridade)
-  if (/CAFE|CAFÉ|FARINHA/.test(upper)) return 'FD';
-  if (/MOLHO DE TOMATE/.test(upper)) return 'PCT';
-  if (/SALSICHA|BISTECA|APRESUNTADO/.test(upper)) return 'KG';
-  if (/KETCHUP|MAIONESE/.test(upper)) return 'UN';
-  if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'FD';
+  const upper = (productName || '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  // Regras específicas por categoria/marca (espelham inferUnitFromName)
+  if (/\bSALSICHA\b/.test(upper)) return 'KG';
+  if (/\bBISTECA\b/.test(upper)) return 'KG';
+  if (/\bAPRESUNTADO\b/.test(upper)) return 'KG';
+  if (/\bKETCHUP\b/.test(upper)) return 'UN';
+  if (/\bMAIONESE\b/.test(upper)) return 'UN';
+  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'PCT';
+  if (/\bCAFE\b/.test(upper)) return 'FD';
+  if (/\bFARINHA\b/.test(upper)) return 'FD';
+  if (/REFRIGERANTE|AGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ISOTON|CHA\s+GELADO|ICE\s+TEA|\bCHA\b/.test(upper)) return 'FD';
+
   const map: Array<[RegExp, string]> = [
     [/\bFD\d*\b|FARDO/, 'FD'],
     [/\bCX\d*\b|CAIXA/, 'CX'],
@@ -1697,7 +1706,7 @@ function inferUnitFromProductName(productName: string): string {
     [/\bDP\d*\b|DISPLAY/, 'DP'],
     [/\bGF\d*\b|GARRAFA/, 'GF'],
     [/\bLT\d*\b|LITRO/, 'LT'],
-    [/\bPC\d*\b|PECA|PEÇA/, 'PC'],
+    [/\bPC\d*\b|PECA/, 'PC'],
     [/\bUN\d*\b|UNIDADE/, 'UN'],
     [/\bKG\b|QUILO/, 'KG'],
   ];
