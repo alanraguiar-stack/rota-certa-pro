@@ -338,6 +338,23 @@ export default function RouteDetails() {
   ) ?? false;
   const activeStep = route ? getActiveStep(route, hasTrucks, hasAssignments) : 'select_trucks';
 
+  // Etapa que está sendo de fato renderizada — combina o viewStep (override do
+  // usuário) com a activeStep real derivada do status. Se viewStep for inválido
+  // (apontar para uma etapa futura, à frente do real), ignoramos.
+  const stepOrder: RouteWorkflowStep[] = WORKFLOW_STEPS.map(s => s.id);
+  const activeIdx = stepOrder.indexOf(activeStep);
+  const viewIdx = viewStep ? stepOrder.indexOf(viewStep) : -1;
+  const displayStep: RouteWorkflowStep =
+    viewStep && viewIdx >= 0 && viewIdx <= activeIdx ? viewStep : activeStep;
+  const isReviewing = displayStep !== activeStep;
+
+  // Quando a etapa real avançar, sair do modo revisão automaticamente.
+  useEffect(() => {
+    if (viewStep && stepOrder.indexOf(viewStep) > activeIdx) {
+      setViewStep(null);
+    }
+  }, [activeStep]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Handle order reordering from the map
   const handleOrderReorder = async (reorders: Array<{ orderId: string; truckId: string; newSequence: number }>) => {
     await reorderDeliveries.mutateAsync(reorders);
