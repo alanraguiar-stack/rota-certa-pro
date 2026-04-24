@@ -1704,20 +1704,23 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
 
 /** Inferir unidade pelo nome do produto (espelho de inferUnitFromName, em maiúsculas para romaneio) */
 function inferUnitFromProductName(productName: string): string {
+  // 1) Regra de negócio (mesma de getCategoryRule, mas devolvendo abreviação)
+  const ruled = getCategoryRule(productName);
+  if (ruled) {
+    const RULE_TO_ABBREV: Record<string, string> = {
+      kg: 'KG', g: 'G', fardo: 'FD', caixa: 'CX', unidade: 'UN',
+      pacote: 'PCT', saco: 'SC', display: 'DP', garrafa: 'GF',
+      litro: 'LT', peca: 'PC',
+    };
+    return RULE_TO_ABBREV[ruled] || 'KG';
+  }
+
   const upper = (productName || '')
     .toUpperCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
 
-  // Regras específicas por categoria/marca (espelham inferUnitFromName)
-  if (/\bSALSICHA\b/.test(upper)) return 'KG';
-  if (/\bBISTECA\b/.test(upper)) return 'KG';
-  if (/\bAPRESUNTADO\b/.test(upper)) return 'KG';
-  if (/\bKETCHUP\b/.test(upper)) return 'UN';
-  if (/\bMAIONESE\b/.test(upper)) return 'UN';
-  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'PCT';
-  if (/\bCAFE\b/.test(upper)) return 'FD';
-  if (/\bFARINHA\b/.test(upper)) return 'FD';
+  // Bebidas → fardo (não direcionamento estrito, segue inferência)
   if (/REFRIGERANTE|AGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ISOTON|CHA\s+GELADO|ICE\s+TEA|\bCHA\b/.test(upper)) return 'FD';
 
   const map: Array<[RegExp, string]> = [
