@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Truck as TruckType, Order, OrderItem } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName, getStrongUnitMarker } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName, getStrongUnitMarker, getCategoryRule } from '@/hooks/useProductUnits';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -42,27 +42,31 @@ function countOrdersWithoutItems(orders: Order[]): number {
 
 /**
  * Resolve a unidade de medida com hierarquia oficial:
- * 1. Marcador EXPLÍCITO forte no nome (FD12UN, CX6, ...) — ganha de tudo
- * 2. Cadastro salvo do produto (getUnitForProduct via banco)
- * 3. Regra por categoria/marca (inferUnitFromName)
- * 4. Default: kg
+ * 1. REGRA DE NEGÓCIO de categoria (linguiça/bisteca → kg, café → fardo, …)
+ *    — vence até "CX 15KG" no nome e cadastros antigos errados.
+ * 2. Marcador EXPLÍCITO forte no nome (FD12UN, CX6, ...)
+ * 3. Cadastro salvo do produto (getUnitForProduct via banco)
+ * 4. Inferência (inferUnitFromName)
+ * 5. Default: kg
  */
 function resolveUnit(productName: string, getUnitForProduct: (name: string) => string): string {
-  // 1) Marcador explícito forte
+  // 1) Regra de negócio sempre vence
+  const ruled = getCategoryRule(productName);
+  if (ruled) return ruled;
+
+  // 2) Marcador explícito forte
   const strong = getStrongUnitMarker(productName);
   if (strong) return strong;
 
-  // 2) Cadastro salvo: getUnitForProduct retorna 'kg' apenas como último recurso.
-  //    Para distinguir "salvo como kg" de "fallback kg", reusamos a inferência
-    //  por categoria como tiebreaker quando o cadastro retorna kg.
+  // 3) Cadastro salvo (já passa por getCategoryRule internamente)
   const saved = getUnitForProduct(productName);
   if (saved && saved !== 'kg') return saved;
 
-  // 3) Regra por categoria/marca
+  // 4) Inferência por categoria/marca
   const byCategory = inferUnitFromName(productName);
   if (byCategory && byCategory !== 'kg') return byCategory;
 
-  // 4) Default
+  // 5) Default
   return saved || 'kg';
 }
 
@@ -89,14 +93,27 @@ function consolidateProducts(orders: Order[], getUnitForProduct: (name: string) 
         const productCode = (item as any).product_code || undefined;
         // Use product_code as key if available, otherwise normalized name
         const key = productCode || normalizeProductKey(productName);
-        // Use unit from DB if available, otherwise resolve via inference
-        const unitType = item.unit && item.unit !== 'kg' 
-          ? item.unit 
-          : resolveUnit(productName, getUnitForProduct);
+        // Resolve unit: a regra de negócio (resolveUnit) tem precedência
+        // sobre item.unit salvo, para não propagar erros de importações
+        // antigas (ex.: linguiça gravada como "CAIXA" no banco).
+        const ruled = getCategoryRule(productName);
+        const unitType = ruled
+          ? ruled
+          : (item.unit && item.unit.toLowerCase() !== 'kg'
+              ? item.unit
+              : resolveUnit(productName, getUnitForProduct));
         const existing = productMap.get(key) || { product: productName, productCode, qty: 0, unitType };
         
         if (isWeightUnit(unitType)) {
-          existing.qty += Number(item.weight_kg);
+          // Quando regra é kg mas item foi salvo como volumétrico
+          // (weight_kg = 0 e quantity tem o valor real), usar quantity
+          // como peso — é o número da coluna Qtde do ADV.
+          const weight = Number(item.weight_kg) || 0;
+          if (weight > 0) {
+            existing.qty += weight;
+          } else if (item.quantity && item.quantity > 0) {
+            existing.qty += Number(item.quantity);
+          }
         } else {
           existing.qty += (item.quantity || 1);
         }
