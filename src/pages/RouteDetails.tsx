@@ -896,7 +896,7 @@ export default function RouteDetails() {
         {/* ETAPA 1: SELECIONAR CAMINHÕES               */}
         {/* (Only shown if fleet wasn't configured in wizard) */}
         {/* ============================================ */}
-        {activeStep === 'select_trucks' && (
+        {displayStep === 'select_trucks' && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -978,7 +978,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 2: DISTRIBUIR CARGA (ROMANEIO)       */}
         {/* ============================================ */}
-        {activeStep === 'distribute_load' && (
+        {displayStep === 'distribute_load' && (
           <div className="space-y-4">
             <Card>
               <CardHeader>
@@ -1024,7 +1024,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 3: AJUSTE MANUAL DE ROTAS + ROMANEIO */}
         {/* ============================================ */}
-        {activeStep === 'loading_manifest' && (
+        {displayStep === 'loading_manifest' && (
           <div className="space-y-6">
             {/* Resumo de vendas por cidade — chips clicáveis */}
             {(() => {
@@ -1198,7 +1198,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 4: IMPORTAR ADV + GERAR ROMANEIO     */}
         {/* ============================================ */}
-        {activeStep === 'import_adv' && (
+        {displayStep === 'import_adv' && (
           <div className="space-y-6">
             {/* Botão para avançar ao Romaneio de Entrega — no topo */}
             {(route.route_trucks.some((rt: any) => 
@@ -1255,7 +1255,7 @@ export default function RouteDetails() {
         {/* ============================================ */}
         {/* ETAPA 6: ROMANEIO DE ENTREGA (FINAL)       */}
         {/* ============================================ */}
-        {activeStep === 'delivery_manifest' && (
+        {displayStep === 'delivery_manifest' && (
           <>
             {/* Map Visualization - Compact */}
             {showMap && (
@@ -1325,7 +1325,7 @@ export default function RouteDetails() {
         )}
 
         {/* Driver Assignment - shown when route is distributed/completed */}
-        {(activeStep === 'delivery_manifest' || route.status === 'distributed' || route.status === 'completed') && route.route_trucks.length > 0 && (
+        {(displayStep === 'delivery_manifest' || route.status === 'distributed' || route.status === 'completed') && route.route_trucks.length > 0 && (
           <DriverAssignment
             routeTrucks={route.route_trucks}
             routeId={route.id}
