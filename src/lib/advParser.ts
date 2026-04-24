@@ -1621,13 +1621,25 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
 
     // Detectar cliente
     if (first === 'Cliente :' || first === 'Cliente:') {
-      currentClient = (partes[2] ?? partes[1] ?? '').trim();
+      // Primeiro campo não-vazio depois de partes[0] que não seja só dígitos (CPF/CNPJ)
+      let found = '';
+      for (let i = 1; i < partes.length; i++) {
+        const v = (partes[i] ?? '').trim();
+        if (v && !/^\d+$/.test(v)) { found = v; break; }
+      }
+      currentClient = found || (partes[2] ?? partes[1] ?? '').trim();
       continue;
     }
 
-    // Detectar número da venda
+    // Detectar número da venda — buscar dinamicamente o primeiro número
+    // longo (≥4 dígitos) após o rótulo, em vez de assumir índice fixo.
     if (first === 'Venda Nº:' || first === 'Venda No:' || /^Venda\s*N[º°]?\s*:?$/i.test(first)) {
-      currentVendaId = (partes[4] ?? partes[1] ?? '').trim().replace(/\D/g, '');
+      let vendaId = '';
+      for (let i = 1; i < partes.length; i++) {
+        const digits = (partes[i] ?? '').replace(/\D/g, '');
+        if (digits.length >= 4) { vendaId = digits; break; }
+      }
+      currentVendaId = vendaId || (partes[4] ?? partes[1] ?? '').trim().replace(/\D/g, '');
       continue;
     }
 
