@@ -8,7 +8,7 @@ export type RouteWorkflowStep =
   | 'import_adv'
   | 'delivery_manifest';
 
-interface WorkflowStepConfig {
+export interface WorkflowStepConfig {
   id: RouteWorkflowStep;
   title: string;
   description: string;
@@ -16,7 +16,7 @@ interface WorkflowStepConfig {
   phase: 'romaneio' | 'roteirizacao';
 }
 
-const WORKFLOW_STEPS: WorkflowStepConfig[] = [
+export const WORKFLOW_STEPS: WorkflowStepConfig[] = [
   { 
     id: 'select_trucks', 
     title: 'Selecionar Caminhões', 
@@ -53,6 +53,10 @@ const WORKFLOW_STEPS: WorkflowStepConfig[] = [
     phase: 'roteirizacao',
   },
 ];
+
+export function getStepConfig(step: RouteWorkflowStep): WorkflowStepConfig | undefined {
+  return WORKFLOW_STEPS.find(s => s.id === step);
+}
 
 interface RouteForStepper {
   status: string;
@@ -101,10 +105,15 @@ interface RouteWorkflowStepperProps {
   route: RouteForStepper | null;
   hasTrucks: boolean;
   hasAssignments?: boolean;
+  /** Etapa que o usuário está visualizando (override visual). Se omitida, usa activeStep. */
+  viewStep?: RouteWorkflowStep;
+  /** Callback quando o usuário clica em uma etapa concluída ou na ativa. */
+  onStepClick?: (step: RouteWorkflowStep) => void;
 }
 
-export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false }: RouteWorkflowStepperProps) {
+export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false, viewStep, onStepClick }: RouteWorkflowStepperProps) {
   const activeStep = getActiveStep(route, hasTrucks, hasAssignments);
+  const effectiveView = viewStep ?? activeStep;
   
   return (
     <div className="space-y-4">
@@ -128,11 +137,18 @@ export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false 
           const isActive = step.id === activeStep;
           const isCompleted = isStepComplete(step.id, activeStep);
           const isPending = !isActive && !isCompleted;
+          const isViewing = step.id === effectiveView && effectiveView !== activeStep;
+          const isClickable = (isCompleted || isActive) && !!onStepClick;
           const StepIcon = step.icon;
           
           // Phase separator
           const showPhaseSeparator = index === 4; // Before "Romaneio de Entrega"
           
+          const handleClick = () => {
+            if (!isClickable) return;
+            onStepClick!(step.id);
+          };
+
           return (
             <div key={step.id} className="flex items-center flex-1">
               {/* Phase separator before roteirização */}
@@ -142,14 +158,31 @@ export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false 
                 </div>
               )}
               
-              <div className="flex flex-col items-center flex-1">
+              <button
+                type="button"
+                onClick={handleClick}
+                disabled={!isClickable}
+                aria-current={isActive ? 'step' : undefined}
+                aria-label={isClickable ? `Ir para etapa ${step.title}` : step.title}
+                title={isClickable
+                  ? (isViewing ? 'Você está revendo esta etapa' : `Ir para ${step.title}`)
+                  : (isPending ? 'Etapa ainda não disponível' : step.title)
+                }
+                className={cn(
+                  'flex flex-col items-center flex-1 bg-transparent border-0 p-0',
+                  isClickable && 'cursor-pointer hover:opacity-80 transition-opacity',
+                  !isClickable && 'cursor-default'
+                )}
+              >
                 <div
                   className={cn(
                     'flex h-10 w-10 items-center justify-center rounded-full transition-all',
                     isActive && step.phase === 'romaneio' && 'bg-primary text-primary-foreground shadow-lg ring-4 ring-primary/20',
                     isActive && step.phase === 'roteirizacao' && 'bg-success text-success-foreground shadow-lg ring-4 ring-success/20',
                     isCompleted && 'bg-success text-success-foreground',
-                    isPending && 'bg-muted text-muted-foreground'
+                    isPending && 'bg-muted text-muted-foreground',
+                    // Anel laranja (warning) sutil quando o usuário está revendo essa etapa
+                    isViewing && 'ring-4 ring-warning/40 ring-offset-1 ring-offset-background'
                   )}
                 >
                   {isCompleted ? (
@@ -165,13 +198,14 @@ export function RouteWorkflowStepper({ route, hasTrucks, hasAssignments = false 
                       isActive && step.phase === 'romaneio' && 'text-primary',
                       isActive && step.phase === 'roteirizacao' && 'text-success',
                       isCompleted && 'text-success',
-                      isPending && 'text-muted-foreground'
+                      isPending && 'text-muted-foreground',
+                      isViewing && 'text-warning'
                     )}
                   >
                     {step.title}
                   </p>
                 </div>
-              </div>
+              </button>
               
               {/* Connector line */}
               {index < WORKFLOW_STEPS.length - 1 && !showPhaseSeparator && index !== 3 && (
