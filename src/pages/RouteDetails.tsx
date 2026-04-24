@@ -753,9 +753,53 @@ export default function RouteDetails() {
         {/* Workflow Stepper */}
         <Card>
           <CardContent className="py-4">
-            <RouteWorkflowStepper route={route} hasTrucks={hasTrucks} hasAssignments={hasAssignments} />
+            <RouteWorkflowStepper
+              route={route}
+              hasTrucks={hasTrucks}
+              hasAssignments={hasAssignments}
+              viewStep={viewStep ?? undefined}
+              onStepClick={(step) => {
+                const idx = stepOrder.indexOf(step);
+                // só aceita ir para etapas <= a etapa real
+                if (idx < 0 || idx > activeIdx) return;
+                // clicou na etapa atual real → sai do modo revisão
+                setViewStep(step === activeStep ? null : step);
+              }}
+            />
           </CardContent>
         </Card>
+
+        {/* Banner — Modo revisão de etapa anterior */}
+        {isReviewing && (
+          <Card className="border-warning/40 bg-warning/5">
+            <CardContent className="py-3">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-warning shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-medium">
+                      Você está revendo a etapa{' '}
+                      <span className="text-warning">"{getStepConfig(displayStep)?.title}"</span>.
+                    </p>
+                    <p className="text-muted-foreground">
+                      A rota continua na etapa{' '}
+                      <span className="font-medium text-foreground">"{getStepConfig(activeStep)?.title}"</span>{' '}
+                      — qualquer ajuste feito aqui é refletido normalmente, mas o progresso atual está preservado.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setViewStep(null)}
+                  className="border-warning/40 text-warning hover:bg-warning/10 hover:text-warning"
+                >
+                  Voltar para a etapa atual
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Recovery Alert - If status is inconsistent with data */}
         {hasAssignments && (route.status === 'draft' || route.status === 'trucks_assigned') && (
