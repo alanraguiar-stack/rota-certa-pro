@@ -12,7 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { Progress } from '@/components/ui/progress';
 import { Truck as TruckType, Order, OrderItem, DISTRIBUTION_CENTER } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName, getStrongUnitMarker } from '@/hooks/useProductUnits';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -65,12 +65,20 @@ function toASCII(text: string): string {
 }
 
 /**
- * Resolve unit for a product name — same logic as LoadingManifest
+ * Resolve unit — hierarquia oficial (espelha LoadingManifest):
+ * 1. Marcador explícito forte → 2. Cadastro salvo → 3. Categoria/marca → 4. kg
  */
 function resolveUnit(productName: string, getUnitForProduct: (name: string) => string): string {
-  const inferred = inferUnitFromName(productName);
-  if (inferred !== 'kg') return inferred;
-  return getUnitForProduct(productName);
+  const strong = getStrongUnitMarker(productName);
+  if (strong) return strong;
+
+  const saved = getUnitForProduct(productName);
+  if (saved && saved !== 'kg') return saved;
+
+  const byCategory = inferUnitFromName(productName);
+  if (byCategory && byCategory !== 'kg') return byCategory;
+
+  return saved || 'kg';
 }
 
 function normalizeProductKey(name: string): string {
