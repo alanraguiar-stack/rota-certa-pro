@@ -7,7 +7,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Truck as TruckType, Order, OrderItem } from '@/types';
 import { cn } from '@/lib/utils';
-import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName } from '@/hooks/useProductUnits';
+import { useProductUnits, getUnitAbbrev, isWeightUnit, inferUnitFromName, getStrongUnitMarker } from '@/hooks/useProductUnits';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -41,21 +41,29 @@ function countOrdersWithoutItems(orders: Order[]): number {
 }
 
 /**
- * Resolve a unidade de medida com prioridade:
- * 1. Marcadores fortes no nome do produto (FD12UN, CX6, etc.)
- * 2. Cadastro do produto no banco
- * 3. Inferência por categoria (bebidas, etc.)
+ * Resolve a unidade de medida com hierarquia oficial:
+ * 1. Marcador EXPLÍCITO forte no nome (FD12UN, CX6, ...) — ganha de tudo
+ * 2. Cadastro salvo do produto (getUnitForProduct via banco)
+ * 3. Regra por categoria/marca (inferUnitFromName)
  * 4. Default: kg
  */
 function resolveUnit(productName: string, getUnitForProduct: (name: string) => string): string {
-  // Primeiro: checar marcadores fortes no nome do produto
-  const inferred = inferUnitFromName(productName);
-  
-  // Se a inferência encontrou algo diferente de kg (marcador forte), usar ela
-  if (inferred !== 'kg') return inferred;
-  
-  // Senão, consultar o banco via getUnitForProduct (que já tem seu próprio fallback)
-  return getUnitForProduct(productName);
+  // 1) Marcador explícito forte
+  const strong = getStrongUnitMarker(productName);
+  if (strong) return strong;
+
+  // 2) Cadastro salvo: getUnitForProduct retorna 'kg' apenas como último recurso.
+  //    Para distinguir "salvo como kg" de "fallback kg", reusamos a inferência
+    //  por categoria como tiebreaker quando o cadastro retorna kg.
+  const saved = getUnitForProduct(productName);
+  if (saved && saved !== 'kg') return saved;
+
+  // 3) Regra por categoria/marca
+  const byCategory = inferUnitFromName(productName);
+  if (byCategory && byCategory !== 'kg') return byCategory;
+
+  // 4) Default
+  return saved || 'kg';
 }
 
 /**

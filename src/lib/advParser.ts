@@ -1392,54 +1392,49 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
       // ===================================================================
       let qty = 0;
       let extractionSource = '';
-      
-      // ATTEMPT 1: Primary qtde column
+
+      // Quando o layout atual foi reconhecido (coluna Qtde mapeada), usar
+      // EXCLUSIVAMENTE essa coluna como fonte autoritativa. Nunca cair em
+      // heurísticas que podem puxar preço/total como quantidade.
       if (itemColumnMap.qtde !== -1) {
         qty = parseExcelWeight(row[itemColumnMap.qtde] as string | number | null | undefined);
-        if (qty > 0) extractionSource = 'qtde';
-      }
-      
-      // ATTEMPT 2: Try total column (often has the total weight/value)
-      if (qty === 0 && itemColumnMap.total !== -1) {
-        const totalVal = parseExcelWeight(row[itemColumnMap.total] as string | number | null | undefined);
-        if (totalVal > 0) {
-          qty = totalVal;
-          extractionSource = 'total';
+        if (qty > 0) {
+          extractionSource = 'qtde';
+        } else {
+          // Coluna Qtde reconhecida mas vazia/inválida — pular item, não inventar
+          console.log('[ADV Excel] ⚠️ Item ignorado: Qtde vazia/inválida na coluna mapeada -', descricao.substring(0, 40));
+          continue;
         }
-      }
-      
-      // ATTEMPT 3: Scan ALL numeric cells adjacent to description
-      if (qty === 0) {
+      } else {
+        // Layout antigo / fora do padrão: aplicar fallbacks heurísticos limitados
+        // ATTEMPT A: scan numeric cells (excluindo unitario/total para não pegar preço)
         const numericValues: { idx: number; val: number }[] = [];
         for (let ci = 0; ci < row.length; ci++) {
           if (ci === itemColumnMap.descricao || ci === itemColumnMap.codigo) continue;
+          if (ci === itemColumnMap.unitario || ci === itemColumnMap.total) continue;
           const val = parseExcelWeight(row[ci] as string | number | null | undefined);
-          if (val > 0) {
-            numericValues.push({ idx: ci, val });
-          }
+          if (val > 0) numericValues.push({ idx: ci, val });
         }
-        // Pick the first plausible numeric value (usually quantity comes before price)
         if (numericValues.length > 0) {
           qty = numericValues[0].val;
           extractionSource = `fallback-col-${numericValues[0].idx}`;
         }
-      }
-      
-      // ATTEMPT 4: Regex on concatenated row text (reuse PDF extractItem logic)
-      if (qty === 0) {
-        const cleanLine = rowText.replace(/[|│]/g, ' ').trim();
-        const regexMatch = cleanLine.match(/\s+([\d]+[,.][\d]+)\s+/);
-        if (regexMatch) {
-          qty = parseExcelWeight(regexMatch[1]);
-          extractionSource = 'regex-line';
+
+        // ATTEMPT B: regex no texto da linha
+        if (qty === 0) {
+          const cleanLine = rowText.replace(/[|│]/g, ' ').trim();
+          const regexMatch = cleanLine.match(/\s+([\d]+[,.][\d]+)\s+/);
+          if (regexMatch) {
+            qty = parseExcelWeight(regexMatch[1]);
+            extractionSource = 'regex-line';
+          }
         }
-      }
-      
-      // FINAL: Accept item even with qty=0 if we have a description (use qty=1 as fallback)
-      if (qty === 0) {
-        qty = 1; // Default: at least 1 unit
-        extractionSource = 'default-1';
-        console.log('[ADV Excel] ⚠️ No numeric value found for item, defaulting to qty=1:', descricao.substring(0, 40));
+
+        // Sem layout reconhecido E sem valor numérico → pular para não corromper romaneio
+        if (qty === 0) {
+          console.log('[ADV Excel] ⚠️ Item ignorado: nenhum valor numérico identificável -', descricao.substring(0, 40));
+          continue;
+        }
       }
       
       // Determine if this is weight or unit-count based
@@ -1621,13 +1616,25 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
 
     // Detectar cliente
     if (first === 'Cliente :' || first === 'Cliente:') {
-      currentClient = (partes[2] ?? partes[1] ?? '').trim();
+      // Primeiro campo não-vazio depois de partes[0] que não seja só dígitos (CPF/CNPJ)
+      let found = '';
+      for (let i = 1; i < partes.length; i++) {
+        const v = (partes[i] ?? '').trim();
+        if (v && !/^\d+$/.test(v)) { found = v; break; }
+      }
+      currentClient = found || (partes[2] ?? partes[1] ?? '').trim();
       continue;
     }
 
-    // Detectar número da venda
+    // Detectar número da venda — buscar dinamicamente o primeiro número
+    // longo (≥4 dígitos) após o rótulo, em vez de assumir índice fixo.
     if (first === 'Venda Nº:' || first === 'Venda No:' || /^Venda\s*N[º°]?\s*:?$/i.test(first)) {
-      currentVendaId = (partes[4] ?? partes[1] ?? '').trim().replace(/\D/g, '');
+      let vendaId = '';
+      for (let i = 1; i < partes.length; i++) {
+        const digits = (partes[i] ?? '').replace(/\D/g, '');
+        if (digits.length >= 4) { vendaId = digits; break; }
+      }
+      currentVendaId = vendaId || (partes[4] ?? partes[1] ?? '').trim().replace(/\D/g, '');
       continue;
     }
 
@@ -1675,13 +1682,22 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
 
 /** Inferir unidade pelo nome do produto (espelho de inferUnitFromName, em maiúsculas para romaneio) */
 function inferUnitFromProductName(productName: string): string {
-  const upper = (productName || '').toUpperCase();
-  // Regras específicas por categoria/marca (ganham prioridade)
-  if (/CAFE|CAFÉ|FARINHA/.test(upper)) return 'FD';
-  if (/MOLHO DE TOMATE/.test(upper)) return 'PCT';
-  if (/SALSICHA|BISTECA|APRESUNTADO/.test(upper)) return 'KG';
-  if (/KETCHUP|MAIONESE/.test(upper)) return 'UN';
-  if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'FD';
+  const upper = (productName || '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  // Regras específicas por categoria/marca (espelham inferUnitFromName)
+  if (/\bSALSICHA\b/.test(upper)) return 'KG';
+  if (/\bBISTECA\b/.test(upper)) return 'KG';
+  if (/\bAPRESUNTADO\b/.test(upper)) return 'KG';
+  if (/\bKETCHUP\b/.test(upper)) return 'UN';
+  if (/\bMAIONESE\b/.test(upper)) return 'UN';
+  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'PCT';
+  if (/\bCAFE\b/.test(upper)) return 'FD';
+  if (/\bFARINHA\b/.test(upper)) return 'FD';
+  if (/REFRIGERANTE|AGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ISOTON|CHA\s+GELADO|ICE\s+TEA|\bCHA\b/.test(upper)) return 'FD';
+
   const map: Array<[RegExp, string]> = [
     [/\bFD\d*\b|FARDO/, 'FD'],
     [/\bCX\d*\b|CAIXA/, 'CX'],
@@ -1690,7 +1706,7 @@ function inferUnitFromProductName(productName: string): string {
     [/\bDP\d*\b|DISPLAY/, 'DP'],
     [/\bGF\d*\b|GARRAFA/, 'GF'],
     [/\bLT\d*\b|LITRO/, 'LT'],
-    [/\bPC\d*\b|PECA|PEÇA/, 'PC'],
+    [/\bPC\d*\b|PECA/, 'PC'],
     [/\bUN\d*\b|UNIDADE/, 'UN'],
     [/\bKG\b|QUILO/, 'KG'],
   ];

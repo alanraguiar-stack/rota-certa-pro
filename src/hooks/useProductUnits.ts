@@ -34,6 +34,36 @@ export function isWeightUnit(unitType: string): boolean {
   return u === 'kg' || u === 'g';
 }
 
+/**
+ * Detecta marcadores explícitos fortes de unidade no nome do produto
+ * (ex: "REFRI 2L FD12UN", "BISCOITO CX24"). Retorna a unidade detectada
+ * ou null se não houver marcador explícito.
+ *
+ * Esses marcadores ganham precedência sobre qualquer cadastro/inferência.
+ */
+export function getStrongUnitMarker(productName: string): string | null {
+  const upper = (productName || '')
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  // Marcadores explícitos com dígitos colados (FD12UN, CX6, PCT24...)
+  const strongMap: Array<[RegExp, string]> = [
+    [/\bFD\d+\b/, 'fardo'],
+    [/\bCX\d+\b/, 'caixa'],
+    [/\bPCT\d+\b/, 'pacote'],
+    [/\bSC\d+\b/, 'saco'],
+    [/\bDP\d+\b/, 'display'],
+    [/\bGF\d+\b/, 'garrafa'],
+    [/\bLT\d+\b/, 'litro'],
+    [/\bUN\d+\b/, 'unidade'],
+  ];
+  for (const [re, unit] of strongMap) {
+    if (re.test(upper)) return unit;
+  }
+  return null;
+}
+
 function normalize(str: string): string {
   return str
     .toLowerCase()
@@ -47,16 +77,33 @@ function normalize(str: string): string {
  * Prioridade: refrigerante > abreviações explícitas > kg (padrão).
  */
 export function inferUnitFromName(productName: string): string {
-  const upper = productName.toUpperCase();
+  // Normalizar: maiúsculas e sem acentos para regras consistentes
+  const upper = productName
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 
+  // ─────────────────────────────────────────────────────────────
   // Regras específicas por categoria/marca (ganham prioridade)
-  if (/CAFE|CAFÉ|FARINHA/.test(upper)) return 'fardo';
-  if (/MOLHO DE TOMATE/.test(upper)) return 'pacote';
-  if (/SALSICHA|BISTECA|APRESUNTADO/.test(upper)) return 'kg';
-  if (/KETCHUP|MAIONESE/.test(upper)) return 'unidade';
+  // Ordem: específicas → genéricas
+  // ─────────────────────────────────────────────────────────────
 
-  // Categorias de bebidas → sempre fardo
-  if (/REFRIGERANTE|AGUA MINERAL|ÁGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ENERGÉTICO|ISOTON|CHÁ|CHA GELADO|ICE TEA/.test(upper)) return 'fardo';
+  // Categorias por KG (proteínas/frios)
+  if (/\bSALSICHA\b/.test(upper)) return 'kg';
+  if (/\bBISTECA\b/.test(upper)) return 'kg';
+  if (/\bAPRESUNTADO\b/.test(upper)) return 'kg';
+
+  // Marcas/produtos por UNIDADE
+  if (/\bKETCHUP\b/.test(upper)) return 'unidade';
+  if (/\bMAIONESE\b/.test(upper)) return 'unidade';
+
+  // Categorias por PACOTE
+  if (/MOLHO\s+DE\s+TOMATE/.test(upper)) return 'pacote';
+
+  // Categorias por FARDO (cafés, farinhas, bebidas)
+  if (/\bCAFE\b/.test(upper)) return 'fardo';
+  if (/\bFARINHA\b/.test(upper)) return 'fardo';
+  if (/REFRIGERANTE|AGUA MINERAL|SUCO|CERVEJA|ENERGETICO|ISOTON|CHA\s+GELADO|ICE\s+TEA|\bCHA\b/.test(upper)) return 'fardo';
 
   // Abreviações flexíveis — aceita FD12UN, CX6, PCT24 etc.
   // Ordem importa: FD antes de UN para não conflitar com "FD12UN"
@@ -76,7 +123,7 @@ export function inferUnitFromName(productName: string): string {
     [/\bLT\d*\b/, 'litro'],
     [/LITRO/, 'litro'],
     [/\bPC\d*\b/, 'peca'],
-    [/PECA|PEÇA/, 'peca'],
+    [/PECA/, 'peca'],
     [/\bUN\d*\b/, 'unidade'],
     [/UNIDADE/, 'unidade'],
   ];

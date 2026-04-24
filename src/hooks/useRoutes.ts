@@ -1186,6 +1186,19 @@ export function useRouteDetails(routeId: string | undefined) {
       const route = routeQuery.data;
       if (!route || route.orders.length === 0) throw new Error('Esta rota não possui pedidos cadastrados. Importe primeiro o relatório "Vendas do Dia".');
 
+      // ─────────────────────────────────────────────────────────────
+      // GUARDA DE INTEGRIDADE: validar cobertura mínima antes de gravar
+      // Evita que uma reimportação claramente incompleta substitua
+      // silenciosamente os itens existentes.
+      // ─────────────────────────────────────────────────────────────
+      const advWithItemsCount = advOrders.filter(o => o.items && o.items.length > 0).length;
+      if (advWithItemsCount === 0) {
+        throw new Error(
+          `O arquivo ADV não trouxe nenhum item válido (${advOrders.length} vendas lidas). ` +
+          `Verifique se o arquivo é o "Detalhe das Vendas" correto e se a coluna de quantidade está preenchida.`
+        );
+      }
+
       // Normalize helper
       const normalize = (s: string) =>
         s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').replace(/[^\w\s]/g, '').trim();
@@ -1290,14 +1303,36 @@ export function useRouteDetails(routeId: string | undefined) {
       );
 
       console.log(`[reimportItems] Matched ${matched}/${route.orders.length} orders, inserted ${itemsToInsert.length} items`);
-      return { matched, total: route.orders.length, itemsInserted: itemsToInsert.length };
+
+      // Cobertura final: se vinculamos itens em menos de 30% dos pedidos,
+      // sinalizar como warning forte (mas o insert já aconteceu).
+      const coverage = route.orders.length > 0 ? matched / route.orders.length : 0;
+      const lowCoverage = coverage < 0.3 && route.orders.length >= 10;
+
+      return {
+        matched,
+        total: route.orders.length,
+        itemsInserted: itemsToInsert.length,
+        advOrdersCount: advOrders.length,
+        advWithItemsCount,
+        lowCoverage,
+        coveragePct: Math.round(coverage * 100),
+      };
     },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      toast({
-        title: 'Detalhamento reimportado!',
-        description: `${result.matched} de ${result.total} pedidos cruzados, ${result.itemsInserted} itens inseridos.`,
-      });
+      if (result.lowCoverage) {
+        toast({
+          title: '⚠️ Cobertura muito baixa',
+          description: `Apenas ${result.matched} de ${result.total} pedidos (${result.coveragePct}%) receberam itens. Confira se o arquivo ADV corresponde a esta rota.`,
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Detalhamento reimportado!',
+          description: `${result.matched} de ${result.total} pedidos cruzados, ${result.itemsInserted} itens inseridos.`,
+        });
+      }
     },
     onError: (error) => {
       toast({
