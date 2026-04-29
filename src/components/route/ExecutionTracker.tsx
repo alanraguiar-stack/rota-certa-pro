@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Eye, Clock, Check, AlertTriangle, FileDown, RefreshCw, MessageSquare } from 'lucide-react';
+import { Eye, Clock, Check, AlertTriangle, FileDown, RefreshCw, MessageSquare, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { supabase } from '@/integrations/supabase/client';
 import type { TruckWithAssignments } from '@/types';
 import jsPDF from 'jspdf';
+import { RescheduleOrdersDialog } from '@/components/route/RescheduleOrdersDialog';
+import { useRescheduleOrders, type ReschedulableOrder } from '@/hooks/useRescheduleOrders';
 
 interface Assignment {
   id: string;
@@ -33,14 +35,19 @@ interface Execution {
 interface Props {
   routeTrucks: TruckWithAssignments[];
   routeName: string;
+  routeId?: string;
 }
 
-export function ExecutionTracker({ routeTrucks, routeName }: Props) {
+export function ExecutionTracker({ routeTrucks, routeName, routeId }: Props) {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [executions, setExecutions] = useState<Record<string, Execution[]>>({});
   const [loading, setLoading] = useState(true);
   const [evidenceModal, setEvidenceModal] = useState<Execution | null>(null);
   const [signedUrls, setSignedUrls] = useState<{ signature?: string; photo?: string }>({});
+  const [showReschedule, setShowReschedule] = useState(false);
+  const [reschedulableOrders, setReschedulableOrders] = useState<ReschedulableOrder[]>([]);
+  const [loadingReschedule, setLoadingReschedule] = useState(false);
+  const { fetchReschedulableOrders, rescheduleOrders } = useRescheduleOrders();
 
   const resolveSignedUrl = useCallback(async (path: string | null): Promise<string | undefined> => {
     if (!path) return undefined;
@@ -149,6 +156,21 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
     doc.save(`relatorio_${routeName.replace(/\s+/g, '_')}.pdf`);
   };
 
+
+  const handleOpenReschedule = async () => {
+    const rtIds = routeTrucks.map(rt => rt.id);
+    setLoadingReschedule(true);
+    setShowReschedule(true);
+    const orders = await fetchReschedulableOrders(rtIds);
+    setReschedulableOrders(orders);
+    setLoadingReschedule(false);
+  };
+
+  const handleRescheduleConfirm = async (selected: ReschedulableOrder[]) => {
+    if (!routeId) return;
+    await rescheduleOrders(selected, routeId);
+  };
+
   const statusBadge = (status: string) => {
     switch (status) {
       case 'pendente': return <Badge variant="secondary"><Clock className="h-3 w-3 mr-1" />Pendente</Badge>;
@@ -181,6 +203,9 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
               </Button>
               <Button variant="outline" size="sm" onClick={generatePDF}>
                 <FileDown className="h-4 w-4 mr-1" /> Relatório PDF
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleOpenReschedule}>
+                <CalendarClock className="h-4 w-4 mr-1" /> Reprogramar Vendas
               </Button>
             </div>
           </div>
@@ -270,6 +295,15 @@ export function ExecutionTracker({ routeTrucks, routeName }: Props) {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Reschedule Dialog */}
+      <RescheduleOrdersDialog
+        open={showReschedule}
+        onOpenChange={setShowReschedule}
+        orders={reschedulableOrders}
+        loading={loadingReschedule}
+        onConfirm={handleRescheduleConfirm}
+      />
     </>
   );
 }

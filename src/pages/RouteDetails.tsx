@@ -1338,6 +1338,7 @@ export default function RouteDetails() {
           <ExecutionTracker
             routeTrucks={route.route_trucks}
             routeName={route.name}
+            routeId={route.id}
           />
         )}
 
