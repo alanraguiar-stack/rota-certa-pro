@@ -17,7 +17,16 @@ import DeliveryConfirmation from "./pages/DeliveryConfirmation";
 import NotFound from "./pages/NotFound";
 import LandingPage from "./pages/LandingPage";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,           // dados frescos por 30s — sem re-fetch desnecessário
+      gcTime: 5 * 60_000,          // cache vive 5min após componente desmontar
+      retry: 1,                    // 1 retry em erro (padrão era 3)
+      refetchOnWindowFocus: false, // não refaz ao trocar de aba/janela
+    },
+  },
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
