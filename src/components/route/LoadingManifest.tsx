@@ -453,21 +453,6 @@ export function LoadingManifest({ routeName, date, trucks, routeId }: LoadingMan
     );
   }
 
-  // Check if ANY truck has items
-  const anyTruckHasItems = trucks.some(t => t.orders.some(o => o.items && o.items.length > 0));
-  
-  // If no items at all, show message
-  if (!anyTruckHasItems) {
-    return (
-      <Card>
-        <CardContent className="py-8 text-center text-muted-foreground">
-          <AlertTriangle className="mx-auto mb-2 h-8 w-8 opacity-50" />
-          <p>Detalhamento de produtos ainda não importado.</p>
-          <p className="text-sm">Carregue o arquivo ADV acima para gerar o romaneio.</p>
-        </CardContent>
-      </Card>
-    );
-  }
   
   const consolidatedProducts = selectedTruck 
     ? consolidateProducts(selectedTruck.orders, getUnitForProduct) 
