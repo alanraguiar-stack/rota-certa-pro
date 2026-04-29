@@ -1678,7 +1678,7 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
       // Fallback para o índice 16 (layout legado) caso M esteja vazia/inválida.
       const qtyFromM = parseBRNumber((partes[12] ?? '').trim());
       const qtyFromLegacy = parseBRNumber((partes[16] ?? '').trim());
-      const quantity = qtyFromM > 0 ? qtyFromM : qtyFromLegacy;
+      let quantity = qtyFromM > 0 ? qtyFromM : qtyFromLegacy;
 
       // Unidade: usar coluna 13 quando trouxer rótulo válido (layout antigo);
       // caso contrário inferir pelo nome do produto (layout atual sem coluna de unidade).
@@ -1698,7 +1698,26 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
         };
         unit = RULE_TO_ABBREV[ruled] || unit;
       }
-      
+
+      // GUARDA: itens não-peso com quantidade fracionária quase sempre
+      // indicam que foi lida a coluna de preço unitário (ex.: 16,99).
+      // Tentar recuperar via total / unitário (índices comuns 14 e 15),
+      // ou arredondar como fallback.
+      const isWeightBased = /^(KG|G)$/.test(unit);
+      if (!isWeightBased && quantity > 0 && Math.abs(quantity - Math.round(quantity)) > 0.001) {
+        const unitPriceCsv = parseBRNumber((partes[14] ?? '').trim());
+        const totalCsv = parseBRNumber((partes[15] ?? '').trim());
+        const recovered = (totalCsv > 0 && unitPriceCsv > 0)
+          ? Math.round(totalCsv / unitPriceCsv)
+          : Math.round(quantity);
+        console.warn(
+          '[parseVendasCSV] ⚠️ Quantidade fracionária em item não-peso, ' +
+          'provável coluna de preço lida como Qtde. Original:', quantity,
+          '| Recuperado:', recovered, '| Produto:', productName.substring(0, 40)
+        );
+        quantity = recovered > 0 ? recovered : 1;
+      }
+
       if (productName && quantity > 0) {
         items.push({
           product_code: productCode,
