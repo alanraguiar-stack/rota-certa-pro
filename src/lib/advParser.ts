@@ -1460,6 +1460,29 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
 
       // Decide weight_kg vs quantity based on unit
       const isWeightBased = /^(kg|g|kilo|quilo)s?$/i.test(unitType);
+
+      // GUARDA: itens não-peso (CX, UN, FD, PCT, SC, DP) com quantidade
+      // fracionária quase sempre indicam que a coluna lida foi a de preço
+      // unitário (ex.: "16,99"). Recuperar usando total / unitário, ou
+      // arredondar como último recurso.
+      if (!isWeightBased && Math.abs(qty - Math.round(qty)) > 0.001) {
+        const unitPriceVal = itemColumnMap.unitario !== -1
+          ? parseExcelWeight(row[itemColumnMap.unitario] as string | number | null | undefined)
+          : 0;
+        const totalVal = itemColumnMap.total !== -1
+          ? parseExcelWeight(row[itemColumnMap.total] as string | number | null | undefined)
+          : 0;
+        const recovered = (totalVal > 0 && unitPriceVal > 0)
+          ? Math.round(totalVal / unitPriceVal)
+          : Math.round(qty);
+        console.warn(
+          '[ADV Excel] ⚠️ Quantidade fracionária em item não-peso, ' +
+          'provável coluna de preço lida como Qtde. Original:', qty,
+          '| Recuperado:', recovered, '| Item:', descricao.substring(0, 40)
+        );
+        qty = recovered > 0 ? recovered : 1;
+      }
+
       const itemWeightKg = isWeightBased ? qty : 0;
       const itemQuantity = isWeightBased ? 1 : qty;
       
