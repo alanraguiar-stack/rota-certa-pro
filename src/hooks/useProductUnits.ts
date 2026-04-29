@@ -56,6 +56,9 @@ export function getCategoryRule(productName: string): string | null {
   if (/\bBISTECA\b/.test(upper)) return 'kg';
   if (/\bAPRESUNTADO\b/.test(upper)) return 'kg';
 
+  // STEAK DE FRANGO — sempre vendido por CAIXA (não por kg)
+  if (/STEAK.*FRANGO|FRANGO.*STEAK/.test(upper)) return 'caixa';
+
   // Categorias direcionadas
   if (/\bCAFE\b/.test(upper)) return 'fardo';
   if (/\bFARINHA\b/.test(upper)) return 'fardo';
