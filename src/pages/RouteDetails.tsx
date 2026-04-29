@@ -30,6 +30,9 @@ import { TruckManifestCards } from '@/components/route/TruckManifestCards';
 import { TruckRouteEditor } from '@/components/route/TruckRouteEditor';
 import { DriverAssignment } from '@/components/route/DriverAssignment';
 import { ExecutionTracker } from '@/components/route/ExecutionTracker';
+import { RescheduleOrdersDialog } from '@/components/route/RescheduleOrdersDialog';
+import { useRescheduleOrders, type ReschedulableOrder } from '@/hooks/useRescheduleOrders';
+import { CalendarClock } from 'lucide-react';
 import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
 import { decodeFileContent } from '@/lib/encoding';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -259,6 +262,12 @@ export default function RouteDetails() {
   
   // Track locked trucks (in-memory state until we add DB column)
   const [lockedTruckIds, setLockedTruckIds] = useState<Set<string>>(new Set());
+
+  // Reprogramar vendas
+  const [showRescheduleDialog, setShowRescheduleDialog] = useState(false);
+  const [reschedulableOrders, setReschedulableOrders] = useState<ReschedulableOrder[]>([]);
+  const [loadingReschedule, setLoadingReschedule] = useState(false);
+  const { fetchReschedulableOrders, rescheduleOrders } = useRescheduleOrders();
 
   // Etapa que o usuário está revendo no momento (override visual do stepper).
   // null = mostra a etapa real (activeStep). Definir para uma etapa anterior
@@ -1340,6 +1349,58 @@ export default function RouteDetails() {
             routeName={route.name}
             routeId={route.id}
           />
+        )}
+
+        {/* Reprogramar Vendas — disponível em qualquer rota com pedidos */}
+        {route.orders.length > 0 && (
+          <>
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  const rtIds = route.route_trucks.map((rt: any) => rt.id);
+                  setLoadingReschedule(true);
+                  setShowRescheduleDialog(true);
+                  const orders = await fetchReschedulableOrders(rtIds);
+                  // Fallback: se não há execuções (motorista não iniciou), monta lista a partir dos pedidos da rota
+                  if (orders.length === 0) {
+                    const fallback: ReschedulableOrder[] = route.orders.map((o: any) => ({
+                      execution_id: o.id,
+                      order_id: o.id,
+                      client_name: o.client_name,
+                      address: o.address,
+                      city: o.city ?? null,
+                      weight_kg: o.weight_kg,
+                      pedido_id: o.pedido_id ?? null,
+                      product_description: o.product_description ?? null,
+                      delivery_status: 'pendente',
+                      delivered_at: null,
+                      observations: null,
+                    }));
+                    setReschedulableOrders(fallback);
+                  } else {
+                    setReschedulableOrders(orders);
+                  }
+                  setLoadingReschedule(false);
+                }}
+              >
+                <CalendarClock className="h-4 w-4 mr-2" />
+                Reprogramar Vendas
+              </Button>
+            </div>
+
+            <RescheduleOrdersDialog
+              open={showRescheduleDialog}
+              onOpenChange={setShowRescheduleDialog}
+              orders={reschedulableOrders}
+              loading={loadingReschedule}
+              onConfirm={async (selected) => {
+                await rescheduleOrders(selected, route.id);
+                setShowRescheduleDialog(false);
+              }}
+            />
+          </>
         )}
 
         {/* All Orders List */}
