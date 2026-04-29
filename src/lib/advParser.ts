@@ -1460,6 +1460,29 @@ export function parseADVDetailExcel(rows: unknown[][]): ParsedOrder[] {
 
       // Decide weight_kg vs quantity based on unit
       const isWeightBased = /^(kg|g|kilo|quilo)s?$/i.test(unitType);
+
+      // GUARDA: itens não-peso (CX, UN, FD, PCT, SC, DP) com quantidade
+      // fracionária quase sempre indicam que a coluna lida foi a de preço
+      // unitário (ex.: "16,99"). Recuperar usando total / unitário, ou
+      // arredondar como último recurso.
+      if (!isWeightBased && Math.abs(qty - Math.round(qty)) > 0.001) {
+        const unitPriceVal = itemColumnMap.unitario !== -1
+          ? parseExcelWeight(row[itemColumnMap.unitario] as string | number | null | undefined)
+          : 0;
+        const totalVal = itemColumnMap.total !== -1
+          ? parseExcelWeight(row[itemColumnMap.total] as string | number | null | undefined)
+          : 0;
+        const recovered = (totalVal > 0 && unitPriceVal > 0)
+          ? Math.round(totalVal / unitPriceVal)
+          : Math.round(qty);
+        console.warn(
+          '[ADV Excel] ⚠️ Quantidade fracionária em item não-peso, ' +
+          'provável coluna de preço lida como Qtde. Original:', qty,
+          '| Recuperado:', recovered, '| Item:', descricao.substring(0, 40)
+        );
+        qty = recovered > 0 ? recovered : 1;
+      }
+
       const itemWeightKg = isWeightBased ? qty : 0;
       const itemQuantity = isWeightBased ? 1 : qty;
       
@@ -1655,7 +1678,7 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
       // Fallback para o índice 16 (layout legado) caso M esteja vazia/inválida.
       const qtyFromM = parseBRNumber((partes[12] ?? '').trim());
       const qtyFromLegacy = parseBRNumber((partes[16] ?? '').trim());
-      const quantity = qtyFromM > 0 ? qtyFromM : qtyFromLegacy;
+      let quantity = qtyFromM > 0 ? qtyFromM : qtyFromLegacy;
 
       // Unidade: usar coluna 13 quando trouxer rótulo válido (layout antigo);
       // caso contrário inferir pelo nome do produto (layout atual sem coluna de unidade).
@@ -1675,7 +1698,26 @@ export function parseVendasCSV(text: string): VendaCSVItem[] {
         };
         unit = RULE_TO_ABBREV[ruled] || unit;
       }
-      
+
+      // GUARDA: itens não-peso com quantidade fracionária quase sempre
+      // indicam que foi lida a coluna de preço unitário (ex.: 16,99).
+      // Tentar recuperar via total / unitário (índices comuns 14 e 15),
+      // ou arredondar como fallback.
+      const isWeightBased = /^(KG|G)$/.test(unit);
+      if (!isWeightBased && quantity > 0 && Math.abs(quantity - Math.round(quantity)) > 0.001) {
+        const unitPriceCsv = parseBRNumber((partes[14] ?? '').trim());
+        const totalCsv = parseBRNumber((partes[15] ?? '').trim());
+        const recovered = (totalCsv > 0 && unitPriceCsv > 0)
+          ? Math.round(totalCsv / unitPriceCsv)
+          : Math.round(quantity);
+        console.warn(
+          '[parseVendasCSV] ⚠️ Quantidade fracionária em item não-peso, ' +
+          'provável coluna de preço lida como Qtde. Original:', quantity,
+          '| Recuperado:', recovered, '| Produto:', productName.substring(0, 40)
+        );
+        quantity = recovered > 0 ? recovered : 1;
+      }
+
       if (productName && quantity > 0) {
         items.push({
           product_code: productCode,
@@ -1807,12 +1849,28 @@ function parseVendasCSVDynamic(lines: string[]): VendaCSVItem[] {
 
       const effectiveQtyIdx = qtyIdx + (alignmentShift ?? 0);
       const qtyRaw = (partes[effectiveQtyIdx] ?? '0').trim();
-      const quantity = parseBRNumber(qtyRaw);
+      let quantity = parseBRNumber(qtyRaw);
+      const dynUnit = inferUnitFromProductName(productName);
+      const isWeightBasedDyn = /^(KG|G)$/.test(dynUnit);
+      if (!isWeightBasedDyn && quantity > 0 && Math.abs(quantity - Math.round(quantity)) > 0.001) {
+        // Tentar recuperar com colunas adjacentes (geralmente unitário/total ficam após qtyIdx)
+        const unitPriceVal = parseBRNumber((partes[effectiveQtyIdx + 1] ?? '').trim());
+        const totalVal = parseBRNumber((partes[effectiveQtyIdx + 2] ?? '').trim());
+        const recovered = (totalVal > 0 && unitPriceVal > 0)
+          ? Math.round(totalVal / unitPriceVal)
+          : Math.round(quantity);
+        console.warn(
+          '[parseVendasCSVDynamic] ⚠️ Quantidade fracionária em item não-peso, ' +
+          'provável coluna de preço lida como Qtde. Original:', quantity,
+          '| Recuperado:', recovered, '| Produto:', productName.substring(0, 40)
+        );
+        quantity = recovered > 0 ? recovered : 1;
+      }
       if (productName && quantity > 0) {
         items.push({
           product_code: productCode,
           product_name: productName,
-          unit: inferUnitFromProductName(productName),
+          unit: dynUnit,
           quantity,
           venda_id: currentVendaId,
           client_name: currentClient,

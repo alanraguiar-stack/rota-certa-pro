@@ -588,6 +588,31 @@ export function TruckRouteEditor({
   const allLocked = trucks.every(t => t.isLocked);
   const lockedCount = trucks.filter(t => t.isLocked).length;
   
+  // Auto-advance: quando um caminhão é confirmado (lockado), pular para o
+  // próximo caminhão que ainda não está confirmado.
+  const prevLockedRef = useRef<Record<string, boolean>>({});
+  useEffect(() => {
+    const prev = prevLockedRef.current;
+    const justLocked = trucks.find(
+      (t) => t.isLocked && !prev[t.routeTruckId] && t.routeTruckId === activeTab
+    );
+    if (justLocked) {
+      const currentIdx = trucks.findIndex((t) => t.routeTruckId === activeTab);
+      // Procurar próximo não confirmado começando após o atual e dando volta
+      const ordered = [
+        ...trucks.slice(currentIdx + 1),
+        ...trucks.slice(0, currentIdx),
+      ];
+      const next = ordered.find((t) => !t.isLocked);
+      if (next) {
+        setActiveTab(next.routeTruckId);
+      }
+    }
+    prevLockedRef.current = Object.fromEntries(
+      trucks.map((t) => [t.routeTruckId, t.isLocked])
+    );
+  }, [trucks, activeTab]);
+  
   const searchMatches = useMemo<SearchMatch[]>(() => {
     if (!searchQuery || searchQuery.length < 2) return [];
     const q = normalizeText(searchQuery);
