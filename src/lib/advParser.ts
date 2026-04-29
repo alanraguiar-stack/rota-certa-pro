@@ -1849,12 +1849,28 @@ function parseVendasCSVDynamic(lines: string[]): VendaCSVItem[] {
 
       const effectiveQtyIdx = qtyIdx + (alignmentShift ?? 0);
       const qtyRaw = (partes[effectiveQtyIdx] ?? '0').trim();
-      const quantity = parseBRNumber(qtyRaw);
+      let quantity = parseBRNumber(qtyRaw);
+      const dynUnit = inferUnitFromProductName(productName);
+      const isWeightBasedDyn = /^(KG|G)$/.test(dynUnit);
+      if (!isWeightBasedDyn && quantity > 0 && Math.abs(quantity - Math.round(quantity)) > 0.001) {
+        // Tentar recuperar com colunas adjacentes (geralmente unitário/total ficam após qtyIdx)
+        const unitPriceVal = parseBRNumber((partes[effectiveQtyIdx + 1] ?? '').trim());
+        const totalVal = parseBRNumber((partes[effectiveQtyIdx + 2] ?? '').trim());
+        const recovered = (totalVal > 0 && unitPriceVal > 0)
+          ? Math.round(totalVal / unitPriceVal)
+          : Math.round(quantity);
+        console.warn(
+          '[parseVendasCSVDynamic] ⚠️ Quantidade fracionária em item não-peso, ' +
+          'provável coluna de preço lida como Qtde. Original:', quantity,
+          '| Recuperado:', recovered, '| Produto:', productName.substring(0, 40)
+        );
+        quantity = recovered > 0 ? recovered : 1;
+      }
       if (productName && quantity > 0) {
         items.push({
           product_code: productCode,
           product_name: productName,
-          unit: inferUnitFromProductName(productName),
+          unit: dynUnit,
           quantity,
           venda_id: currentVendaId,
           client_name: currentClient,
