@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -12,32 +13,22 @@ import { ParsedOrder } from '@/types';
 
 export function useHistoryPatterns() {
   const { user } = useAuth();
-  const [rawPatterns, setRawPatterns] = useState<HistoryRow[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    if (!user?.id) return;
+  const { data: rawPatterns = [], isLoading } = useQuery<HistoryRow[]>({
+    queryKey: ['history-patterns', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('route_history_patterns')
+        .select('id, truck_label, city, client_name, address, neighborhood, sequence_order, route_date, state, was_manually_moved')
+        .eq('user_id', user!.id);
 
-    const fetchPatterns = async () => {
-      setIsLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('route_history_patterns')
-          .select('id, truck_label, city, client_name, address, neighborhood, sequence_order, route_date, state, was_manually_moved')
-          .eq('user_id', user.id);
-
-        if (!error && data) {
-          setRawPatterns(data as HistoryRow[]);
-        }
-      } catch {
-        // silently fail - patterns are optional enhancement
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchPatterns();
-  }, [user?.id]);
+      if (error) throw error;
+      return (data ?? []) as HistoryRow[];
+    },
+    enabled: !!user?.id,
+    staleTime: 10 * 60_000, // padrões mudam raramente — frescos por 10 minutos
+    gcTime: 30 * 60_000,    // manter no cache por 30 minutos após desmontar
+  });
 
   const extractedPatterns: ExtractedPatterns = useMemo(
     () => extractCityPatterns(rawPatterns),
