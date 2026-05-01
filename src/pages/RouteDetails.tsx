@@ -33,7 +33,10 @@ import { ExecutionTracker } from '@/components/route/ExecutionTracker';
 import { RescheduleOrdersDialog } from '@/components/route/RescheduleOrdersDialog';
 import { useRescheduleOrders, type ReschedulableOrder } from '@/hooks/useRescheduleOrders';
 import { CalendarClock } from 'lucide-react';
-import { parseADVDetailExcel, isADVExcelFormat } from '@/lib/advParser';
+import { parseADVDetailExcel, isADVExcelFormat, parseVendasCSV } from '@/lib/advParser';
+import { supabase } from '@/integrations/supabase/client';
+import { parseAddress } from '@/lib/geocoding';
+import * as XLSX from 'xlsx';
 import { decodeFileContent } from '@/lib/encoding';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -65,7 +68,6 @@ function ADVUploadSection({ route, reimportItems, hasExistingItems }: { route: a
       const isCSVorTXT = file.name.endsWith('.csv') || file.name.endsWith('.txt');
       
       if (isCSVorTXT) {
-        const { parseVendasCSV } = await import('@/lib/advParser');
         const text = await decodeFileContent(file);
         const csvItems = parseVendasCSV(text);
         
@@ -107,7 +109,6 @@ function ADVUploadSection({ route, reimportItems, hasExistingItems }: { route: a
         setImportedCount(csvItems.length);
         toast({ title: 'Detalhamento importado!', description: `${advOrders.length} vendas com ${csvItems.length} itens vinculados.` });
       } else {
-        const XLSX = await import('xlsx');
         const buffer = await file.arrayBuffer();
         const wb = XLSX.read(buffer, { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -288,8 +289,6 @@ export default function RouteDetails() {
     
     snapshotTimerRef.current[truckId] = setTimeout(async () => {
       try {
-        const { supabase } = await import('@/integrations/supabase/client');
-        const { parseAddress } = await import('@/lib/geocoding');
         const { data: { user } } = await supabase.auth.getUser();
         if (!user || !route) return;
 
@@ -604,8 +603,6 @@ export default function RouteDetails() {
 
     // Save snapshot to route_history_patterns for learning
     try {
-      const { supabase } = await import('@/integrations/supabase/client');
-      const { parseAddress } = await import('@/lib/geocoding');
       const { data: { user } } = await supabase.auth.getUser();
       if (user && route) {
         const today = new Date().toISOString().split('T')[0];
@@ -666,7 +663,6 @@ export default function RouteDetails() {
 
     // Advance status to loading_confirmed so stepper moves to import_adv
     try {
-      const { supabase } = await import('@/integrations/supabase/client');
       await supabase.from('routes').update({ status: 'loading_confirmed' }).eq('id', route!.id);
       await refetch();
     } catch (err) {
@@ -826,7 +822,6 @@ export default function RouteDetails() {
                 </div>
                 <Button 
                   onClick={async () => {
-                    const { supabase } = await import('@/integrations/supabase/client');
                     await supabase.from('routes').update({ status: 'loading' }).eq('id', route.id);
                     refetch();
                     toast({ title: 'Status corrigido!' });
@@ -877,7 +872,6 @@ export default function RouteDetails() {
                     disabled={distributeLoad.isPending}
                     onClick={async () => {
                       try {
-                        const { supabase } = await import('@/integrations/supabase/client');
                         await Promise.all(
                           route.route_trucks.map(rt =>
                             supabase.from('route_trucks').update({ total_weight_kg: 0, total_orders: 0 }).eq('id', rt.id)
@@ -1186,7 +1180,6 @@ export default function RouteDetails() {
                       });
                     }
                     // Delete the order_assignments for disabled cities
-                    const { supabase } = await import('@/integrations/supabase/client');
                     for (const rt of route.route_trucks) {
                       for (const a of (rt.assignments || [])) {
                         if (a.order && disabledCities.has(a.order.city || 'Sem cidade')) {
@@ -1225,7 +1218,6 @@ export default function RouteDetails() {
                       onClick={async () => {
                         if (!confirm('Deseja finalizar o romaneio de carga e avançar para o romaneio de entrega?')) return;
                         try {
-                          const { supabase } = await import('@/integrations/supabase/client');
                           await supabase.from('routes').update({ status: 'distributed' }).eq('id', route.id);
                           await refetch();
                           toast({ title: 'Avançando para Romaneio de Entrega!' });
