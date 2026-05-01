@@ -649,6 +649,30 @@ function TruckTab({
               </>
             )}
           </Button>
+
+          {!truckData.isLocked && (
+            <Button
+              variant={selectionMode ? 'secondary' : 'outline'}
+              onClick={() => {
+                if (selectionMode) exitSelection();
+                else setSelectionMode(true);
+              }}
+              disabled={isProcessing || isMoving || localOrders.length === 0}
+              className="gap-2"
+            >
+              {selectionMode ? (
+                <>
+                  <X className="h-4 w-4" />
+                  Cancelar
+                </>
+              ) : (
+                <>
+                  <CheckSquare className="h-4 w-4" />
+                  Selecionar
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
       
@@ -705,11 +729,160 @@ function TruckTab({
                 isLast={idx === localOrders.length - 1}
                 isHighlighted={highlightedOrderId === order.id}
                 orderRef={highlightedOrderId === order.id ? highlightRef : undefined}
+                selectionMode={selectionMode}
+                isSelected={selectedIds.has(order.id)}
+                onToggleSelect={() => toggleSelect(order.id)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Bulk Action Bar (sticky bottom while in selection mode) */}
+      {selectionMode && !truckData.isLocked && (
+        <div className="sticky bottom-2 z-10 mt-2">
+          <div className="rounded-xl border bg-background/95 backdrop-blur p-3 shadow-lg flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 text-sm font-medium pr-2 border-r">
+              <CheckSquare className="h-4 w-4 text-primary" />
+              <span>{selectedIds.size} selecionada{selectedIds.size === 1 ? '' : 's'}</span>
+              {selectedIds.size > 0 && (
+                <Badge variant="secondary">{formatWeight(selectedWeight)}</Badge>
+              )}
+            </div>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedIds(new Set(localOrders.map(o => o.id)))}
+              disabled={isMoving}
+            >
+              Selecionar tudo
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSelectedIds(new Set())}
+              disabled={isMoving || selectedIds.size === 0}
+            >
+              Limpar
+            </Button>
+
+            {/* Select by city */}
+            {cityGroups.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={isMoving} className="gap-1">
+                    <MapPinned className="h-3.5 w-3.5" />
+                    Por cidade
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
+                  <DropdownMenuLabel>Marcar todas de…</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {cityGroups.map(g => (
+                    <DropdownMenuItem
+                      key={g.label}
+                      onClick={() => setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        g.ids.forEach(id => next.add(id));
+                        return next;
+                      })}
+                    >
+                      <span className="flex-1">{g.label}</span>
+                      <Badge variant="secondary" className="ml-2">{g.ids.length}</Badge>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {/* Select by neighborhood */}
+            {neighborhoodGroups.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={isMoving} className="gap-1">
+                    <MapPin className="h-3.5 w-3.5" />
+                    Por bairro
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
+                  <DropdownMenuLabel>Marcar todas de…</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {neighborhoodGroups.map(g => (
+                    <DropdownMenuItem
+                      key={g.label}
+                      onClick={() => setSelectedIds(prev => {
+                        const next = new Set(prev);
+                        g.ids.forEach(id => next.add(id));
+                        return next;
+                      })}
+                    >
+                      <span className="flex-1">{g.label}</span>
+                      <Badge variant="secondary" className="ml-2">{g.ids.length}</Badge>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            <div className="flex-1" />
+
+            {/* Move dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  disabled={selectedIds.size === 0 || isMoving || otherTrucks.length === 0}
+                  className="gap-1"
+                >
+                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                  Mover {selectedIds.size > 0 ? `(${selectedIds.size})` : ''} para…
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="max-h-72 overflow-y-auto w-64">
+                <DropdownMenuLabel>Caminhão de destino</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {otherTrucks.map(t => {
+                  const cap = Number(t.truck.capacity_kg) || 0;
+                  const maxDel = t.truck.max_deliveries ?? 25;
+                  const fitsWeight = (t.totalWeight + selectedWeight) <= cap;
+                  const fitsCount = (t.orders.length + selectedIds.size) <= maxDel;
+                  const canMove = !t.isLocked && fitsWeight && fitsCount;
+                  let warn = '';
+                  if (t.isLocked) warn = 'confirmada';
+                  else if (!fitsWeight) warn = `peso excede ${formatWeight(cap)}`;
+                  else if (!fitsCount) warn = `máx ${maxDel} entregas`;
+
+                  return (
+                    <DropdownMenuItem
+                      key={t.routeTruckId}
+                      disabled={!canMove}
+                      onClick={() => handleBulkMove(t.routeTruckId)}
+                      className="flex flex-col items-start gap-0.5"
+                    >
+                      <div className="flex w-full items-center justify-between">
+                        <span className="font-medium">{t.truck.plate}</span>
+                        {warn ? (
+                          <Badge variant="outline" className="text-destructive border-destructive/50">
+                            {warn}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">
+                            {Math.round(((t.totalWeight + selectedWeight) / (cap || 1)) * 100)}%
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {t.orders.length}+{selectedIds.size} entregas • {formatWeight(t.totalWeight)} → {formatWeight(t.totalWeight + selectedWeight)}
+                      </span>
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
