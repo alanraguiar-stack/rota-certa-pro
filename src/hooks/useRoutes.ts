@@ -686,13 +686,14 @@ export function useRouteDetails(routeId: string | undefined) {
         });
       }
 
-      // Batch sequence updates in parallel (chunks of 50)
-      const SEQ_CHUNK = 50;
-      for (let i = 0; i < allSeqUpdates.length; i += SEQ_CHUNK) {
-        const chunk = allSeqUpdates.slice(i, i + SEQ_CHUNK);
-        await Promise.all(
-          chunk.map(u => supabase.from('order_assignments').update({ delivery_sequence: u.delivery_sequence }).eq('id', u.id))
-        );
+      // Upsert em lote — 1 query no lugar de N updates individuais
+      if (allSeqUpdates.length > 0) {
+        await supabase
+          .from('order_assignments')
+          .upsert(
+            allSeqUpdates.map(u => ({ id: u.id, delivery_sequence: u.delivery_sequence })),
+            { onConflict: 'id' }
+          );
       }
 
       // Batch truck metric updates in parallel
@@ -843,23 +844,20 @@ export function useRouteDetails(routeId: string | undefined) {
         reordersByTruck.set(routeTruck.id, existing);
       }
 
-      // Update each assignment's delivery_sequence
+      // Coletar todos os updates de sequência em lote
+      const allReorderUpdates: Array<{ id: string; delivery_sequence: number }> = [];
+
       for (const [routeTruckId, truckReorders] of reordersByTruck) {
+        const routeTruck = route.route_trucks.find(rt => rt.id === routeTruckId);
+
         for (const reorder of truckReorders) {
-          // Find the assignment for this order
-          const routeTruck = route.route_trucks.find(rt => rt.id === routeTruckId);
           const assignment = routeTruck?.assignments?.find(a => a.order?.id === reorder.orderId);
-          
           if (assignment) {
-            await supabase
-              .from('order_assignments')
-              .update({ delivery_sequence: reorder.newSequence })
-              .eq('id', assignment.id);
+            allReorderUpdates.push({ id: assignment.id, delivery_sequence: reorder.newSequence });
           }
         }
 
         // Recalculate route metrics for this truck
-        const routeTruck = route.route_trucks.find(rt => rt.id === routeTruckId);
         if (routeTruck) {
           const truckOrders = truckReorders
             .sort((a, b) => a.newSequence - b.newSequence)
@@ -876,6 +874,16 @@ export function useRouteDetails(routeId: string | undefined) {
             })
             .eq('id', routeTruckId);
         }
+      }
+
+      // Upsert em lote — 1 query no lugar de N updates individuais
+      if (allReorderUpdates.length > 0) {
+        await supabase
+          .from('order_assignments')
+          .upsert(
+            allReorderUpdates.map(u => ({ id: u.id, delivery_sequence: u.delivery_sequence })),
+            { onConflict: 'id' }
+          );
       }
     },
     onSuccess: () => {
