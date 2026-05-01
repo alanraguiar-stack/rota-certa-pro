@@ -348,6 +348,120 @@ function TruckTab({
   
   // Optimistic local state
   const [localOrders, setLocalOrders] = useState<Order[]>(truckData.orders);
+
+  // Bulk selection state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isMoving, setIsMoving] = useState(false);
+
+  // Auto-disable selection when truck gets locked
+  useEffect(() => {
+    if (truckData.isLocked && selectionMode) {
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    }
+  }, [truckData.isLocked, selectionMode]);
+
+  const toggleSelect = useCallback((orderId: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  }, []);
+
+  const exitSelection = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  // Group helpers for "select by city / neighborhood"
+  const cityGroups = useMemo(() => {
+    const map = new Map<string, { label: string; ids: string[] }>();
+    for (const o of localOrders) {
+      const label = (o.city || '').trim() || 'Sem cidade';
+      const key = normalizeText(label);
+      const entry = map.get(key) ?? { label, ids: [] };
+      entry.ids.push(o.id);
+      map.set(key, entry);
+    }
+    return Array.from(map.values()).sort((a, b) => b.ids.length - a.ids.length);
+  }, [localOrders]);
+
+  const extractNeighborhood = (addr: string): string => {
+    if (!addr) return '';
+    // Try "Bairro: X" pattern
+    const m = addr.match(/bairro:?\s*([^,\-•|]+)/i);
+    if (m) return m[1].trim();
+    // Fallback: penultimate comma segment
+    const parts = addr.split(',').map(p => p.trim()).filter(Boolean);
+    if (parts.length >= 3) return parts[parts.length - 2];
+    return '';
+  };
+
+  const neighborhoodGroups = useMemo(() => {
+    const map = new Map<string, { label: string; ids: string[] }>();
+    for (const o of localOrders) {
+      const nb = extractNeighborhood(o.address || '');
+      if (!nb) continue;
+      const key = normalizeText(nb);
+      const entry = map.get(key) ?? { label: nb, ids: [] };
+      entry.ids.push(o.id);
+      map.set(key, entry);
+    }
+    return Array.from(map.values())
+      .filter(g => g.ids.length >= 2)
+      .sort((a, b) => b.ids.length - a.ids.length);
+  }, [localOrders]);
+
+  const selectedWeight = useMemo(() => {
+    let total = 0;
+    for (const o of localOrders) {
+      if (selectedIds.has(o.id)) total += Number(o.weight_kg) || 0;
+    }
+    return total;
+  }, [localOrders, selectedIds]);
+
+  const handleBulkMove = useCallback(async (toTruckId: string) => {
+    if (selectedIds.size === 0 || isMoving) return;
+    const ids = localOrders
+      .filter(o => selectedIds.has(o.id))
+      .map(o => o.id);
+    const previousOrders = [...localOrders];
+    const destPlate = otherTrucks.find(t => t.routeTruckId === toTruckId)?.truck.plate ?? '';
+
+    // Optimistic remove
+    setLocalOrders(prev => prev.filter(o => !selectedIds.has(o.id)));
+    setIsMoving(true);
+
+    const failed: string[] = [];
+    for (const id of ids) {
+      try {
+        await onOrderMove(id, truckData.routeTruckId, toTruckId, 999);
+      } catch (err) {
+        failed.push(id);
+      }
+    }
+
+    setIsMoving(false);
+
+    if (failed.length === 0) {
+      toast({
+        title: `${ids.length} entrega${ids.length > 1 ? 's' : ''} movida${ids.length > 1 ? 's' : ''}`,
+        description: `Transferid${ids.length > 1 ? 'as' : 'a'} para ${destPlate}`,
+      });
+      exitSelection();
+    } else {
+      // Rollback on partial/full failure
+      setLocalOrders(previousOrders);
+      toast({
+        title: 'Erro ao mover em massa',
+        description: `${failed.length} de ${ids.length} entregas não puderam ser movidas. Operação revertida.`,
+        variant: 'destructive',
+      });
+    }
+  }, [selectedIds, localOrders, otherTrucks, onOrderMove, truckData.routeTruckId, toast, exitSelection, isMoving]);
   
   // Sync with server data
   useEffect(() => {
