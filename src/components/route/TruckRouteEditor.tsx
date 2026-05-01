@@ -18,7 +18,10 @@ import {
   Package,
   Search,
   X,
-  Copy
+  Copy,
+  CheckSquare,
+  Square,
+  MapPinned
 } from 'lucide-react';
 
 import { arrayMove } from '@dnd-kit/sortable';
@@ -36,6 +39,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Truck as TruckType, Order, OrderItem } from '@/types';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
