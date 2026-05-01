@@ -18,6 +18,17 @@ export default defineConfig(({ mode }) => ({
     esbuildOptions: {
       drop: mode === "production" ? ["console", "debugger"] : [],
     },
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Cada grupo vira um chunk separado — o browser faz cache independente
+          // Se o app mudar mas o Leaflet não, o usuário não re-baixa o mapa
+          "vendor-maps":  ["leaflet", "react-leaflet"],
+          "vendor-pdf":   ["jspdf", "jspdf-autotable", "pdfjs-dist"],
+          "vendor-excel": ["xlsx"],
+        },
+      },
+    },
   },
   optimizeDeps: {
     esbuildOptions: {
