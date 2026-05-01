@@ -108,6 +108,9 @@ function OrderCard({
   isLast,
   isHighlighted,
   orderRef,
+  selectionMode,
+  isSelected,
+  onToggleSelect,
 }: { 
   order: Order; 
   sequence: number;
@@ -122,6 +125,9 @@ function OrderCard({
   isLast: boolean;
   isHighlighted?: boolean;
   orderRef?: React.Ref<HTMLDivElement>;
+  selectionMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isEditingPosition, setIsEditingPosition] = useState(false);
@@ -163,9 +169,21 @@ function OrderCard({
         "rounded-lg border bg-card transition-all select-text",
         isLocked ? "opacity-75" : "hover:shadow-md",
         isHighlighted && "ring-2 ring-amber-400 bg-amber-50/50 dark:bg-amber-900/20",
+        selectionMode && isSelected && "ring-2 ring-primary bg-primary/5",
+        selectionMode && "cursor-pointer",
       )}
+      onClick={selectionMode && !isLocked ? onToggleSelect : undefined}
     >
       <div className="flex items-center gap-3 p-3">
+        {/* Selection checkbox */}
+        {selectionMode && !isLocked && (
+          <Checkbox
+            checked={!!isSelected}
+            onCheckedChange={onToggleSelect}
+            onClick={(e) => e.stopPropagation()}
+            className="h-5 w-5"
+          />
+        )}
         {/* Position Number (clickable to edit) */}
         <div className="flex items-center -ml-1 pl-1">
           {isEditingPosition ? (
@@ -221,7 +239,7 @@ function OrderCard({
         </div>
         
         {/* Actions */}
-        {!isLocked && (
+        {!isLocked && !selectionMode && (
           <div className="flex items-center gap-1">
             <div className="flex flex-col">
               <Button 
