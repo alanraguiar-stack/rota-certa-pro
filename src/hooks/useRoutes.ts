@@ -136,109 +136,70 @@ export function useRouteDetails(routeId: string | undefined) {
     queryFn: async () => {
       if (!routeId) return null;
 
-      const { data: route, error: routeError } = await supabase
+      // ─── 1 roundtrip no lugar de 4-5 queries sequenciais ───────────────────
+      const { data: raw, error } = await supabase
         .from('routes')
-        .select('*')
+        .select(`
+          *,
+          orders:orders(
+            *,
+            order_items(*)
+          ),
+          route_trucks:route_trucks(
+            *,
+            truck:trucks(*),
+            assignments:order_assignments(
+              *,
+              order:orders(*)
+            )
+          )
+        `)
         .eq('id', routeId)
         .maybeSingle();
 
-      if (routeError) throw routeError;
-      if (!route) return null;
+      if (error) throw error;
+      if (!raw) return null;
 
-      const { data: orders, error: ordersError } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('route_id', routeId)
-        .order('sequence_order', { ascending: true });
+      // ─── Reconstruir no mesmo formato que os componentes já esperam ────────
 
-      if (ordersError) throw ordersError;
-
-      // Fetch order items for all orders — batched to avoid Supabase 1000-row limit
-      const orderIds = (orders ?? []).map(o => o.id);
-      let orderItems: Record<string, OrderItem[]> = {};
-      
-      if (orderIds.length > 0) {
-        const BATCH_SIZE = 200;
-        const allItems: any[] = [];
-        for (let i = 0; i < orderIds.length; i += BATCH_SIZE) {
-          const chunk = orderIds.slice(i, i + BATCH_SIZE);
-          const { data: items, error: itemsError } = await supabase
-            .from('order_items')
-            .select('*')
-            .in('order_id', chunk);
-
-          if (!itemsError && items) {
-            allItems.push(...items);
-          }
-        }
-        
-        // Group items by order_id
-        allItems.forEach(item => {
-          if (!orderItems[item.order_id]) {
-            orderItems[item.order_id] = [];
-          }
-          orderItems[item.order_id].push(item as OrderItem);
-        });
-        
-        console.log(`[useRouteDetails] Fetched ${allItems.length} order_items for ${orderIds.length} orders`);
+      // Mapa de order_items por order_id (vindo do nested select)
+      const orderItems: Record<string, OrderItem[]> = {};
+      for (const o of (raw.orders ?? [])) {
+        orderItems[o.id] = (o.order_items ?? []) as OrderItem[];
       }
 
-      // Attach items to orders
-      const ordersWithItems = (orders ?? []).map(order => ({
-        ...order,
-        items: orderItems[order.id] || [],
-      }));
+      // orders com items embutidos (igual ao formato anterior)
+      const ordersWithItems = (raw.orders ?? [])
+        .sort((a: any, b: any) => (a.sequence_order ?? 0) - (b.sequence_order ?? 0))
+        .map((o: any) => ({
+          ...o,
+          items: orderItems[o.id] ?? [],
+        }));
 
-      const { data: routeTrucks, error: trucksError } = await supabase
-        .from('route_trucks')
-        .select(`
-          *,
-          truck:trucks(*)
-        `)
-        .eq('route_id', routeId);
+      // route_trucks com assignments ordenados e order.items embutidos
+      const routeTrucksWithAssignments = (raw.route_trucks ?? []).map((rt: any) => {
+        const assignments = [...(rt.assignments ?? [])]
+          .sort((a: any, b: any) => (a.delivery_sequence ?? 0) - (b.delivery_sequence ?? 0))
+          .map((a: any) => ({
+            ...a,
+            order: a.order
+              ? { ...a.order, items: orderItems[a.order.id] ?? [] }
+              : null,
+          }));
 
-      if (trucksError) throw trucksError;
+        return {
+          ...rt,
+          assignments,
+          occupancy_percent: rt.truck
+            ? Math.round((Number(rt.total_weight_kg) / Number(rt.truck.capacity_kg)) * 100)
+            : 0,
+        };
+      });
 
-      // Get ALL assignments for this route in a single query (fixes N+1)
-      const routeTruckIds = (routeTrucks ?? []).map(rt => rt.id);
-      let allAssignments: any[] = [];
-      
-      if (routeTruckIds.length > 0) {
-        const { data: assignmentsData } = await supabase
-          .from('order_assignments')
-          .select(`
-            *,
-            order:orders(*)
-          `)
-          .in('route_truck_id', routeTruckIds)
-          .order('delivery_sequence', { ascending: true });
-        
-        allAssignments = assignmentsData ?? [];
-      }
-
-      // Group assignments by route_truck_id in memory
-      const assignmentsByTruck = new Map<string, any[]>();
-      for (const a of allAssignments) {
-        const list = assignmentsByTruck.get(a.route_truck_id) ?? [];
-        // Attach items to order
-        const order = a.order as any;
-        if (order) {
-          a.order = { ...order, items: orderItems[order.id] || [] };
-        }
-        list.push(a);
-        assignmentsByTruck.set(a.route_truck_id, list);
-      }
-
-      const routeTrucksWithAssignments = (routeTrucks ?? []).map(rt => ({
-        ...rt,
-        assignments: assignmentsByTruck.get(rt.id) ?? [],
-        occupancy_percent: rt.truck
-          ? Math.round((Number(rt.total_weight_kg) / Number(rt.truck.capacity_kg)) * 100)
-          : 0,
-      }));
-
+      // Retorno idêntico ao formato anterior — nenhum componente precisa mudar
+      const { orders: _o, route_trucks: _rt, ...routeBase } = raw;
       return {
-        ...route,
+        ...routeBase,
         orders: ordersWithItems,
         route_trucks: routeTrucksWithAssignments,
       };
