@@ -290,7 +290,6 @@ export function useRouteDetails(routeId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      queryClient.invalidateQueries({ queryKey: ['routes'] });
       toast({ title: 'Pedidos adicionados!' });
     },
     onError: (error) => {
@@ -321,7 +320,6 @@ export function useRouteDetails(routeId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      queryClient.invalidateQueries({ queryKey: ['routes'] });
       toast({ title: 'Pedido removido!' });
     },
     onError: (error) => {
@@ -361,7 +359,6 @@ export function useRouteDetails(routeId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      queryClient.invalidateQueries({ queryKey: ['routes'] });
     },
     onError: (error) => {
       toast({
@@ -584,7 +581,6 @@ export function useRouteDetails(routeId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      queryClient.invalidateQueries({ queryKey: ['routes'] });
       toast({ title: 'Carga distribuída! Gere o Romaneio de Carga.' });
     },
     onError: (error) => {
@@ -610,7 +606,6 @@ export function useRouteDetails(routeId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      queryClient.invalidateQueries({ queryKey: ['routes'] });
       toast({ title: 'Carregamento confirmado! Pronto para roteirizar.' });
     },
     onError: (error) => {
@@ -711,7 +706,6 @@ export function useRouteDetails(routeId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      queryClient.invalidateQueries({ queryKey: ['routes'] });
       toast({ title: 'Rotas otimizadas! Gere os Romaneios de Entrega.' });
     },
     onError: (error) => {
@@ -814,7 +808,6 @@ export function useRouteDetails(routeId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['route', routeId] });
-      queryClient.invalidateQueries({ queryKey: ['routes'] });
       toast({ title: 'Distribuição otimizada concluída!' });
     },
     onError: (error) => {
