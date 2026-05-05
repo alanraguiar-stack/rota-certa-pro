@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { Route, Trash2, Search } from 'lucide-react';
+import { Route, Trash2, Search, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -90,21 +90,32 @@ export default function History() {
 
         {routes.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <Route className="mb-4 h-12 w-12 text-muted-foreground/50" />
-              <h3 className="mb-2 text-lg font-medium">Nenhuma rota no histórico</h3>
-              <p className="mb-4 text-center text-muted-foreground">
-                Crie sua primeira rota para começar
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+                <Route className="h-8 w-8 text-muted-foreground/60" />
+              </div>
+              <h3 className="text-lg font-semibold">Nenhuma rota no histórico</h3>
+              <p className="mt-2 mb-6 max-w-sm text-sm text-muted-foreground">
+                Suas rotas criadas aparecem aqui. Comece criando a primeira rota de entregas.
               </p>
               <Button asChild>
-                <Link to="/nova-rota">Criar Primeira Rota</Link>
+                <Link to="/nova-rota">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Criar Primeira Rota
+                </Link>
               </Button>
             </CardContent>
           </Card>
         ) : filteredRoutes.length === 0 ? (
           <Card>
-            <CardContent className="py-8 text-center text-muted-foreground">
-              Nenhuma rota encontrada para "{search}"
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-muted">
+                <Search className="h-5 w-5 text-muted-foreground/60" />
+              </div>
+              <h3 className="font-semibold">Nenhuma rota encontrada</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Nenhum resultado para <span className="font-medium">"{search}"</span>. Tente outro nome.
+              </p>
             </CardContent>
           </Card>
         ) : (

@@ -424,13 +424,15 @@ export default function Fleet() {
 
         {trucks.length === 0 ? (
           <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <TruckIcon className="mb-4 h-12 w-12 text-muted-foreground/50" />
-              <h3 className="mb-2 text-lg font-medium">Nenhum caminhão cadastrado</h3>
-              <p className="mb-4 text-center text-muted-foreground">
-                {isAdmin 
-                  ? 'Cadastre os caminhões da sua frota para começar a criar rotas'
-                  : 'Aguarde um administrador cadastrar os caminhões da frota'}
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+                <TruckIcon className="h-8 w-8 text-muted-foreground/60" />
+              </div>
+              <h3 className="text-lg font-semibold">Nenhum caminhão cadastrado</h3>
+              <p className="mt-2 mb-6 max-w-sm text-sm text-muted-foreground">
+                {isAdmin
+                  ? 'Cadastre os caminhões da sua frota para começar a criar e distribuir rotas de entrega.'
+                  : 'Aguarde um administrador cadastrar os caminhões da frota para que eles apareçam aqui.'}
               </p>
               {isAdmin && (
                 <Button onClick={openCreateDialog}>
