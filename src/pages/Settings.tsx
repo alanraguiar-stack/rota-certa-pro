@@ -19,6 +19,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Settings as SettingsIcon, User, Shield, Moon, Sun, Users, Lock, UserPlus, Copy, CalendarDays, MapPin, Trash2 } from 'lucide-react';
 import { CityScheduleTab } from '@/components/settings/CityScheduleTab';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { TruckTerritoryTab } from '@/components/settings/TruckTerritoryTab';
 
 interface UserProfile {
@@ -33,6 +34,7 @@ export default function Settings() {
   const { user } = useAuth();
   const { theme, toggleTheme, isDark } = useTheme();
   const { isAdmin, isMotorista, loading: roleLoading } = useUserRole();
+  usePageTitle('Configurações');
   const { getAllUsers, updateUserRole, toggleUserActive, deleteUser } = useUserManagement();
   const { toast } = useToast();
 

@@ -17,6 +17,7 @@ import { PendingOrdersCard } from '@/components/route/PendingOrdersCard';
 import { DeprioritizedOrdersDialog } from '@/components/route/DeprioritizedOrdersDialog';
 
 import { useRoutes } from '@/hooks/useRoutes';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useHistoryPatterns } from '@/hooks/useHistoryPatterns';
 import { usePendingOrders, PendingOrder } from '@/hooks/usePendingOrders';
@@ -40,6 +41,7 @@ export default function NewRoute() {
   const { savePendingOrders, getPendingOrdersForDate, markAsRouted, cancelPending, toParsedOrders, getDeprioritized } = usePendingOrders();
 
   const [currentStep, setCurrentStep] = useState<RouteWizardStep>('orders');
+  usePageTitle('Nova Rota');
   const [completedSteps, setCompletedSteps] = useState<RouteWizardStep[]>([]);
   const [routeName, setRouteName] = useState('');
   const [orders, setOrders] = useState<ParsedOrder[]>([]);

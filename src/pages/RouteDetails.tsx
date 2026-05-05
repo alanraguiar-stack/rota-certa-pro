@@ -30,6 +30,7 @@ import { TruckManifestCards } from '@/components/route/TruckManifestCards';
 import { TruckRouteEditor } from '@/components/route/TruckRouteEditor';
 import { DriverAssignment } from '@/components/route/DriverAssignment';
 import { ExecutionTracker } from '@/components/route/ExecutionTracker';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { RescheduleOrdersDialog } from '@/components/route/RescheduleOrdersDialog';
 import { useRescheduleOrders, type ReschedulableOrder } from '@/hooks/useRescheduleOrders';
 import { CalendarClock } from 'lucide-react';
@@ -250,6 +251,9 @@ export default function RouteDetails() {
     reimportItems,
     refetch 
   } = useRouteDetails(id);
+
+  // Título dinâmico com nome da rota
+  usePageTitle(route?.name ?? 'Detalhes da Rota');
   const { activeTrucks } = useTrucks();
   const { saveDeprioritizedOrders } = usePendingOrders();
 

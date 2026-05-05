@@ -30,6 +30,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
 import { useTrucks } from '@/hooks/useTrucks';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { useUserRole } from '@/hooks/useUserRole';
 import { TruckFormData, Truck } from '@/types';
 import { validateBrazilianPlate, formatPlateInput } from '@/lib/plateValidation';
@@ -556,3 +557,4 @@ export default function Fleet() {
     </AppLayout>
   );
 }
+  usePageTitle('Frota');

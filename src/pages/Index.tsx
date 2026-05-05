@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { useTrucks } from '@/hooks/useTrucks';
 import { useRoutes } from '@/hooks/useRoutes';
 import { cn } from '@/lib/utils';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { KpiDashboard } from '@/components/dashboard/KpiDashboard';
 
 export default function Index() {
@@ -15,6 +16,7 @@ export default function Index() {
   const { routes, isLoading: loadingRoutes } = useRoutes();
 
   const recentRoutes = routes.slice(0, 5);
+  usePageTitle('Dashboard');
 
   const formatWeight = (weight: number) => {
     if (weight >= 1000) return `${(weight / 1000).toFixed(1)}t`;

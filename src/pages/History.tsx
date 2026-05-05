@@ -17,11 +17,13 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useRoutes } from '@/hooks/useRoutes';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { RouteStatusBadge } from '@/components/ui/RouteStatusBadge';
 
 export default function History() {
   const { routes, isLoading, deleteRoute } = useRoutes();
   const [search, setSearch] = useState('');
+  usePageTitle('Histórico');
 
   const filteredRoutes = routes.filter((route) =>
     route.name.toLowerCase().includes(search.toLowerCase())

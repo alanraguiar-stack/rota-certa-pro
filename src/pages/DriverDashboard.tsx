@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/AuthContext';
+import { usePageTitle } from '@/hooks/usePageTitle';
 import { useDriverRoutes, DeliveryExecution } from '@/hooks/useDriverRoutes';
 import { DeliveryCard } from '@/components/driver/DeliveryCard';
 import { useToast } from '@/hooks/use-toast';
@@ -18,6 +19,7 @@ export default function DriverDashboard() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { assignments, deliveries, loading, fetchAssignments, fetchDeliveries, startRoute, confirmDelivery, markNotDelivered } = useDriverRoutes();
+  usePageTitle('Minhas Rotas');
   const [activeAssignment, setActiveAssignment] = useState<string | null>(null);
 
   // Confirmation dialog state
