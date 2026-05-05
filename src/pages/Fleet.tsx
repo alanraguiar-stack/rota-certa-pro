@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Plus, Pencil, Trash2, Truck as TruckIcon, Eye, Calendar, Car, FileText, Hash } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -29,7 +30,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { useTrucks } from '@/hooks/useTrucks';
+import { useTrucks, type TruckDayStatus } from '@/hooks/useTrucks';
 import { usePageTitle } from '@/hooks/usePageTitle';
 import { useUserRole } from '@/hooks/useUserRole';
 import { TruckFormData, Truck } from '@/types';
@@ -444,7 +445,9 @@ export default function Fleet() {
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {trucks.map((truck) => (
+            {trucks.map((truck) => {
+              const dayStatus = getTruckDayStatus(truck);
+              return (
               <Card
                 key={truck.id}
                 className={cn('transition-all', !truck.is_active && 'opacity-60')}
@@ -470,6 +473,22 @@ export default function Fleet() {
                       </div>
                     )}
                   </div>
+
+                  {/* Badge de disponibilidade do dia */}
+                  {dayStatus.status === 'em_rota' ? (
+                    <Link
+                      to={`/rota/${dayStatus.routeId}`}
+                      className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-200 transition-colors dark:bg-amber-900/30 dark:text-amber-400 w-fit"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      Em rota · {dayStatus.routeName}
+                    </Link>
+                  ) : dayStatus.status === 'disponivel' ? (
+                    <span className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 w-fit">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      Disponível hoje
+                    </span>
+                  ) : null}
                 </CardHeader>
                 <CardContent>
                   <div className="mb-4 space-y-2 text-sm">
@@ -552,7 +571,8 @@ export default function Fleet() {
                   </div>
                 </CardContent>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

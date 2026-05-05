@@ -4,6 +4,13 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Truck, TruckFormData } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 
+export interface TruckDayStatus {
+  truckId: string;
+  status: 'em_rota' | 'disponivel' | 'inativo';
+  routeName?: string;
+  routeId?: string;
+}
+
 export function useTrucks() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -22,6 +29,47 @@ export function useTrucks() {
     },
     enabled: !!user,
   });
+
+  // Busca rotas ativas hoje para cruzar com os caminhões
+  const todayStatusQuery = useQuery({
+    queryKey: ['trucks-today-status', user?.id],
+    queryFn: async () => {
+      const today = new Date().toISOString().split('T')[0];
+
+      const { data } = await supabase
+        .from('route_trucks')
+        .select(`
+          truck_id,
+          route:routes(id, name, status, departure_date)
+        `)
+        .neq('route.status', 'completed')
+        .neq('route.status', 'draft') as any;
+
+      if (!data) return {} as Record<string, TruckDayStatus>;
+
+      // Filtra rotas do dia e mapeia por truck_id
+      const map: Record<string, TruckDayStatus> = {};
+      for (const rt of data) {
+        if (!rt.route) continue;
+        const depDate = rt.route.departure_date?.split('T')[0];
+        if (depDate !== today) continue;
+        map[rt.truck_id] = {
+          truckId: rt.truck_id,
+          status: 'em_rota',
+          routeName: rt.route.name,
+          routeId: rt.route.id,
+        };
+      }
+      return map;
+    },
+    enabled: !!user,
+    staleTime: 60_000, // status do dia muda pouco — 1 min
+  });
+
+  const getTruckDayStatus = (truck: Truck): TruckDayStatus => {
+    if (!truck.is_active) return { truckId: truck.id, status: 'inativo' };
+    return todayStatusQuery.data?.[truck.id] ?? { truckId: truck.id, status: 'disponivel' };
+  };
 
   const activeTrucks = trucksQuery.data?.filter((t) => t.is_active) ?? [];
   const totalCapacity = activeTrucks.reduce((sum, t) => sum + Number(t.capacity_kg), 0);
@@ -112,6 +160,7 @@ export function useTrucks() {
     totalCapacity,
     isLoading: trucksQuery.isLoading,
     error: trucksQuery.error,
+    getTruckDayStatus,
     createTruck,
     updateTruck,
     deleteTruck,
