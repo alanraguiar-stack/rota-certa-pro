@@ -1,4 +1,5 @@
 import { Truck, Route, Clock, ArrowRight, Plus, CheckCircle2 } from 'lucide-react';
+import { RouteStatusBadge } from '@/components/ui/RouteStatusBadge';
 import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Button } from '@/components/ui/button';
@@ -38,18 +39,7 @@ export default function Index() {
     });
   };
 
-  const getStatusConfig = (status: string) => {
-    const config = {
-      draft: { label: 'Rascunho', variant: 'secondary' as const },
-      planned: { label: 'Planejada', variant: 'default' as const },
-      trucks_assigned: { label: 'Em Processo', variant: 'default' as const },
-      loading: { label: 'Carregando', variant: 'default' as const },
-      loading_confirmed: { label: 'Confirmada', variant: 'default' as const },
-      distributed: { label: 'Distribuída', variant: 'default' as const },
-      completed: { label: 'Concluída', variant: 'outline' as const },
-    };
-    return config[status as keyof typeof config] || config.draft;
-  };
+
 
   if (loadingTrucks || loadingRoutes) {
     return (
@@ -119,7 +109,6 @@ export default function Index() {
             ) : (
               <div className="space-y-1">
                 {recentRoutes.map((route, index) => {
-                  const statusConfig = getStatusConfig(route.status);
                   return (
                     <Link
                       key={route.id}
@@ -129,9 +118,7 @@ export default function Index() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium">{route.name}</p>
-                          <Badge variant={statusConfig.variant} className="text-xs">
-                            {statusConfig.label}
-                          </Badge>
+                          <RouteStatusBadge status={route.status} />
                         </div>
                         <p className="mt-0.5 text-sm text-muted-foreground">
                           {route.total_orders} pedidos • {formatWeight(Number(route.total_weight_kg))}

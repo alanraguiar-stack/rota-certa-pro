@@ -17,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useRoutes } from '@/hooks/useRoutes';
+import { RouteStatusBadge } from '@/components/ui/RouteStatusBadge';
 
 export default function History() {
   const { routes, isLoading, deleteRoute } = useRoutes();
@@ -43,23 +44,7 @@ export default function History() {
     });
   };
 
-  const getStatusBadge = (status: string) => {
-    const styles = {
-      draft: 'bg-muted text-muted-foreground',
-      planned: 'bg-primary/10 text-primary',
-      completed: 'bg-success/10 text-success',
-    };
-    const labels = {
-      draft: 'Rascunho',
-      planned: 'Planejada',
-      completed: 'Concluída',
-    };
-    return (
-      <span className={`rounded-full px-2 py-1 text-xs font-medium ${styles[status as keyof typeof styles]}`}>
-        {labels[status as keyof typeof labels]}
-      </span>
-    );
-  };
+
 
   const handleDelete = (id: string) => {
     deleteRoute.mutate(id);
@@ -150,7 +135,7 @@ export default function History() {
                       </div>
                     </Link>
                     <div className="flex items-center gap-3">
-                      {getStatusBadge(route.status)}
+                      <RouteStatusBadge status={route.status} />
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive">
