@@ -43,6 +43,7 @@ export function useAdminUsers() {
     },
     enabled: !!user,
     staleTime: 30_000,
+    retry: 1,
   });
 
   const resetPassword = useCallback(async (userId: string, newPassword: string) => {
@@ -77,6 +78,8 @@ export function useAdminUsers() {
   return {
     users: usersQuery.data ?? [],
     isLoading: usersQuery.isLoading,
+    isError: usersQuery.isError,
+    error: usersQuery.error as Error | null,
     resetPassword,
     updateEmail,
     resettingId,

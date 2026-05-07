@@ -1,18 +1,18 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 
-// Estáticos — carregam imediatamente (first paint rápido)
+// Estáticos — carregam imediatamente (fast first paint)
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import LandingPage from "./pages/LandingPage";
 import NotFound from "./pages/NotFound";
 
-// Lazy — carregam apenas quando o usuário navega para a rota pela primeira vez
+// Lazy — carregam quando o usuário navega pela primeira vez
 const Fleet                = lazy(() => import("./pages/Fleet"));
 const NewRoute             = lazy(() => import("./pages/NewRoute"));
 const RouteDetails         = lazy(() => import("./pages/RouteDetails"));
@@ -22,21 +22,48 @@ const DriverDashboard      = lazy(() => import("./pages/DriverDashboard"));
 const DriverAccess         = lazy(() => import("./pages/DriverAccess"));
 const DeliveryConfirmation = lazy(() => import("./pages/DeliveryConfirmation"));
 
-// Spinner mínimo exibido enquanto o chunk da página carrega
+// Prefetch das páginas mais usadas no idle do browser
+// Elimina o delay de carregamento na primeira navegação para cada tela
+function PrefetchPages() {
+  useEffect(() => {
+    const prefetch = () => {
+      // Prefetch em sequência, sem bloquear a thread principal
+      import("./pages/NewRoute");
+      import("./pages/RouteDetails");
+      import("./pages/History");
+      import("./pages/Fleet");
+      import("./pages/Settings");
+    };
+
+    if ('requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(prefetch, { timeout: 3000 });
+    } else {
+      setTimeout(prefetch, 2000);
+    }
+  }, []);
+  return null;
+}
+
+// Spinner minimalista — só uma barra no topo, não bloqueia a tela
 const PageSpinner = () => (
-  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
-    <div style={{ width: 32, height: 32, borderRadius: "50%", border: "2px solid #e5e7eb", borderTopColor: "#3b82f6", animation: "spin 0.7s linear infinite" }} />
-    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  <div style={{
+    position: "fixed", top: 0, left: 0, right: 0, height: "2px",
+    background: "linear-gradient(90deg, #3b82f6 0%, #60a5fa 50%, #3b82f6 100%)",
+    backgroundSize: "200% 100%",
+    animation: "slide 1.2s linear infinite",
+    zIndex: 9999,
+  }}>
+    <style>{`@keyframes slide { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }`}</style>
   </div>
 );
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 30_000,           // dados frescos por 30s — sem re-fetch desnecessário
-      gcTime: 5 * 60_000,          // cache vive 5min após componente desmontar
-      retry: 1,                    // 1 retry em erro (padrão era 3)
-      refetchOnWindowFocus: false, // não refaz ao trocar de aba/janela
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      retry: 1,
+      refetchOnWindowFocus: false,
     },
   },
 });
@@ -48,6 +75,7 @@ const App = () => (
         <Toaster />
         <Sonner />
         <BrowserRouter>
+          <PrefetchPages />
           <Suspense fallback={<PageSpinner />}>
             <Routes>
               <Route path="/landing" element={<LandingPage />} />

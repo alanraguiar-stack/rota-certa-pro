@@ -158,7 +158,7 @@ function EditEmailDialog({ user, onClose, onConfirm, loading }: EditEmailDialogP
 }
 
 export function AdminUsersTab() {
-  const { users, isLoading, resetPassword, updateEmail, resettingId, updatingEmailId } = useAdminUsers();
+  const { users, isLoading, isError, error, resetPassword, updateEmail, resettingId, updatingEmailId } = useAdminUsers();
   const { toggleUserActive, deleteUser } = useUserManagement();
   const { toast } = useToast();
 
@@ -178,6 +178,28 @@ export function AdminUsersTab() {
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground text-sm">
           Carregando usuários...
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isError) {
+    const msg = error?.message ?? '';
+    const isNotDeployed = msg.includes('Failed to fetch') || msg.includes('FunctionNotFound') || msg.includes('404') || msg.includes('relay');
+    return (
+      <Card>
+        <CardContent className="py-10 text-center space-y-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 mx-auto">
+            <AlertCircle className="h-6 w-6 text-amber-600" />
+          </div>
+          <p className="font-medium text-sm">
+            {isNotDeployed ? 'Edge Function não deployada' : 'Erro ao carregar usuários'}
+          </p>
+          <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+            {isNotDeployed
+              ? 'A função manage-users precisa ser deployada no Supabase. Acesse Supabase → Edge Functions → manage-users → Deploy.'
+              : msg}
+          </p>
         </CardContent>
       </Card>
     );
