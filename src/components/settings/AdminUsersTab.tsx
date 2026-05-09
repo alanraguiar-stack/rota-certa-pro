@@ -6,7 +6,6 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { useAdminUsers, type AdminUser } from '@/hooks/useAdminUsers';
-import { useUserManagement, type AppRole } from '@/hooks/useUserRole';
 import { useToast } from '@/hooks/use-toast';
 import { Users, KeyRound, Mail, Eye, EyeOff, Copy, Shield, Truck, UserCog, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -159,7 +158,6 @@ function EditEmailDialog({ user, onClose, onConfirm, loading }: EditEmailDialogP
 
 export function AdminUsersTab() {
   const { users, isLoading, isError, error, resetPassword, updateEmail, resettingId, updatingEmailId } = useAdminUsers();
-  const { toggleUserActive, deleteUser } = useUserManagement();
   const { toast } = useToast();
 
   const [resetTarget, setResetTarget] = useState<AdminUser | null>(null);
@@ -184,21 +182,15 @@ export function AdminUsersTab() {
   }
 
   if (isError) {
-    const msg = error?.message ?? '';
-    const isNotDeployed = msg.includes('Failed to fetch') || msg.includes('FunctionNotFound') || msg.includes('404') || msg.includes('relay');
     return (
       <Card>
         <CardContent className="py-10 text-center space-y-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 mx-auto">
-            <AlertCircle className="h-6 w-6 text-amber-600" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 mx-auto">
+            <AlertCircle className="h-6 w-6 text-red-600" />
           </div>
-          <p className="font-medium text-sm">
-            {isNotDeployed ? 'Edge Function não deployada' : 'Erro ao carregar usuários'}
-          </p>
+          <p className="font-medium text-sm">Erro ao carregar usuários</p>
           <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-            {isNotDeployed
-              ? 'A função manage-users precisa ser deployada no Supabase. Acesse Supabase → Edge Functions → manage-users → Deploy.'
-              : msg}
+            {error?.message ?? 'Tente recarregar a página.'}
           </p>
         </CardContent>
       </Card>
@@ -233,7 +225,7 @@ export function AdminUsersTab() {
               <thead>
                 <tr className="border-b border-border bg-muted/40">
                   <th className="text-left font-medium text-muted-foreground px-4 py-3">Usuário</th>
-                  <th className="text-left font-medium text-muted-foreground px-4 py-3">E-mail</th>
+                  <th className="text-left font-medium text-muted-foreground px-4 py-3">E-mail <span className="text-xs font-normal opacity-60">(deploy Edge Fn para ver todos)</span></th>
                   <th className="text-left font-medium text-muted-foreground px-4 py-3">Role</th>
                   <th className="text-left font-medium text-muted-foreground px-4 py-3">Acesso</th>
                   <th className="text-left font-medium text-muted-foreground px-4 py-3">Último login</th>
